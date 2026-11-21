@@ -114,12 +114,12 @@ domain age `captured_at` and `basis`. A failed lookup is a `not_observable` row 
 
 | Namespace | Value shape | Purpose | Catalogue |
 | --- | --- | --- | --- |
-| `dns.ns_pair` | name servers, lower-case, no trailing dot, sorted, `|`-joined; RDAP delegation when the zone has none (`confidence` 0.8) | linkage (`infra.host`) | C3 |
+| `dns.ns_pair` | name servers, lower-case, no trailing dot, sorted, `|`-joined; RDAP delegation when the zone has none (`confidence` 0.8) | linkage (`infra.host`); risk when the servers are parking or sinkhole ones, or the RDAP stand-in for a dead domain | C3 |
 | `rdap.registrar` | registrar name without corporate suffixes (`namecheap`); original and IANA ID in `raw` | both (`infra.host`) | C2 |
 | `rdap.registered_at` | ISO date of the `registration` event | risk | C1 |
 | `rdap.domain_age_days` | whole days from registration to capture; `basis` = `har:…`, `incident_har:…`, `manifest:…` or `lookup` (`confidence` 0.5) | risk | C1 |
-| `dns.status` | `live`, `dead`, `parked`, `sinkholed`; the rule in `raw` | risk | C13 |
-| `dns.a`, `dns.mx` | one row per address / mail host | risk | C13 |
+| `dns.status` | `live`, `dead`, `parked`, `sinkholed`, judged on the page's own host (A and AAAA); the rule in `raw` | risk | C13 |
+| `dns.a`, `dns.mx` | one row per A or AAAA address of the page's host / per mail host of the domain | risk | C13 |
 | `domain.tld_risk` | `high` (`.live .pro .xyz .top .icu .life`), `low` (`.pl`), `other` | risk | C4 |
 | `domain.name_shape` | `hyphen_digits`, `generated_pronounceable`, `generated`, `plain`; metrics in `raw` | risk | C5 |
 

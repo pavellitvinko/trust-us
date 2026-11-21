@@ -10,7 +10,9 @@ older successful entry is still used and marked stale: a past fact beats no fact
 
 from __future__ import annotations
 
+import hashlib
 import json
+import logging
 import re
 import threading
 import time
@@ -62,23 +64,46 @@ class Lookup:
 
 
 class FetchError(Exception):
-    """A lookup failed. `cacheable` is False for failures that say nothing about the domain."""
+    """A lookup failed. `cacheable` is False for failures that say nothing about the domain
+    (network down, timeout, server error): those are not written to the cache."""
+
+    def __init__(self, message: str, cacheable: bool = True):
+        super().__init__(message)
+        self.cacheable = cacheable
 
 
 _SAFE = re.compile(r"[^a-z0-9._-]+")
+_MODES = {
+    "on": "on", "1": "on", "true": "on", "yes": "on", "": "on",
+    "off": "off", "0": "off", "false": "off", "no": "off", "none": "off",
+    "cache": "cache", "cached": "cache", "cache-only": "cache",
+}  # fmt: skip
+
+
+def normalise_mode(value: str) -> str:
+    """FTF_ENRICH as on | cache | off. An unknown value means off: no lookup by surprise."""
+    mode = _MODES.get(value.strip().lower())
+    if mode is None:
+        logging.getLogger(__name__).warning(
+            "FTF_ENRICH=%r is not one of on, cache, off; enrichment is off", value
+        )
+        return "off"
+    return mode
 
 
 class Cache:
     def __init__(self, root: Path | None = None, mode: str | None = None):
         settings = get_settings()
         self.root = root if root is not None else settings.enrich_cache_dir
-        self.mode = (mode or settings.enrich_mode).lower()
+        self.mode = normalise_mode(mode if mode is not None else settings.enrich_mode)
         self._memo: dict[tuple[str, str], Lookup] = {}
         self._lock = threading.Lock()
         self._last_hit: dict[str, float] = {}
 
     def _path(self, source: str, key: str) -> Path:
-        return self.root / source / f"{_SAFE.sub('_', key.lower())[:150]}.json"
+        """Readable prefix plus a hash of the exact key, so two keys never share a file."""
+        digest = hashlib.sha1(key.encode("utf-8")).hexdigest()[:12]
+        return self.root / source / f"{_SAFE.sub('_', key.lower())[:100]}-{digest}.json"
 
     def _read(self, source: str, key: str) -> Lookup | None:
         try:
@@ -145,6 +170,8 @@ class Cache:
             if cached is not None and cached.ok:
                 cached.stale = True  # the old file is kept, so the next run retries
                 return cached
+            if not getattr(exc, "cacheable", False):
+                return result  # transient: remembered for this run only
         self._write(source, key, result)
         return result
 
@@ -166,9 +193,12 @@ class Cache:
             with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
                 return json.loads(resp.read().decode("utf-8", errors="replace"))
         except urllib.error.HTTPError as exc:
-            raise FetchError(f"HTTP {exc.code}") from exc
+            # 404 is an answer about the domain; 429 and 5xx are the server's trouble.
+            transient = exc.code == 429 or exc.code >= 500
+            raise FetchError(f"HTTP {exc.code}", cacheable=not transient) from exc
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
-            raise FetchError(f"network: {getattr(exc, 'reason', exc)}") from exc
+            reason = getattr(exc, "reason", exc)
+            raise FetchError(f"network: {reason}", cacheable=False) from exc
         except ValueError as exc:
             raise FetchError("invalid JSON") from exc
 

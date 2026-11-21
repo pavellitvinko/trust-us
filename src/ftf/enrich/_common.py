@@ -8,16 +8,36 @@ from typing import Any
 from ..contracts import Observation, Purpose, Source, State, View, ViewKind
 
 
+def ascii_name(name: str) -> str:
+    """A host or domain in its IDNA (punycode) form, as DNS and RDAP expect it."""
+    name = name.strip().lower().rstrip(".")
+    try:
+        return name.encode("idna").decode("ascii")
+    except UnicodeError:
+        return name
+
+
 def view_domain(view: View, observations: list[Observation]) -> str | None:
-    """Registrable domain of a page view, from page.identity (A14) or the view's URL."""
+    """Registrable domain of a page view (IDNA form), from page.identity (A14) or the URL."""
     if view.kind is not ViewKind.PAGE:
         return None
     for o in observations:
         if o.namespace == "domain.registrable" and o.state is State.PRESENT and o.value:
-            return str(o.value).lower()
+            return ascii_name(str(o.value))
     from ..extract._material import own_domain
 
-    return own_domain(view)
+    domain = own_domain(view)
+    return ascii_name(domain) if domain else None
+
+
+def view_host(view: View, observations: list[Observation], domain: str) -> str:
+    """The host the page was served from (IDNA form); the registrable domain when unknown."""
+    for o in observations:
+        if o.namespace == "url.host" and o.state is State.PRESENT and o.value:
+            host = ascii_name(str(o.value))
+            if host == domain or host.endswith("." + domain):
+                return host
+    return domain
 
 
 def raw_json(info: dict[str, Any]) -> str:

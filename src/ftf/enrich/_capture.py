@@ -1,9 +1,9 @@
 """When a view was captured, for domain age at capture time (signal C1).
 
 File modification times are not used: saved pages are copied around, so their mtime is the
-copy date. Order of trust: the view's own HAR, another HAR of the same incident that talks
-to the same domain, the capture bundle's manifest. Without any of them the caller falls back
-to the lookup time and says so.
+copy date. Order of trust: the view's own HAR, the view's own capture-bundle manifest, then
+another HAR of the same incident that talks to the same domain (the earliest one). Without any
+of them the caller falls back to the lookup time and says so.
 """
 
 from __future__ import annotations

@@ -127,7 +127,7 @@ def lookup(domain: str, cache: _cache.Cache | None = None) -> _cache.Lookup:
 @enrichers.register
 class RdapEnricher:
     name = "rdap"
-    version = "1"
+    version = "2"
 
     def run(self, view: View, observations: list[Observation], ctx: Context) -> list[Observation]:
         domain = view_domain(view, observations)

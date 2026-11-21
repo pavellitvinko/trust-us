@@ -101,7 +101,8 @@ Comparators (`@comparators.register`) turn two fingerprints into an `Evidence`.
 `ftf run` (and `ingest`) looks up each page's domain in DNS and RDAP after extraction; pass
 `--no-enrich` to skip. Answers are cached with their timestamp in `$FTF_DATA_DIR/enrich_cache/`
 (7 days; failures 1 hour), and a failed lookup is recorded as `not_observable`, never as a
-negative. `FTF_ENRICH=cache` uses the cache only, `FTF_ENRICH=off` makes no lookups.
+negative; network failures are not cached. `FTF_ENRICH=cache` uses the cache only,
+`FTF_ENRICH=off` (also `0`, `false`, `no`, or any unknown value) makes no lookups.
 
 - DNS: the system resolver (dnspython), so domains are not sent to a third-party DNS service.
 - RDAP: the registry's server, found through IANA's bootstrap file

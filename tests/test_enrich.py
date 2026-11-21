@@ -62,11 +62,11 @@ def fake(tmp_path, monkeypatch):
     """Install a fake cache and DNS; returns a helper to configure them."""
     dns_answers: dict[str, object] = {}
 
-    def resolve(domain):
-        answer = dns_answers.get(domain)
+    def resolve(domain, host=None):
+        answer = dns_answers.get(host) or dns_answers.get(domain)
         if answer is None or isinstance(answer, Exception):
-            raise answer or _cache.FetchError("Timeout")
-        return answer
+            raise answer or _cache.FetchError("Timeout", cacheable=False)
+        return {"host": host or domain, "aaaa": [], **answer}
 
     monkeypatch.setattr(dns_lookup, "resolve", resolve)
 
@@ -197,13 +197,17 @@ def test_ns_pair_is_sorted_and_trimmed():
         ({"a": ["1.1.1.1"], "ns": ["ns1.dyna-ns.net", "ns2.dyna-ns.net"]}, "parked"),
         ({"a": ["0.0.0.0"], "ns": ["a.ns.cloudflare.com"]}, "parked"),
         ({"nxdomain": True, "a": [], "ns": []}, "dead"),
-        ({"a": [], "ns": ["a.ns.cloudflare.com"]}, "dead"),
+        ({"a": [], "aaaa": [], "ns": ["a.ns.cloudflare.com"]}, "dead"),
+        ({"a": [], "aaaa": ["2606:4700::1"], "ns": ["a.ns.cloudflare.com"]}, "live"),
+        ({"a": [], "aaaa": None, "ns": ["a.ns.cloudflare.com"]}, None),
+        ({"host_nxdomain": True, "host": "x.example.org", "a": [], "aaaa": [], "ns": []}, "dead"),
         ({"a": ["1.2.3.4"], "ns": ["ns1.sinkhole.example.org"]}, "sinkholed"),
         ({"a": ["104.21.0.1"], "ns": ["a.ns.cloudflare.com"]}, "live"),
     ],
 )
 def test_dns_status(data, expected):
-    assert dns_lookup.status(data)[0] == expected
+    decided = dns_lookup.status(data)
+    assert (decided[0] if decided else None) == expected
 
 
 def test_dns_enricher_parked_domain(store, tmp_path, fake):
@@ -217,7 +221,8 @@ def test_dns_enricher_parked_domain(store, tmp_path, fake):
     view, ctx = page_view(store, tmp_path, "civicdaybook.live")
     obs = by_ns(dns_lookup.DnsEnricher().run(view, [], ctx))
     assert obs["dns.ns_pair"][0].value == "ns1.dyna-ns.net|ns2.dyna-ns.net"
-    assert obs["dns.ns_pair"][0].purpose.value == "linkage"
+    # parking name servers are shared by unrelated domains: a risk fact, never a link
+    assert obs["dns.ns_pair"][0].purpose.value == "risk"
     assert obs["dns.status"][0].value == "parked"
     assert "dyna-ns.net" in json.loads(obs["dns.status"][0].raw)["rule"]
     assert [o.value for o in obs["dns.a"]] == ["1.1.1.1"]
@@ -231,7 +236,31 @@ def test_dns_dead_domain_takes_ns_from_rdap(store, tmp_path, fake):
     pair = obs["dns.ns_pair"][0]
     assert pair.value == "deborah.ns.cloudflare.com|miguel.ns.cloudflare.com"
     assert pair.source.locator.endswith(":nameservers") and pair.confidence == 0.8
+    assert pair.purpose.value == "risk"  # a dead domain's delegation does not link
     assert obs["dns.status"][0].value == "dead"
+
+
+def test_dns_live_domain_ns_pair_links(store, tmp_path, fake):
+    fake({})
+    fake.dns["glowpixel.org"] = {"a": ["104.21.0.1"], "ns": ["ed.ns.cloudflare.com"], "mx": []}
+    view, ctx = page_view(store, tmp_path, "glowpixel.org")
+    pair = by_ns(dns_lookup.DnsEnricher().run(view, [], ctx))["dns.ns_pair"][0]
+    assert pair.purpose.value == "linkage"
+
+
+def test_dns_resolves_the_page_host_not_only_the_apex(store, tmp_path, fake):
+    """A live page on a sub-domain whose apex has no address is not called dead."""
+    fake({})
+    fake.dns["example.xyz"] = {"a": [], "ns": ["a.ns.cloudflare.com"], "mx": []}
+    fake.dns["promo.example.xyz"] = {"a": ["104.21.0.1"], "ns": ["a.ns.cloudflare.com"], "mx": []}
+    view, _ = page_view(store, tmp_path, "example.xyz")
+    host = Observation(
+        view_id=view.view_id, signal_id="A14", namespace="url.host",
+        value="promo.example.xyz", extractor="page.identity", version="1",
+    )  # fmt: skip
+    obs = by_ns(dns_lookup.DnsEnricher().run(view, [host], Context(store)))
+    assert obs["dns.status"][0].value == "live"
+    assert json.loads(obs["dns.status"][0].raw)["host"] == "promo.example.xyz"
 
 
 def test_dns_resolver_failure_is_not_observable(store, tmp_path, fake):
@@ -272,6 +301,47 @@ def test_cache_retries_expired_error_and_keeps_stale_success(tmp_path):
 
     found = cache.get("src", "k", failing)
     assert found.ok and found.stale and found.data == 1  # old fact beats no fact
+
+
+def test_cache_files_never_collide(tmp_path):
+    cache = _cache.Cache(root=tmp_path, mode="on")
+    assert cache._path("rdap", "łódź.pl") != cache._path("rdap", "łódż.pl")
+    assert cache._path("rdap", "a" * 200 + "x") != cache._path("rdap", "a" * 200 + "y")
+
+
+def test_idn_domains_are_looked_up_in_punycode(store, tmp_path, fake):
+    cache = fake({"/domain/xn--zakady-5db.pl": rdap_doc("civicdaybook.live")})
+    BOOTSTRAP["services"].append([["pl"], ["https://rdap.dns.pl/"]])
+    try:
+        view, ctx = page_view(store, tmp_path, "zakłady.pl")
+        obs = rdap.RdapEnricher().run(view, [], ctx)
+    finally:
+        BOOTSTRAP["services"].pop()
+    assert cache.calls[-1] == "https://rdap.dns.pl/domain/xn--zakady-5db.pl"
+    assert all(o.state is State.PRESENT for o in obs)
+
+
+def test_transient_failures_are_not_cached(tmp_path):
+    def down():
+        raise _cache.FetchError("network: down", cacheable=False)
+
+    assert not _cache.Cache(root=tmp_path, mode="on").get("s", "k", down).ok
+    assert not list(tmp_path.rglob("*.json"))
+
+    def gone():
+        raise _cache.FetchError("HTTP 404")
+
+    _cache.Cache(root=tmp_path, mode="on").get("s", "k", gone)
+    assert len(list(tmp_path.rglob("*.json"))) == 1
+
+
+@pytest.mark.parametrize(
+    ("value", "mode"),
+    [("on", "on"), ("", "on"), ("OFF", "off"), ("false", "off"), ("0", "off"),
+     ("no", "off"), ("cache", "cache"), ("typo", "off")],
+)  # fmt: skip
+def test_enrich_mode_values(value, mode):
+    assert _cache.normalise_mode(value) == mode
 
 
 def test_cache_modes(tmp_path):
