@@ -7,7 +7,7 @@ Results with real gateway embeddings belong to HAC-32 and are not in this file.
 
 ## Run record
 
-- Commit: `8399800`
+- Commit: `fa9ab12`
 - Date: 2026-11-22
 - Corpus: `testing_sample`: 10 incident folders, 37 views (21 image, 13 page, 3 video), 1316 observations; 3 views carry no fingerprint at all
 - Execution mode: model-off: no gateway call; vector layers use the local hashed-word embedder; no screenshot, video, pattern or expected-element reading
@@ -144,7 +144,7 @@ Each run rebuilds the corpus from a damaged copy of the files, on a fresh store.
 
 - **HAR files removed:** requests, responses and HAR-only pages are gone; saved pages remain.
 - **folder 2 on swapped domains:** every occurrence of acrosscommunities.live, healthlinkq.pro rewritten in HAR, HTML and file names.
-- **images re-encoded and hue-shifted (folders 2, 61):** every image file rewritten with Pillow: exact hashes change, the picture barely.
+- **images re-encoded and hue-shifted (folders 2, 61):** every image file and every image body inside a HAR rewritten with Pillow: exact hashes change everywhere they could be read from, the picture barely.
 - **screenshots only:** only the image files at the top of each folder; no page, HAR or video. Reading what a screenshot shows needs the vision model: unavailable in this mode.
 
 ## Layer ablation
