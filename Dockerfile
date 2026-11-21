@@ -19,7 +19,8 @@ COPY src ./src
 COPY app ./app
 RUN uv sync --locked --no-dev --no-editable --no-cache
 
-ENV FTF_DATA_DIR=/data
+ENV FTF_DATA_DIR=/data \
+    STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
 VOLUME /data
 EXPOSE 8501
 CMD ["streamlit", "run", "app/streamlit_app.py", "--server.address=0.0.0.0", "--server.port=8501"]
