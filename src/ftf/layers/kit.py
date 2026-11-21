@@ -20,9 +20,13 @@ set_layer(
     namespaces=(
         "aio.template_uuid",
         "aio.landing_type_uuid",
+        "aio.folder_name",
+        "aio.source_name",
         "config.key_path",
         "api.route_shape",
+        "api.route",
         "traffic_source",
+        "kit.cloaker",
     ),
     doc="A2, B3, B6, B8: config-object key schema, template IDs, own-domain API route shapes.",
 )
@@ -32,7 +36,7 @@ set_layer(
     tier=Tier.KIT,
     group="kit_url",
     comparator="set_overlap",
-    namespaces=("url.param_name", "url.param_shape", "url.path_convention"),
+    namespaces=("url.param_name", "url.param_shape", "url.path_convention", "url.path_shape"),
     doc="B1, B2, B5: non-standard landing-URL parameter names and value shapes; platform params stoplisted.",
 )
 
@@ -41,7 +45,7 @@ set_layer(
     tier=Tier.KIT,
     group="kit_form",
     comparator="set_overlap",
-    namespaces=("form.field",),
+    namespaces=("form.field", "form.hidden_name"),
     doc="B4, I2: lead-form and hidden-field name set.",
 )
 
@@ -65,7 +69,14 @@ set_layer(
     tier=Tier.KIT,
     group="infra",
     comparator="shared_value",
-    namespaces=("dns.ns_pair", "rdap.registrar", "http.server", "origin.asn"),
+    namespaces=(
+        "dns.ns_pair",
+        "rdap.registrar",
+        "http.server",
+        "http.via",
+        "http.powered_by",
+        "origin.asn",
+    ),
     doc="C2, C3, C10, C11: hosting fingerprints. Weak: shared providers are common.",
 )
 

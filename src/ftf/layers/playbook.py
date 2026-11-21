@@ -94,20 +94,34 @@ class KitAbsence:
         )
 
 
+# Fixture form `entity.cast` {"entity", "role"} and the Perception track's
+# `page.entity.person` / `page.entity.organisation` / `page.entity.persona` {"name", "role"}.
+CAST_NAMESPACES = (
+    "entity.cast",
+    "page.entity.person",
+    "page.entity.organisation",
+    "page.entity.persona",
+)
+
+
 def _cast_items(observations: list[Observation]):
     for o in observations:
-        if (
-            o.namespace != "entity.cast"
-            or o.state is not State.PRESENT
-            or o.purpose is Purpose.RISK
-        ):
+        if o.namespace not in CAST_NAMESPACES or o.state is not State.PRESENT:
+            continue
+        if o.purpose is Purpose.RISK:
             continue
         d = _parse(o.value)
         if isinstance(o.value, str) and "|" in o.value and not d:
             entity, _, role = o.value.partition("|")
             d = {"entity": entity, "role": role}
-        if d.get("entity") and d.get("role"):
-            yield d["entity"].strip(), d["role"].strip().lower()
+        entity = d.get("entity") or d.get("name")
+        role = d.get("role") or ("persona" if o.namespace.endswith("persona") else None)
+        if entity and role:
+            yield str(entity).strip(), str(role).strip().lower()
+
+
+def cast_names(observations: list[Observation]) -> list[str]:
+    return sorted({entity for entity, _ in _cast_items(observations)})
 
 
 @layers.register
@@ -118,7 +132,7 @@ class EntityCast:
     tier = Tier.PLAYBOOK
     group = "cast"
     comparator = "set_overlap"
-    namespaces = ("entity.cast",)
+    namespaces = CAST_NAMESPACES
 
     def build(self, view: View, observations: list[Observation]) -> Fingerprint | None:
         pairs = sorted(set(_cast_items(observations)))
@@ -145,7 +159,7 @@ class EntityRoles:
     tier = Tier.PLAYBOOK
     group = "cast"
     comparator = "set_overlap"
-    namespaces = ("entity.cast",)
+    namespaces = CAST_NAMESPACES
 
     def build(self, view: View, observations: list[Observation]) -> Fingerprint | None:
         roles = sorted({r for _, r in _cast_items(observations)})

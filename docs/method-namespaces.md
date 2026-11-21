@@ -8,6 +8,23 @@ Observations with `purpose=risk` never enter a fingerprint.
 
 Catalogue column = row in `docs/signal-catalogue.md`. Examples are from the sample.
 
+**Accepted aliases (2026-11-21).** The Evidence and Perception tracks landed with some names
+of their own; the layers read both, so nobody has to rename. Fixture name → also read as:
+`campaign.label` → `aio.campaign_name` · `landing.label` → `aio.landing_name` · `brand.offer` →
+`offer.name` · `tracker.host` → `third_party.host` · `api.route_shape` → `api.route` ·
+`traffic_source` → `kit.cloaker`, `aio.source_name` · `url.path_convention` → `url.path_shape` ·
+`form.field` → `form.hidden_name` · `text.body` → `page.clean_text` · `entity.cast` →
+`page.entity.person` / `page.entity.organisation` / `page.entity.persona` (`{"name", "role"}`) ·
+`ocr.domain` → `image.domain` · `ocr.brand` → `image.brand_offer` · `ocr.person` →
+`image.person_name` · `ad.id` → `ad.ad_id`. Also consumed: `aio.source_uuid`, `aio.folder_uuid`,
+`aio.campaign_human_id`, `aio.landing_human_id` (identity, campaign group); `ad.campaign_id`,
+`ad.adset_id`, `ad.account_label`, `gads_conversion`, `bing_uet`, `quora_pixel` (identity,
+tracking group); `aff.*` as a prefix, `public_key`, `push_public_key` (identity, conversion
+group); `url.host` (domain group); `aio.folder_name` (kit config); `http.via`, `http.powered_by`
+(infra). Still missing on the sample and read from fixtures only: `asset.sha256`, `image.phash`,
+`creative.phash`, `video.frame_phash`, `dom.class`, `firstparty.sha256`, `code.evasion_filter`,
+`page.clean_text` (the cleaned body text), `pattern.score`, `expect.element`.
+
 ## Identity tier (T1): supports *same campaign*
 
 | Layer | Namespace | Value shape | Catalogue | Example |

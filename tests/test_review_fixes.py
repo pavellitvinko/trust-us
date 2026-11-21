@@ -253,3 +253,22 @@ def test_cli_candidates_flag_skips_brute_force_and_reaches_run_method(monkeypatc
     assert calls["compare_all"] == 1
     assert calls["run_method"][-1] == {"candidates": False}
     weights.reset()
+
+
+# coverage over groups observed in the corpus ----------------------------------------------------
+
+
+def test_coverage_counts_only_groups_the_corpus_can_build():
+    """A layer no extractor produces for any view must not push every pair to insufficient."""
+    from ftf.fusion.fuse import active_groups
+
+    s = _disjoint_store()  # eleven set layers, no text, no hashes, no model output
+    prepare(s)
+    assert active_groups() is not None and len(active_groups()) == 11
+    from ftf.fusion import fuse_pair
+
+    r = fuse_pair(s, "x:page", "y:page", persist=False)
+    assert r.type is RelationType.UNRELATED and r.coverage == 1.0
+    weights.reset()
+    assert active_groups() is None
+    s.close()

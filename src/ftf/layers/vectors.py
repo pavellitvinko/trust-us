@@ -99,9 +99,16 @@ def _replace_all(text: str, names, placeholder: str) -> str:
 
 def mask(text: str, observations: list[Observation] = ()) -> str:
     """Replace people, organisations, products, amounts and dates with role placeholders."""
-    people = [v for _, v in linkage_items(observations, ("entity.person", "ocr.person"))]
-    cast = [v.split("|")[0] for _, v in linkage_items(observations, ("entity.cast",))]
-    products = [v for _, v in linkage_items(observations, ("brand.offer",))]
+    from .playbook import cast_names
+
+    people = [
+        v
+        for _, v in linkage_items(
+            observations, ("entity.person", "ocr.person", "image.person_name")
+        )
+    ]
+    cast = cast_names(observations)
+    products = [v for _, v in linkage_items(observations, ("brand.offer", "offer.name"))]
     text = _replace_all(text, products, "[PRODUCT]")
     text = _replace_all(text, list(CELEBRITIES) + people + cast, "[CELEBRITY]")
     text = _replace_all(text, BANKS, "[BANK]")
@@ -121,8 +128,11 @@ def mask(text: str, observations: list[Observation] = ()) -> str:
     return " ".join(text.split())
 
 
+TEXT_NAMESPACES = ("text.body", "page.clean_text")
+
+
 def _body(observations: list[Observation]) -> str:
-    return "\n".join(v for _, v in linkage_items(observations, ("text.body",)))
+    return "\n".join(v for _, v in linkage_items(observations, TEXT_NAMESPACES))
 
 
 def _vector_fingerprint(view: View, layer_id: str, version: str, text: str) -> Fingerprint | None:
@@ -149,7 +159,7 @@ class TextSemantic:
     tier = Tier.ARTIFACT
     group = "semantic"
     comparator = "calibrated_cosine"
-    namespaces = ("text.body",)
+    namespaces = TEXT_NAMESPACES
 
     def build(self, view: View, observations: list[Observation]) -> Fingerprint | None:
         return _vector_fingerprint(view, self.name, self.version, _body(observations))
@@ -163,7 +173,12 @@ class NarrativeSkeleton:
     tier = Tier.PLAYBOOK
     group = "narrative"
     comparator = "calibrated_cosine"
-    namespaces = ("text.body", "entity.person", "entity.cast", "brand.offer")
+    namespaces = TEXT_NAMESPACES + (
+        "entity.person",
+        "entity.cast",
+        "page.entity.person",
+        "brand.offer",
+    )
 
     def build(self, view: View, observations: list[Observation]) -> Fingerprint | None:
         body = _body(observations)

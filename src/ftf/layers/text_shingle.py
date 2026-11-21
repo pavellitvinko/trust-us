@@ -24,7 +24,7 @@ class TextShingle:
     tier = Tier.ARTIFACT
     group = "text"
     comparator = "minhash"
-    namespaces = ("text.body",)
+    namespaces = ("text.body", "page.clean_text")
 
     def build(self, view: View, observations: list[Observation]) -> Fingerprint | None:
         body = "\n".join(value for _, value in linkage_items(observations, self.namespaces))

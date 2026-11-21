@@ -19,7 +19,7 @@ from ..contracts import FingerprintKind, Relation
 from ..registry import layers, load_plugins
 from .config import DEFAULT, FusionConfig
 from .demotion import find_demotions
-from .fuse import fuse
+from .fuse import fuse, set_active_groups
 
 if TYPE_CHECKING:
     from ..store import Store
@@ -32,6 +32,7 @@ def prepare(
     load_plugins()
     weights.fit(store, campaigns)
     weights.demoted, _ = find_demotions(store, config)
+    set_active_groups({layers.get(f.layer_id).group for f in store.fingerprints()})
     for layer in layers.all():
         if layer.kind is FingerprintKind.VECTOR:
             calibrate(store, layer.name)

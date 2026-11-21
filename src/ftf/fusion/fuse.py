@@ -24,6 +24,20 @@ from .demotion import Key
 
 DEMOTED_GROUP_PREFIX = "demoted:"
 
+# Correlation groups that exist somewhere in the corpus. Coverage is measured against these:
+# a layer no extractor produces for any view cannot lower the coverage of every pair.
+# None means "all registered groups" (the fixtures build every layer).
+_active_groups: set[str] | None = None
+
+
+def set_active_groups(groups: set[str] | None) -> None:
+    global _active_groups
+    _active_groups = set(groups) if groups is not None else None
+
+
+def active_groups() -> set[str] | None:
+    return _active_groups
+
 
 @dataclass
 class TierSummary:
@@ -65,7 +79,8 @@ def summarise(
     # all groups per tier, from the registry: a group nobody built still lowers coverage
     groups_in_tier: dict[Tier, set[str]] = defaultdict(set)
     for layer in meta.values():
-        groups_in_tier[layer.tier].add(layer.group)
+        if _active_groups is None or layer.group in _active_groups:
+            groups_in_tier[layer.tier].add(layer.group)
 
     comparable: dict[Tier, dict[str, float]] = defaultdict(dict)
     contradictions, demoted_shared, anchors = [], [], []

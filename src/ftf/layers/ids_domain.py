@@ -14,7 +14,13 @@ class IdsDomain:
     tier = Tier.IDENTITY
     group = "domain"
     comparator = "shared_value"
-    namespaces = ("domain.registrable", "url.host_path", "outbound.domain", "redirect.domain")
+    namespaces = (
+        "domain.registrable",
+        "url.host",
+        "url.host_path",
+        "outbound.domain",
+        "redirect.domain",
+    )
 
     def build(self, view: View, observations: list[Observation]) -> Fingerprint | None:
         items = sorted(

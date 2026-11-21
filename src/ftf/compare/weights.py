@@ -41,6 +41,12 @@ BASE_WEIGHTS: dict[str, float] = {
     "aio.landing_uuid": 0.9,
     "aio.flow_uuid": 0.9,
     "nav.landing_uuid": 0.9,
+    "aio.source_uuid": 0.85,
+    "aio.folder_uuid": 0.8,
+    "aio.campaign_human_id": 0.9,
+    "aio.landing_human_id": 0.85,
+    "aio.campaign_name": 0.85,
+    "aio.landing_name": 0.85,
     "campaign.label": 0.85,
     "landing.label": 0.85,
     # identity: trackers
@@ -53,11 +59,26 @@ BASE_WEIGHTS: dict[str, float] = {
     "tiktok_pixel": 0.85,
     "ym_id": 0.85,
     "cdn.zone_id": 0.85,
+    "gads_conversion": 0.85,
+    "bing_uet": 0.85,
+    "quora_pixel": 0.85,
+    "ad.ad_id": 0.8,
+    "ad.campaign_id": 0.8,
+    "ad.adset_id": 0.8,
+    "ad.account_label": 0.6,
     # identity: conversion
     "api_key_id": 0.85,
     "form_endpoint_host": 0.8,
     "form_endpoint_path": 0.5,
     "tracker.host": 0.7,
+    "third_party.host": 0.7,
+    "public_key": 0.85,
+    "push_public_key": 0.85,
+    "aff.offer_uuid": 0.6,
+    "aff.tracker": 0.4,
+    "aff.api_key": 0.85,
+    "aff.sid": 0.5,
+    "aff.x_id": 0.5,
     "aff.user_id": 0.8,
     "aff.offer_id": 0.6,
     "aff.landing_id": 0.6,
@@ -72,6 +93,8 @@ BASE_WEIGHTS: dict[str, float] = {
     "outbound.domain": 0.7,
     "redirect.domain": 0.8,
     "brand.offer": 0.8,
+    "offer.name": 0.8,
+    "url.host": 0.9,
     # artifact
     "asset.sha256": 0.7,
     "avatar.sha256": 0.6,
@@ -81,7 +104,15 @@ BASE_WEIGHTS: dict[str, float] = {
     "aio.landing_type_uuid": 0.6,
     "config.key_path": 0.3,
     "api.route_shape": 0.5,
+    "api.route": 0.5,
     "traffic_source": 0.4,
+    "kit.cloaker": 0.5,
+    "aio.source_name": 0.4,
+    "aio.folder_name": 0.4,
+    "url.path_shape": 0.5,
+    "form.hidden_name": 0.3,
+    "http.via": 0.2,
+    "http.powered_by": 0.2,
     "url.param_name": 0.5,
     "url.param_shape": 0.4,
     "form.field": 0.3,
@@ -134,6 +165,12 @@ class WeightTable:
         self.reset()
 
     def reset(self) -> None:
+        try:  # coverage denominators follow the corpus the weights were fitted on
+            from ..fusion.fuse import set_active_groups
+
+            set_active_groups(None)
+        except ImportError:  # pragma: no cover - import order during package init
+            pass
         self.holders: dict[Key, int] = {}
         self.learned_stoplist: set[Key] = set()
         self.demoted: set[Key] = set()

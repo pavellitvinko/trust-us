@@ -76,7 +76,11 @@ def cheap_relation(store: Store, a: str, b: str, config: FusionConfig = DEFAULT)
     """The relation of a non-candidate pair, from layer presence alone."""
     groups_a = {layers.get(f.layer_id).group for f in store.fingerprints(view_id=a)}
     groups_b = {layers.get(f.layer_id).group for f in store.fingerprints(view_id=b)}
+    from ..fusion.fuse import active_groups
+
     total = {layer.group for layer in layers.all()}
+    if active_groups() is not None:
+        total &= active_groups()
     coverage = len(groups_a & groups_b) / len(total) if total else 0.0
     rtype = RelationType.UNRELATED if coverage >= config.min_coverage else RelationType.INSUFFICIENT
     return Relation(

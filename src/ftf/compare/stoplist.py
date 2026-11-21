@@ -23,6 +23,8 @@ HOST_NAMESPACES = frozenset(
         "form_endpoint_host",
         "cdn.host",
         "http.server",
+        "third_party.host",
+        "url.host",
     }
 )
 HASH_NAMESPACES = frozenset({"asset.sha256", "firstparty.sha256", "avatar.sha256"})

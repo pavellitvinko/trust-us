@@ -22,11 +22,17 @@ set_layer(
         "aio.owner_uuid",
         "aio.landing_uuid",
         "aio.flow_uuid",
+        "aio.source_uuid",
+        "aio.folder_uuid",
+        "aio.campaign_human_id",
+        "aio.landing_human_id",
+        "aio.campaign_name",
+        "aio.landing_name",
         "campaign.label",
         "landing.label",
         "nav.landing_uuid",
     ),
-    doc="A1, A9, I4: tracker-platform campaign, owner, landing and flow records.",
+    doc="A1, A9, I4: tracker-platform campaign, owner, landing, source and flow records.",
 )
 
 set_layer(
@@ -37,15 +43,22 @@ set_layer(
     namespaces=(
         "fb_pixel",
         "gads_id",
+        "gads_conversion",
         "gtm_id",
         "ga_id",
         "taboola_id",
         "uet_id",
+        "bing_uet",
+        "quora_pixel",
         "tiktok_pixel",
         "ym_id",
         "cdn.zone_id",
+        "ad.ad_id",
+        "ad.campaign_id",
+        "ad.adset_id",
+        "ad.account_label",
     ),
-    doc="A3-A5, A10, C12: pixel and tag IDs of advertising and analytics accounts.",
+    doc="A3-A5, A10, C12: pixel and tag IDs of advertising and analytics accounts; ad-platform IDs in the landing URL.",
 )
 
 set_layer(
@@ -61,9 +74,12 @@ set_layer(
         "form_endpoint_host",
         "form_endpoint_path",
         "api_key_id",
+        "public_key",
+        "push_public_key",
         "tracker.host",
+        "third_party.host",
     ),
-    prefixes=("contact.",),
+    prefixes=("contact.", "aff."),
     doc="A6-A8, A12, I3, B7: where leads and clicks go — affiliate fields, form endpoints, keys, contacts.",
 )
 
@@ -78,7 +94,7 @@ set_layer(
     tier=Tier.IDENTITY,
     group="brand",
     comparator="shared_value",
-    namespaces=("brand.offer",),
+    namespaces=("brand.offer", "offer.name"),
     normalise=_normalise_offer,
     doc="A13: invented product or offer names, case-folded; diacritics kept.",
 )

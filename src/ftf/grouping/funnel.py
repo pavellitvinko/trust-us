@@ -47,27 +47,40 @@ def _registrable(host: str) -> str:
     return registrable_domain(host.lower().strip().rstrip("/"))
 
 
+# The fixture names and the Perception track's names for what a screenshot shows.
+AD_DOMAIN = ("ocr.domain", "image.domain", "redirect.domain")
+AD_BRAND = ("ocr.brand", "image.brand_offer", "brand.offer")
+AD_PERSON = ("ocr.person", "image.person_name")
+AD_ID = ("ad.id", "ad.ad_id")
+PAGE_BRAND = ("brand.offer", "offer.name", "ocr.brand")
+PAGE_PERSON = ("entity.person", "ocr.person")
+
+
+def _any(observations: list[Observation], namespaces) -> set[str]:
+    out: set[str] = set()
+    for ns in namespaces:
+        out |= _values(observations, ns)
+    return out
+
+
 def funnel_evidence(src: list[Observation], dst: list[Observation]) -> list[str]:
     """Why `src` (an ad or an upstream page) leads to `dst` (a page). Empty = no evidence."""
+    from ..layers.playbook import cast_names
+
     out = []
-    shown = {_registrable(d) for d in _values(src, "ocr.domain") | _values(src, "redirect.domain")}
-    hosts = _values(dst, "domain.registrable")
+    shown = {_registrable(d) for d in _any(src, AD_DOMAIN)}
+    hosts = _values(dst, "domain.registrable") | {_registrable(h) for h in _values(dst, "url.host")}
     if shown & hosts:
         out.append("domain shown in the ad = page host: " + ", ".join(sorted(shown & hosts)))
-    ad_ids = _values(src, "ad.id") & _values(dst, "ad.id")
+    ad_ids = _any(src, AD_ID) & _any(dst, AD_ID)
     if ad_ids:
         out.append("ad ID present in the landing URL: " + ", ".join(sorted(ad_ids)))
-    brands = {
-        _normalise_offer("", b) for b in _values(src, "ocr.brand") | _values(src, "brand.offer")
-    }
-    page_brands = {
-        _normalise_offer("", b) for b in _values(dst, "brand.offer") | _values(dst, "ocr.brand")
-    }
+    brands = {_normalise_offer("", b) for b in _any(src, AD_BRAND)}
+    page_brands = {_normalise_offer("", b) for b in _any(dst, PAGE_BRAND)}
     if brands & page_brands:
         out.append("shared brand or offer: " + ", ".join(sorted(brands & page_brands)))
-    people = _values(src, "ocr.person") & (
-        _values(dst, "entity.person") | _values(dst, "ocr.person")
-    )
+    page_people = _any(dst, PAGE_PERSON) | {n.lower() for n in cast_names(dst)}
+    people = _any(src, AD_PERSON) & page_people
     if people:
         out.append("shared named person: " + ", ".join(sorted(people)))
     nav = _values(src, "nav.landing_uuid") & _values(dst, "aio.landing_uuid")
@@ -101,9 +114,7 @@ def funnel_edges(
         matched = False
         for page in pages:  # every page is considered: co-captured edges are recorded for each
             matched = consider(ad, page) or matched
-        shown = sorted(
-            _values(obs[ad.view_id], "ocr.domain") | _values(obs[ad.view_id], "ocr.brand")
-        )
+        shown = sorted(_any(obs[ad.view_id], AD_DOMAIN[:2]) | _any(obs[ad.view_id], AD_BRAND[:2]))
         if pages and not matched and shown:
             mismatches.append(
                 Observation(
