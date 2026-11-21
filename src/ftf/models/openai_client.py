@@ -76,6 +76,38 @@ def _final_parts(response: Any) -> list[Any]:
     ]
 
 
+def _is_inline_image(part: Any) -> bool:
+    if not isinstance(part, dict) or part.get("type") != "input_image":
+        return False
+    url = part.get("image_url")
+    return isinstance(url, str) and url.startswith("data:image/")
+
+
+def _redact_content(content: str | list[dict[str, Any]]) -> Any:
+    """Redact text parts. Inline image data stays whole: base64 can look like `token=...`."""
+    if not isinstance(content, list):
+        return redact_json(content)
+    out: list[Any] = []
+    for part in content:
+        if _is_inline_image(part):
+            rest = {key: value for key, value in part.items() if key != "image_url"}
+            out.append({**redact_json(rest), "image_url": part["image_url"]})
+        else:
+            out.append(redact_json(part))
+    return out
+
+
+def _redact_strings(value: Any) -> Any:
+    """Redact every string in a model answer, keeping its keys and other value types."""
+    if isinstance(value, str):
+        return redact_text(value)
+    if isinstance(value, list):
+        return [_redact_strings(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _redact_strings(item) for key, item in value.items()}
+    return value
+
+
 def read_structured[S: BaseModel](
     task: str,
     prompt_version: str,
@@ -93,7 +125,7 @@ def read_structured[S: BaseModel](
     """
     settings = settings or get_settings()
     safe_system = redact_text(system)
-    safe_content = redact_json(content)
+    safe_content = _redact_content(content)
     payload = {
         "system": safe_system,
         "content": safe_content,
@@ -123,9 +155,11 @@ def read_structured[S: BaseModel](
             raise TransientModelError("schema")
         try:
             schema.model_validate_json(text)
+            answer = _redact_strings(json.loads(text))  # the cache ships, so it holds no secrets
+            schema_parser(schema)(answer)
         except ValidationError as exc:
             raise TransientModelError("schema") from exc
-        return success_envelope(json.loads(text))
+        return success_envelope(answer)
 
     return guarded_call(
         settings.model_cache_dir,

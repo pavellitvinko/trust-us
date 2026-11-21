@@ -1,4 +1,4 @@
-"""Command line: ftf ingest | run | views | observations | compare | pairs."""
+"""Command line: ftf ingest | run | perceive | views | observations | compare | pairs."""
 
 from __future__ import annotations
 
@@ -32,6 +32,19 @@ def cmd_run(args) -> None:
     print(f"observations: {pipeline.run_extract(store)}")
     print(f"fingerprints: {pipeline.run_fingerprint(store)}")
     print(f"evidence rows: {pipeline.run_compare_all(store)}")
+
+
+def cmd_perceive(args) -> None:
+    from .perception.image import run_perceive
+    from .registry import Context
+
+    summary = run_perceive(Context(_store()), args.view or None)
+    print(
+        f"image views: {summary['views']}, read: {summary['read']}, "
+        f"not observable: {summary['not_observable']}, "
+        f"failed but kept earlier reading: {summary['kept']}, "
+        f"observations: {summary['observations']}"
+    )
 
 
 def cmd_views(args) -> None:
@@ -79,6 +92,10 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("run", help="extract, fingerprint and compare everything stored").set_defaults(
         func=cmd_run
     )
+    p = sub.add_parser("perceive", help="read stored image views with the vision model")
+    p.add_argument("--view", action="append", help="only this view id; may be repeated")
+    p.set_defaults(func=cmd_perceive)
+
     sub.add_parser("views", help="list views").set_defaults(func=cmd_views)
 
     p = sub.add_parser("observations", help="show one view's observations")

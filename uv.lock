@@ -388,6 +388,7 @@ source = { editable = "." }
 dependencies = [
     { name = "google-genai" },
     { name = "openai" },
+    { name = "pillow" },
     { name = "pydantic" },
     { name = "streamlit" },
     { name = "tldextract" },
@@ -403,6 +404,7 @@ dev = [
 requires-dist = [
     { name = "google-genai", specifier = ">=3.6.1" },
     { name = "openai", specifier = ">=3.57.0" },
+    { name = "pillow", specifier = ">=10" },
     { name = "pydantic", specifier = ">=2.7" },
     { name = "streamlit", specifier = ">=1.38" },
     { name = "tldextract", specifier = ">=5.1" },
