@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import time
 from contextlib import contextmanager
+from pathlib import Path
 from types import SimpleNamespace as NS
 
 import pytest
@@ -494,7 +495,8 @@ def test_sidecar_secrets_are_redacted_before_flattening(ctx):
         primary="missing.mp4",
         attachments=["clip.json"],
     )
-    blocks = techniques._video_metadata(view, ctx)
+    blocks, failed = techniques._video_metadata(view, ctx)
+    assert not failed
     assert "SIDECARSECRET" not in json.dumps(blocks)
     assert any(text == "ok" for _, text in blocks)
 
@@ -592,3 +594,153 @@ def test_quote_offset_is_within_its_own_file(ctx, settings):
     run(ctx, settings, FakeOpenAI(message(card("Profit claim", quote("zarobilem 5000")))))
     evidence = cards_of(ctx)[0].value["evidence"][0]
     assert evidence["file"] == "b.json" and evidence["locator"] == "text:normalised_offset[0]"
+
+
+def sent_text(client):
+    return client.requests[0]["input"][0]["content"][0]["text"]
+
+
+def test_secret_named_stored_facts_are_never_sent(ctx, settings):
+    view = page_view(ctx)
+    stored = [
+        Observation(
+            view_id=view.view_id,
+            signal_id="A1",
+            namespace=namespace,
+            value=value,
+            extractor="test",
+            version="1",
+        )
+        for namespace, value in (
+            ("ad.access_token", "EAABURLTOKEN123456"),
+            ("aff.api_key", "HIDDENAPIKEY777"),
+            ("aff.sid", "HIDDENSID888"),
+            ("ad.param", "keepme123"),
+        )
+    ]
+    ctx.store.put_observations(view.view_id, "test", stored)
+    client = FakeOpenAI(message(card()))
+    run(ctx, settings, client)
+    text = sent_text(client)
+    for secret in ("EAABURLTOKEN123456", "HIDDENAPIKEY777", "HIDDENSID888"):
+        assert secret not in text
+    assert "ad.param: keepme123" in text
+
+
+def test_label_and_value_in_inline_tags_are_redacted_together(ctx, settings):
+    html = (
+        "<p>Password: <b>HUNTER2VALUE</b></p>"
+        "<p><span>api_key:</span> <code>SKLIVEVALUE123</code></p><h1>Zarobisz 5000 zl</h1>"
+    )
+    page_view(ctx, html)
+    client = FakeOpenAI(message(card("Income", quote("Zarobisz 5000"))))
+    run(ctx, settings, client)
+    text = sent_text(client)
+    assert "HUNTER2VALUE" not in text and "SKLIVEVALUE123" not in text
+    assert "Zarobisz 5000 zl" in text
+
+
+@pytest.mark.parametrize(
+    "control",
+    [
+        '<input type="submit" name="csrf_token" value="FORMSECRET1">',
+        '<textarea name="csrf_token">FORMSECRET1</textarea>',
+        '<select id="session_id"><option>FORMSECRET1</option></select>',
+    ],
+)
+def test_secret_named_form_controls_are_not_material(control):
+    text = page_text(f"{control}<p>Dolacz teraz</p>")
+    assert "FORMSECRET1" not in text and "Dolacz teraz" in text
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        '{"auth": {"user": "NESTEDSECRET1"}, "name": "X-Session", "value": "NESTEDSECRET1",}',
+        '{"auth": {"user": "NESTEDSECRET1"}, "t": "' + "x" * techniques.MAX_METADATA_CHARS + '"}',
+    ],
+)
+def test_unparseable_or_oversized_sidecar_is_not_sent(ctx, raw):
+    root = ctx.store.get_incident("i1").root
+    with open(f"{root}/clip.json", "w", encoding="utf-8") as fh:
+        fh.write(raw)
+    view = View(
+        view_id="v1",
+        incident_id="i1",
+        kind=ViewKind.VIDEO,
+        label="clip",
+        primary="clip.mp4",
+        attachments=["clip.json"],
+    )
+    assert techniques._video_metadata(view, ctx) == ([], True)
+
+
+def test_damaged_har_keeps_stored_cards(ctx, settings):
+    root = ctx.store.get_incident("i1").root
+    with open(f"{root}/p.har", "w", encoding="utf-8") as fh:
+        json.dump(
+            {
+                "log": {
+                    "entries": [
+                        {
+                            "request": {"url": "https://x.pl/", "method": "GET"},
+                            "response": {
+                                "status": 200,
+                                "content": {"mimeType": "text/html", "text": PAGE},
+                            },
+                            "_resourceType": "document",
+                        }
+                    ]
+                }
+            },
+            fh,
+        )
+    add_view(
+        ctx,
+        View(
+            view_id="v1",
+            incident_id="i1",
+            kind=ViewKind.PAGE,
+            label="har",
+            har="p.har",
+            meta={"har_document": "https://x.pl/"},
+        ),
+    )
+    assert run(ctx, settings, FakeOpenAI(message(card())))["with_cards"] == 1
+    with open(f"{root}/p.har", "w", encoding="utf-8") as fh:
+        fh.write('{"log": ')
+    client = FakeOpenAI()
+    summary = run(ctx, settings, client)
+    assert summary["kept"] == 1 and client.requests == []
+    assert cards_of(ctx)[0].state is State.PRESENT
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
+@pytest.mark.parametrize("with_sidecar", [False, True])
+def test_moved_video_keeps_stored_cards(ctx, settings, with_sidecar):
+    root = ctx.store.get_incident("i1").root
+    attachments = []
+    if with_sidecar:
+        with open(f"{root}/clip.json", "w", encoding="utf-8") as fh:
+            json.dump({"t": "opis tego filmu"}, fh)
+        attachments = ["clip.json"]
+    video_view(ctx, attachments)
+    run(ctx, settings, FakeOpenAI(message(card("From frames", shown(0)))))
+    Path(root, "clip.mp4").rename(Path(root, "moved.mp4"))
+    client = FakeOpenAI()
+    summary = run(ctx, settings, client)
+    assert summary["kept"] == 1 and client.requests == []
+    assert cards_of(ctx)[0].value["name"] == "From frames"
+
+
+def test_moved_resources_folder_keeps_image_cards(ctx, settings):
+    root = ctx.store.get_incident("i1").root
+    Path(root, "page_files").mkdir()
+    image_bytes(f"{root}/page_files/proof.png")
+    page_view(ctx, resources=True)
+    run(ctx, settings, FakeOpenAI(message(card("From image", shown(0)))))
+    Path(root, "page_files").rename(Path(root, "moved_files"))
+    client = FakeOpenAI()
+    summary = run(ctx, settings, client)
+    assert summary["kept"] == 1 and client.requests == []
+    assert cards_of(ctx)[0].value["name"] == "From image"

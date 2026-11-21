@@ -11,6 +11,7 @@ import base64
 import hashlib
 import json
 import logging
+import os
 import re
 import subprocess
 from dataclasses import dataclass
@@ -24,6 +25,7 @@ from ..config import Settings
 from ..contracts import Observation, Purpose, Source, State, View, ViewKind
 from ..extract import _material
 from ..models import ModelResult, read_structured, redact_json, redact_text
+from ..models.redact import is_secret_name
 from ..registry import Context
 from .image import (
     MAX_IMAGE_BYTES,
@@ -96,6 +98,44 @@ _VOID_TAGS = frozenset(
         "wbr",
     }
 )
+# Text inside these stays in one block, so a label and its value are redacted together.
+_INLINE_TAGS = frozenset(
+    {
+        "a",
+        "abbr",
+        "b",
+        "bdi",
+        "bdo",
+        "br",
+        "cite",
+        "code",
+        "data",
+        "del",
+        "dfn",
+        "em",
+        "font",
+        "i",
+        "ins",
+        "kbd",
+        "label",
+        "mark",
+        "q",
+        "s",
+        "samp",
+        "small",
+        "span",
+        "strike",
+        "strong",
+        "sub",
+        "sup",
+        "time",
+        "tt",
+        "u",
+        "var",
+        "wbr",
+    }
+)
+_FORM_CONTROLS = frozenset({"input", "textarea", "select", "button"})
 _NEVER_HIDDEN_TAGS = frozenset({"html", "body"})  # scripts often reveal a hidden page on load
 _MAX_IMPLIED_DEPTH = 256
 _P_CLOSERS = frozenset(
@@ -222,10 +262,17 @@ class _PageText(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.parts: list[str] = []
         self.struck: list[str] = []
+        self._block: list[str] = []
         self._open: list[str] = []
         self._counts: dict[str, int] = {}
         self._hidden_at: int | None = None
         self._struck_at: int | None = None
+
+    def flush(self) -> None:
+        """End the current block of text."""
+        if self._block:
+            self.parts.append("".join(self._block))
+            self._block = []
 
     def _push(self, tag: str) -> None:
         self._open.append(tag)
@@ -255,6 +302,8 @@ class _PageText(HTMLParser):
             self._truncate(found)
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag not in _INLINE_TAGS:
+            self.flush()
         self._imply_end(tag)
         is_void = tag in _VOID_TAGS
         if self._hidden_at is not None:
@@ -266,7 +315,10 @@ class _PageText(HTMLParser):
         is_hidden = tag not in _NEVER_HIDDEN_TAGS and (
             "hidden" in values or bool(_HIDDEN_STYLE.search(style))
         )
-        if tag in _SKIPPED_TAGS or is_hidden:
+        is_secret_control = tag in _FORM_CONTROLS and (
+            is_secret_name(values.get("name", "")) or is_secret_name(values.get("id", ""))
+        )
+        if tag in _SKIPPED_TAGS or is_hidden or is_secret_control:
             if not is_void:
                 self._hidden_at = len(self._open)
                 self._push(tag)
@@ -281,6 +333,8 @@ class _PageText(HTMLParser):
         self._push(tag)
 
     def handle_endtag(self, tag: str) -> None:
+        if tag not in _INLINE_TAGS:
+            self.flush()
         if not self._counts.get(tag):
             return
         for index in range(len(self._open) - 1, -1, -1):
@@ -291,7 +345,7 @@ class _PageText(HTMLParser):
     def handle_data(self, data: str) -> None:
         if self._hidden_at is not None or not data.strip():
             return
-        self.parts.append(data)
+        self._block.append(data)
         if self._struck_at is not None:
             self.struck.append(data)
 
@@ -309,6 +363,7 @@ def _page_text(html: str) -> tuple[list[str], list[str]]:
         parser.close()
     except (AssertionError, ValueError):  # keep what was read from badly broken markup
         pass
+    parser.flush()
     blocks = [" ".join(part.split()) for part in parser.parts]
     return [block for block in blocks if block], [" ".join(s.split()) for s in parser.struck]
 
@@ -479,15 +534,15 @@ def _video_images(view: View, ctx: Context) -> list[_Image]:
     return images
 
 
-def _json_strings(raw: str) -> list[str]:
-    """Decoded, redacted string values of a JSON sidecar, or the raw text when it is not JSON.
+def _json_strings(raw: str) -> list[str] | None:
+    """Decoded, redacted string values of a JSON sidecar, or None when it cannot be parsed.
 
-    Redaction runs before flattening, because it depends on the key names.
+    Redaction depends on the key names, so unparsed text is never sent.
     """
     try:
         pending = [redact_json(json.loads(raw))]
     except (ValueError, RecursionError):
-        return [redact_text(raw)]
+        return None
     strings: list[str] = []
     while pending:
         value = pending.pop()
@@ -500,16 +555,41 @@ def _json_strings(raw: str) -> list[str]:
     return strings
 
 
-def _video_metadata(view: View, ctx: Context) -> list[tuple[str | None, str]]:
+def _video_metadata(view: View, ctx: Context) -> tuple[list[tuple[str | None, str]], bool]:
+    """Text of the sidecars that parse fully, and whether any sidecar was unusable."""
     blocks: list[tuple[str | None, str]] = []
+    failed = False
     for file in view.attachments:
         try:
-            raw = ctx.read_text(view, file, limit=MAX_METADATA_CHARS)
-        except OSError as exc:
-            raise _MediaError(str(exc)) from exc
-        cleaned = (" ".join(text.split()) for text in _json_strings(raw))
+            raw = ctx.read_text(view, file, limit=MAX_METADATA_CHARS + 1)
+        except OSError:
+            failed = True
+            continue
+        strings = None if len(raw) > MAX_METADATA_CHARS else _json_strings(raw)
+        if strings is None:
+            failed = True
+            continue
+        cleaned = (" ".join(text.split()) for text in strings)
         blocks.extend((file, text) for text in cleaned if text)
-    return blocks
+    return blocks, failed
+
+
+def _readable(path: Path, directory: bool = False) -> bool:
+    try:
+        found = path.is_dir() if directory else path.is_file()
+        return found and os.access(path, os.R_OK)
+    except OSError:
+        return False
+
+
+def _dependency_missing(view: View, ctx: Context) -> bool:
+    """True when a file or folder this view depends on cannot be read right now."""
+    files = [f for f in (view.primary, view.har, *view.attachments) if f]
+    if not all(_readable(ctx.path(view, file)) for file in files):
+        return True
+    return bool(view.resources_dir) and not _readable(
+        ctx.path(view, view.resources_dir), directory=True
+    )
 
 
 def _fact(label: str, value: str) -> str:
@@ -523,6 +603,8 @@ def _stored_facts(observations: list[Observation]) -> list[str]:
         if o.state is not State.PRESENT or o.extractor in _NOT_SCRIPT_FACTS:
             continue
         if o.namespace == "image.text":
+            continue
+        if is_secret_name(o.namespace):  # never sent, whatever its value looks like
             continue
         if isinstance(o.value, str):
             value = o.value
@@ -558,7 +640,7 @@ def build_input(view: View, ctx: Context) -> _Input | None:
     page_facts: list[str] = []
     blocks: list[tuple[str | None, str]] = []
     images: list[_Image] = []
-    failed = False
+    failed = _dependency_missing(view, ctx)
     text_file = view.primary or view.har
     if view.kind is ViewKind.PAGE:
         material = _material.load(view, ctx)
@@ -568,8 +650,9 @@ def build_input(view: View, ctx: Context) -> _Input | None:
             text_file = material.html.source.file
             blocks = [(text_file, part) for part in parts]
         page_facts = _page_facts(material, struck)
-        images, failed = _page_images(view, ctx, material)
-        failed = failed or bool(material.errors)
+        images, image_failed = _page_images(view, ctx, material)
+        har_empty = bool(view.har) and not material.har_requests
+        failed = failed or image_failed or har_empty or bool(material.errors)
     elif view.kind is ViewKind.IMAGE:
         blocks = [
             (view.primary, o.raw)
@@ -583,9 +666,10 @@ def build_input(view: View, ctx: Context) -> _Input | None:
             image = _read_image(ctx.path(view, view.primary), view.primary)
             images = [image] if image is not None else []
     else:
-        blocks = _video_metadata(view, ctx)
+        blocks, metadata_failed = _video_metadata(view, ctx)
         text_file = view.attachments[0] if view.attachments else view.primary
         images = _video_images(view, ctx)
+        failed = failed or metadata_failed or (bool(view.primary) and not images)
     safe_text, segments = _assemble(blocks)
     # Partial input must not replace cards that were made from the complete material.
     if failed and ((not safe_text and not images) or _has_cards(ctx, view)):
