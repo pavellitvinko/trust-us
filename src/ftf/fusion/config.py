@@ -54,6 +54,9 @@ class FusionConfig:
     # a shared value here anchors a duplicate: same landing, or the same primary file
     duplicate_anchors: tuple[str, ...] = ("url.host_path", "primary.sha256")
     duplicate_layer: str = "text.shingle"
+    # a perceptual match this close in these layers is the same creative re-encoded
+    duplicate_anchor_layers: tuple[str, ...] = ("ad.creative",)
+    duplicate_anchor_max_distance: int = 6
 
     def group_weight(self, group: str, tier: Tier) -> float:
         return self.group_weights.get(group, self.tier_weights.get(tier.value, 0.0))
@@ -67,7 +70,7 @@ class FusionConfig:
     @classmethod
     def load(cls, path: Path) -> FusionConfig:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
-        for key in ("exclusive_namespaces", "duplicate_anchors"):
+        for key in ("exclusive_namespaces", "duplicate_anchors", "duplicate_anchor_layers"):
             if key in data:
                 data[key] = tuple(data[key])
         return cls(**data)

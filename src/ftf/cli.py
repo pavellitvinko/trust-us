@@ -167,6 +167,55 @@ def cmd_groups(args) -> None:
             print(f"rejected merge {a} <-> {b}: {why}")
 
 
+def cmd_incidents(args) -> None:
+    """Per-folder roll-up: campaigns, funnel edges, co-captured views and mismatches."""
+    from .grouping import build_groups, rollup
+
+    store = _store()
+    labels = {v.view_id: v.label for v in store.views()}
+    g = build_groups(store)
+    for s in rollup(store, g, g.funnel_edges):
+        n = len(s.campaigns)
+        print(f"incident {s.incident_id}: {n} campaign{'s' if n != 1 else ''}")
+        for cid, views in s.campaigns.items():
+            others = s.shared_campaigns.get(cid)
+            tag = f"  (also: {', '.join(others)})" if others else "  (only this folder)"
+            print(f"  {cid}{tag}")
+            for v in views:
+                print(f"      {v:16} {labels.get(v, '')}")
+        for e in s.funnel:
+            print(f"  funnel {e.source} -> {e.target}: " + "; ".join(e.evidence))
+        for e in s.co_captured:
+            print(f"  co-captured {e.source} ~ {e.target} (display only)")
+        for m in s.mismatches:
+            print(
+                f"  MISMATCH: ad shows {m['ad_shows']} but the folder's pages are {m['page_hosts']}"
+            )
+
+
+def cmd_assign(args) -> None:
+    """Open-set outcome for one stored view against the rest of the corpus."""
+    from .grouping import assign
+
+    store = _store()
+    a = assign(store, args.view_id, exclude_incident=not args.same_incident)
+    print(f"{a.view_id}: {a.headline()}")
+    for reason in a.reasons:
+        print(f"  - {reason}")
+    for rtype, items in a.related.items():
+        for x in items[: args.top]:
+            print(
+                f"  {rtype:22} {x.view_id:16} strength {x.strength:.2f} cov {x.relation.coverage:.2f}"
+            )
+
+
+def cmd_loio(args) -> None:
+    """Leave-one-incident-out on the fixtures."""
+    from .eval.loio import format_loio, loio_all
+
+    print(format_loio(loio_all(incidents=args.incident or None)))
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="ftf", description="Follow the Fake")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -214,6 +263,20 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser(
         "groups", help="campaigns, families and playbooks from stored relations"
     ).set_defaults(func=cmd_groups)
+
+    sub.add_parser(
+        "incidents", help="per-folder roll-up with funnel edges and mismatches"
+    ).set_defaults(func=cmd_incidents)
+
+    p = sub.add_parser("assign", help="open-set outcome for one view against the corpus")
+    p.add_argument("view_id")
+    p.add_argument("--same-incident", action="store_true", help="also compare with its own folder")
+    p.add_argument("--top", type=int, default=3)
+    p.set_defaults(func=cmd_assign)
+
+    p = sub.add_parser("loio", help="leave-one-incident-out on the fixtures")
+    p.add_argument("--incident", action="append", help="only these incidents; repeatable")
+    p.set_defaults(func=cmd_loio)
 
     p = sub.add_parser("eval", help="agreement with the reference pairs (docs/baseline-report.md)")
     p.add_argument("--fixtures", action="store_true", help="evaluate the fixtures in memory")

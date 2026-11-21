@@ -6667,6 +6667,306 @@
    }
   },
   {
+   "view_id": "1:ad",
+   "signal_id": "E11",
+   "namespace": "ocr.domain",
+   "value": "civicdaybook.live",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "1:ad",
+   "signal_id": "E11",
+   "namespace": "ocr.person",
+   "value": "Rafał Brzoska",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "1:ad",
+   "signal_id": "G4",
+   "namespace": "ad.advertiser",
+   "value": "Formal Favorable",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "1:ad",
+   "signal_id": "L2",
+   "namespace": "creative.phash",
+   "value": "a1b2c3d4e5f60718",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "2:ad",
+   "signal_id": "E11",
+   "namespace": "ocr.domain",
+   "value": "acrosscommunities.live",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "2:ad",
+   "signal_id": "E11",
+   "namespace": "ocr.person",
+   "value": "Rafał Brzoska",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "2:ad",
+   "signal_id": "G4",
+   "namespace": "ad.advertiser",
+   "value": "EasyJoy",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "2:ad",
+   "signal_id": "L2",
+   "namespace": "creative.phash",
+   "value": "0f1e2d3c4b5a6978",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "10:ad",
+   "signal_id": "E11",
+   "namespace": "ocr.domain",
+   "value": "allegro.pl",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "10:ad",
+   "signal_id": "E11",
+   "namespace": "ocr.brand",
+   "value": "Allegro",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "10:ad",
+   "signal_id": "G4",
+   "namespace": "ad.advertiser",
+   "value": "Sustain Studio",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "10:ad",
+   "signal_id": "L2",
+   "namespace": "creative.phash",
+   "value": "5555aaaa5555aaaa",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "36:ad",
+   "signal_id": "E11",
+   "namespace": "ocr.domain",
+   "value": "orlen-inwestycje.pl",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "36:ad",
+   "signal_id": "E11",
+   "namespace": "ocr.brand",
+   "value": "Orlen",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "36:ad",
+   "signal_id": "E11",
+   "namespace": "ocr.person",
+   "value": "Daniel Obajtek",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "36:ad",
+   "signal_id": "L2",
+   "namespace": "creative.phash",
+   "value": "3c3c3c3cc3c3c3c3",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "61:ad",
+   "signal_id": "E11",
+   "namespace": "ocr.domain",
+   "value": "glowpixel.org",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "61:ad",
+   "signal_id": "E11",
+   "namespace": "ocr.person",
+   "value": "Donald Tusk",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "61:ad",
+   "signal_id": "G4",
+   "namespace": "ad.advertiser",
+   "value": "Glowpixel",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "61:ad",
+   "signal_id": "L2",
+   "namespace": "creative.phash",
+   "value": "9999666699996666",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "99:ad",
+   "signal_id": "L2",
+   "namespace": "creative.phash",
+   "value": "a1b2c3d4e5f60719",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "99:ad",
+   "signal_id": "E11",
+   "namespace": "ocr.person",
+   "value": "Rafał Brzoska",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "1:page",
+   "signal_id": "G1",
+   "namespace": "entity.person",
+   "value": "Rafał Brzoska",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "2:page",
+   "signal_id": "G1",
+   "namespace": "entity.person",
+   "value": "Rafał Brzoska",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "61:article",
+   "signal_id": "G1",
+   "namespace": "entity.person",
+   "value": "Donald Tusk",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
    "view_id": "5:video",
    "signal_id": "M1",
    "namespace": "video.frame_phash",
@@ -6899,6 +7199,30 @@
   "61:chat": {
    "kind": "page",
    "label": "61 chat / lead form (glowpixel.org)"
+  },
+  "1:ad": {
+   "kind": "image",
+   "label": "1 Facebook ad screenshot (Brzoska)"
+  },
+  "2:ad": {
+   "kind": "image",
+   "label": "2 Facebook ad screenshot (Brzoska)"
+  },
+  "10:ad": {
+   "kind": "image",
+   "label": "10 ad screenshot (marketplace lure)"
+  },
+  "36:ad": {
+   "kind": "image",
+   "label": "36 ad screenshot (investment lure)"
+  },
+  "61:ad": {
+   "kind": "image",
+   "label": "61 Google ad screenshot (Tusk)"
+  },
+  "99:ad": {
+   "kind": "image",
+   "label": "99 screenshot only: re-encoded copy of the case-1 ad"
   }
  }
 }

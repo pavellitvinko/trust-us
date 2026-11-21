@@ -38,6 +38,7 @@ def store_from_fixtures(
     store: Store | None = None,
     exclude_incidents: set[str] = frozenset(),
     exclude_namespaces: set[str] = frozenset(),
+    only_incidents: set[str] | None = None,
 ) -> Store:
     """A store holding the fixture incidents, views and observations. Nothing is run."""
     store = store or Store(":memory:")
@@ -50,11 +51,16 @@ def store_from_fixtures(
         incident_id, _, _ = o.view_id.partition(":")
         if incident_id in exclude_incidents:
             continue
+        if only_incidents is not None and incident_id not in only_incidents:
+            continue
         by_incident[incident_id][o.view_id].append(o)
     for view_id, spec in declared.items():  # views with no observations still exist
         incident_id = view_id.partition(":")[0]
-        if incident_id not in exclude_incidents:
-            by_incident[incident_id].setdefault(view_id, [])
+        if incident_id in exclude_incidents:
+            continue
+        if only_incidents is not None and incident_id not in only_incidents:
+            continue
+        by_incident[incident_id].setdefault(view_id, [])
     root = str(Path(path).resolve().parent / "incidents")
     for incident_id, views in sorted(by_incident.items()):
         view_objs = []
