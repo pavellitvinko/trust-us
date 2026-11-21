@@ -21,9 +21,9 @@ def _load_dotenv(path: Path = Path(".env")) -> None:
 @dataclass(frozen=True)
 class Settings:
     data_dir: Path
-    anthropic_api_key: str
+    openai_api_key: str
     gemini_api_key: str
-    claude_model: str
+    openai_model: str
     embedding_model: str
     video_model: str
 
@@ -41,9 +41,9 @@ def get_settings() -> Settings:
     env = os.environ.get
     return Settings(
         data_dir=Path(env("FTF_DATA_DIR", "./data")),
-        anthropic_api_key=env("ANTHROPIC_API_KEY", ""),
+        openai_api_key=env("OPENAI_API_KEY", ""),
         gemini_api_key=env("GEMINI_API_KEY", ""),
-        claude_model=env("FTF_CLAUDE_MODEL", "claude-opus-5-5"),
+        openai_model=env("FTF_OPENAI_MODEL", "gpt-6-luna"),
         embedding_model=env("FTF_EMBEDDING_MODEL", "gemini-embedding-2"),
         video_model=env("FTF_VIDEO_MODEL", "gemini-4-hydrogen"),
     )
