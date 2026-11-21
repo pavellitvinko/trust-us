@@ -142,7 +142,7 @@ A URL is captured by a headless browser into the **same bundle layout the organi
 | TLS and connection facts | Certificate issuer, validity, SANs; server IP; response headers |
 | **Cloaking differential** | The same URL fetched under two or three profiles: *ad click* (mobile, social referrer, original query string), *bare* (desktop, no referrer, no query), optionally *crawler* user agent. The views are compared with the pipeline's own text and DOM comparators; a large difference is recorded as a cloaking observation and each variant is kept as its own view. |
 
-Safeguards: an ephemeral browser context per capture; downloads blocked; no form is ever submitted and nothing is typed; tokens and cookies in the HAR are redacted before storage; capture runs inside the container only. A dead domain produces a view whose page layers are *not observable*, with DNS and registration layers still filled — which is the normal case for this material, not an error.
+Safeguards: an ephemeral browser context per capture; downloads blocked; no form is ever submitted and nothing is typed; capture runs inside the container only. Tokens and cookies in the HAR are stored as captured: secrets found in material are evidence like any other identifier (team decision 2026-11-21). A dead domain produces a view whose page layers are *not observable*, with DNS and registration layers still filled — which is the normal case for this material, not an error.
 
 Cloakers often filter by country. Captures are expected to run from a Polish network, so this should not hide the offer page; the capture record notes the egress used, and a proxy setting exists for running elsewhere.
 
