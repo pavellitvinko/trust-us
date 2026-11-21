@@ -53,6 +53,15 @@ def reencode(data: bytes, quality: int = 60) -> bytes:
     return out.getvalue()
 
 
+def _pixel() -> bytes:
+    buf = io.BytesIO()
+    Image.new("RGB", (1, 1), (255, 255, 255)).save(buf, "GIF")
+    return buf.getvalue() + b"\x00" * 64  # padded past the size floor, still a 1x1 image
+
+
+PIXEL_GIF = _pixel()
+
+
 def distance(a: str, b: str) -> int:
     return (int(a, 16) ^ int(b, 16)).bit_count()
 
@@ -81,6 +90,21 @@ CODE = b"body { color: red; } " * 10
     ],
 )  # fmt: skip
 def test_classify(name, data, role):
+    assert classify(name, data) is role
+
+
+@pytest.mark.parametrize(
+    ("name", "data", "role"),
+    [
+        ("1.jpg", picture(fmt="JPEG"), Role.CONTENT),  # case 47 numbers its photos
+        ("4.webp", picture(fmt="WEBP"), Role.CONTENT),
+        ("2012165449475163", CODE * 20, Role.NOISE),  # pixel config saved under the pixel ID
+        ("1.gif", PIXEL_GIF, Role.NOISE),  # a tracking pixel
+        ("reaction-2020alphab.png", picture(), Role.CONTENT),  # not React
+        ("react-dom.production.min.js", CODE, Role.NOISE),
+    ],
+)
+def test_numeric_names(name, data, role):
     assert classify(name, data) is role
 
 
@@ -185,6 +209,30 @@ def test_har_body_matches_the_saved_file(store, tmp_path):
     obs = run_page(store, root)
     assert values(obs, "asset.sha256.content") == [hashlib.sha256(hero).hexdigest()]
     assert obs[0].source.locator.startswith("har:entries[")
+
+
+def test_same_bytes_get_one_role(store, tmp_path):
+    """A logo saved as `publisher-logo.png` and captured in the HAR as `image.png` is an icon."""
+    logo = picture(6, fmt="PNG")
+    har = [
+        {
+            "request": {"url": "https://www.shop.example.org/L1/image.png"},
+            "response": {
+                "status": 200,
+                "content": {
+                    "mimeType": "image/png",
+                    "encoding": "base64",
+                    "text": base64.b64encode(logo).decode(),
+                },
+            },
+        }
+    ]
+    root = page(tmp_path / "v", har=har)
+    write_files(root, {"publisher-logo.png": logo})
+    obs = run_page(store, root)
+    roles = {o.namespace for o in obs if o.namespace.startswith("asset.sha256.")}
+    assert roles == {"asset.sha256.icon"}
+    assert not values(obs, "asset.phash")  # an icon is not linkable content
 
 
 def test_image_view_gets_a_phash(store, tmp_path):

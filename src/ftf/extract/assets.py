@@ -31,13 +31,15 @@ MAX_BYTES = 20 << 20
 MAX_PIXELS = 50_000_000
 MIN_BYTES = 64  # smaller files are pixels and placeholders
 ICON_SIDE = 64
+PIXEL_SIDE = 2  # tracking pixels are 1x1, sometimes 2x2
+PLATFORM_ID_DIGITS = 12  # a file named by an ad-platform ID (pixel config), not `1.jpg`
 
 _RASTER = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".avif")
 _VECTOR_ICON = (".svg", ".ico")
 _CODE = (".css", ".js", ".mjs")
-_LIBRARY = re.compile(
-    r"jquery|bootstrap|swiper|slick|lodash|react|vue|gsap|font-?awesome|popper|"
-    r"fbevents|gtag|gtm|analytics|recaptcha|sdk\.js|polyfill",
+_LIBRARY = re.compile(  # whole words only: `reaction-2020.png` is not React
+    r"(?<![a-z])(?:jquery|bootstrap|swiper|slick|lodash|react|vue|gsap|font-?awesome|popper|"
+    r"fbevents|gtag|gtm|analytics|recaptcha|sdk|polyfill)(?![a-z])",
     re.IGNORECASE,
 )
 _STUB = re.compile(r"^saved_resource(\(\d+\))?\.html?$", re.IGNORECASE)
@@ -51,6 +53,10 @@ class Role(StrEnum):
     ICON = "icon"
     CODE = "code"
     NOISE = "noise"
+
+
+# When sources disagree about one file, the least linkable role wins.
+_PRECEDENCE = {Role.NOISE: 0, Role.ICON: 1, Role.CODE: 2, Role.AVATAR: 3, Role.CONTENT: 4}
 
 
 def clean_name(name: str) -> str:
@@ -80,7 +86,7 @@ def classify(name: str, data: bytes, host: str = "", mime: str = "") -> Role:
         or (host and is_noise_host(host))
         or _STUB.match(clean)
         or ext in (".html", ".htm")
-        or stem.isdigit()  # tracking pixels saved under the pixel ID
+        or (stem.isdigit() and len(stem) >= PLATFORM_ID_DIGITS)
         or _LIBRARY.search(clean)
     ):
         return Role.NOISE
@@ -91,6 +97,8 @@ def classify(name: str, data: bytes, host: str = "", mime: str = "") -> Role:
     img = _image(data) if ext in _RASTER or mime.startswith("image/") or not ext else None
     if img is None:
         return Role.NOISE  # neither code nor a readable image: fonts, data, junk
+    if img.width <= PIXEL_SIDE and img.height <= PIXEL_SIDE:
+        return Role.NOISE
     if img.width <= ICON_SIDE and img.height <= ICON_SIDE:
         return Role.ICON
     if _AVATAR_NAME.search(stem):
@@ -107,6 +115,8 @@ def phash(data: bytes) -> str | None:
         img.seek(0)  # first frame of an animation
     except EOFError:
         pass
+    if img.mode in ("P", "PA"):  # palette transparency must go through RGBA first
+        img = img.convert("RGBA")
     return str(imagehash.phash(img.convert("L")))
 
 
@@ -198,14 +208,19 @@ class AssetHashes:
 
         m.run_steps([image_view, resources, har_bodies])
 
-        # One role per file: a library saved into _files/ is still a library if the HAR
-        # shows it came from a public CDN.
-        noise = {hashlib.sha256(d).hexdigest() for _, d, _, r in found if r is Role.NOISE}
-        hashes: dict[str, str | None] = {}
-        for name, data, source, role in found:
+        # One role per file, whatever name each source gives it. A library saved into
+        # _files/ is still a library if the HAR shows a public CDN served it, and a file
+        # one source names as a logo is not linkable content under another name.
+        role_of: dict[str, Role] = {}
+        for _, data, _, role in found:
             digest = hashlib.sha256(data).hexdigest()
-            if digest in noise:
-                role = Role.NOISE
+            current = role_of.get(digest)
+            if current is None or _PRECEDENCE[role] < _PRECEDENCE[current]:
+                role_of[digest] = role
+        hashes: dict[str, str | None] = {}
+        for name, data, source, _ in found:
+            digest = hashlib.sha256(data).hexdigest()
+            role = role_of[digest]
             label = clean_name(name)
             signal = {Role.CODE: "D3", Role.AVATAR: "E12"}.get(role, "E1")
             emit(signal, f"asset.sha256.{role}", digest, source, raw=label)
