@@ -119,6 +119,7 @@ class HarRequest:
     resource_type: str
     mime: str
     file: str
+    response_headers: tuple[tuple[str, str], ...] = ()  # names lower-cased
 
     @property
     def source(self) -> Source:
@@ -365,6 +366,17 @@ def _har_request(index: int, entry: dict[str, Any], har: str) -> HarRequest | No
         resource_type=str(entry.get("_resourceType") or "").lower(),
         mime=str(content.get("mimeType") or "") if isinstance(content, dict) else "",
         file=har,
+        response_headers=_headers(response),
+    )
+
+
+def _headers(response: Any) -> tuple[tuple[str, str], ...]:
+    if not isinstance(response, dict) or not isinstance(response.get("headers"), list):
+        return ()
+    return tuple(
+        (str(h["name"]).strip().lower(), str(h.get("value") or "").strip())
+        for h in response["headers"]
+        if isinstance(h, dict) and h.get("name")
     )
 
 
