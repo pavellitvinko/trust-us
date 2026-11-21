@@ -22,7 +22,7 @@ and the interface are still to be built.
 
 Pattern discovery (architecture §6) includes a versioned library with stable IDs and
 merge/split history, embedding and clustering, pattern induction and matching, novelty
-tracking, and pattern-based playbook grouping. See [Pattern Library](PATTERN_LIBRARY.md).
+tracking, and pattern-based playbook evidence. See [Pattern Library](PATTERN_LIBRARY.md).
 
 ## Run locally
 

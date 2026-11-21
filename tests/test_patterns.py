@@ -1,358 +1,322 @@
-"""Tests for pattern discovery: induction, matching, novelty.
-
-These tests validate the core pattern library functionality:
-1. Clustering technique cards by embedding
-2. Generating pattern definitions via induction
-3. Judging views against patterns
-4. Tracking candidates for promotion
-5. Reproducibility across shuffled inputs
-"""
+"""Pattern stage tests. A fake model and fake vectors: nothing here touches the network."""
 
 import json
-import tempfile
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from dataclasses import dataclass
 
 import pytest
 
-from ftf.patterns import (
+from ftf.config import Settings
+from ftf.contracts import Incident, Observation, Source, State, View, ViewKind
+from ftf.layers.playbook import PatternMo
+from ftf.models import ModelResult
+from ftf.patterns import induction as ind
+from ftf.patterns import matching as mat
+from ftf.patterns.clustering import cluster_cards, gather_technique_cards
+from ftf.patterns.library import (
     ClusterResult,
+    LibraryVersion,
     PatternDefinition,
     PatternLibraryStore,
+    PatternMetadata,
     TechniqueCardForClustering,
-    cluster_cards,
-    cluster_cards_reproducible,
-    gather_technique_cards,
 )
-from ftf.patterns.library import PatternMetadata, LibraryVersion
-from ftf.patterns.matching import ViewPatternVector, PatternJudgement
-from ftf.patterns.novelty import CandidatePattern, NoveltyStore
+from ftf.patterns.novelty import NoveltyStore
+from ftf.registry import Context, load_plugins
+
+TEXT = "Znany inwestor poleca platformę. Oferta kończy się za 10 minut."
+
+
+def card(cid, campaign, view=None, name="Celebrity endorsement"):
+    return TechniqueCardForClustering(
+        card_name=name,
+        card_description=f"{name} used to build trust",
+        view_id=view or f"view-{cid}",
+        incident_id=f"incident-{campaign}",
+        source_text="",
+        card_id=cid,
+        campaign_id=campaign,
+    )
+
+
+def cluster(index, cards, centroid=(1.0, 0.0)):
+    return ClusterResult(cluster_id=index, cards=cards, centroid=list(centroid))
+
+
+def draft(ids, name="Celebrity endorsement", coherent=True):
+    return ind.InducedPattern(
+        coherent=coherent,
+        name=name,
+        description="A public figure is shown backing the offer.",
+        positive_card_ids=ids,
+        near_misses=["An anonymous testimonial"],
+    )
 
 
 @pytest.fixture
-def tmp_library(tmp_path):
-    """Create a temporary pattern library store."""
-    lib_dir = tmp_path / "library"
-    lib_dir.mkdir()
-    return PatternLibraryStore(lib_dir)
+def settings(tmp_path):
+    return Settings(
+        data_dir=tmp_path / "data",
+        openai_api_key="",
+        gemini_api_key="",
+        openai_model="openai-test",
+        embedding_model="embed-test",
+        video_model="video-test",
+    )
 
 
 @pytest.fixture
-def tmp_novelty(tmp_path):
-    """Create a temporary novelty store."""
-    nov_dir = tmp_path / "novelty"
-    nov_dir.mkdir()
-    return NoveltyStore(nov_dir)
+def library(tmp_path):
+    return PatternLibraryStore(tmp_path / "library")
 
 
-class TestTechniqueCardClustering:
-    """Test clustering of technique cards."""
+def fake_reader(monkeypatch, answer):
+    calls = []
 
-    def test_cluster_empty_list(self):
-        """Empty card list produces empty clusters."""
-        clusters = cluster_cards([])
-        assert clusters == []
+    def read(task, version, system, content, schema, **kwargs):
+        calls.append(task)
+        value = answer(task, content) if callable(answer) else answer
+        return value if isinstance(value, ModelResult) else ModelResult.ok(value)
 
-    def test_cluster_single_card(self):
-        """Single card produces one cluster."""
-        card = TechniqueCardForClustering(
-            card_name="Celebrity endorser",
-            card_description="A famous person recommends the product",
+    monkeypatch.setattr("ftf.models.read_structured", read)
+    return calls
+
+
+def test_plugins_load_and_pattern_mo_is_the_only_pattern_layer():
+    from ftf.registry import layers
+
+    load_plugins()
+    assert layers.get("pattern.mo").__class__ is PatternMo
+
+
+def test_clustering_ignores_input_order():
+    cards = [card("a", "c1"), card("b", "c2"), card("c", "c3", name="Countdown")]
+    vectors = [[1.0, 0.0], [0.99, 0.05], [0.0, 1.0]]
+    first = cluster_cards(cards, vectors)
+    second = cluster_cards(cards[::-1], vectors[::-1])
+    shape = [[c.card_id for c in x.cards] for x in first]
+    assert shape == [[c.card_id for c in x.cards] for x in second]
+    assert shape == [["a", "b"], ["c"]]
+
+
+def test_gather_reads_the_real_card_namespace(store):
+    view = View(view_id="v1", incident_id="i", kind=ViewKind.PAGE, label="p")
+    store.put_incident(Incident(incident_id="i", root="."), [], [view])
+    rows = [
+        Observation(
             view_id="v1",
-            incident_id="1",
-            source_text="The celebrity says this is great",
-        )
-        clusters = cluster_cards([card], n_clusters=1)
-        assert len(clusters) == 1
-        assert len(clusters[0].cards) == 1
-        assert clusters[0].cards[0].card_name == "Celebrity endorser"
+            signal_id="H",
+            namespace="technique.card",
+            value={"name": "Countdown", "description": "Timer", "evidence": [{"quote": "x"}]},
+            extractor="perception.technique",
+            version="1",
+        ),
+        Observation(
+            view_id="v1",
+            signal_id="H",
+            namespace="technique.card",
+            raw="refusal",
+            state=State.NOT_OBSERVABLE,
+            extractor="perception.technique",
+            version="1",
+        ),
+    ]
+    store.put_observations("v1", "perception.technique", rows)
+    cards = gather_technique_cards(store, campaign_of={"v1": "c1"})
+    assert [(c.card_name, c.campaign_id) for c in cards] == [("Countdown", "c1")]
 
-    def test_cluster_multiple_cards(self):
-        """Multiple cards are grouped by similarity."""
-        cards = [
-            TechniqueCardForClustering(
-                card_name="Celebrity endorser",
-                card_description="A famous person recommends the product",
-                view_id=f"v{i}",
-                incident_id=str(i),
-                source_text="A celebrity",
-            )
-            for i in range(3)
-        ]
-        cards.extend(
-            [
-                TechniqueCardForClustering(
-                    card_name="Scarcity claim",
-                    card_description="Only a few items left in stock",
-                    view_id=f"v{i}",
-                    incident_id=str(i),
-                    source_text="Limited stock",
-                )
-                for i in range(3, 5)
-            ]
-        )
 
-        clusters = cluster_cards(cards, n_clusters=2)
-        assert len(clusters) >= 1  # at least one cluster
-        assert len([c for cluster in clusters for c in cluster.cards]) == len(cards)
+def test_one_campaign_across_two_folders_is_only_a_candidate(library, settings, monkeypatch):
+    calls = fake_reader(monkeypatch, draft(["a", "b"]))
+    same = cluster(0, [card("a", "campaign-1"), card("b", "campaign-1")])
+    result = ind.run_induction(library, [same], settings=settings)
+    assert calls == []
+    assert result.version is None
+    assert result.reason == "no_patterns"
+    assert result.candidates == [same]
 
-    def test_cluster_reproducibility(self):
-        """Two runs on same card set produce identical clusters."""
-        cards = [
-            TechniqueCardForClustering(
-                card_name=f"Technique {i % 3}",
-                card_description=f"Description for technique {i % 3}",
-                view_id=f"v{i}",
-                incident_id=str(i // 2),
-                source_text=f"Text {i}",
-            )
-            for i in range(10)
-        ]
 
-        # First run
-        clusters1 = cluster_cards_reproducible(cards, seed=42)
+def test_two_independent_campaigns_enter_the_library(library, settings, monkeypatch):
+    fake_reader(monkeypatch, draft(["a", "b"]))
+    found = cluster(0, [card("a", "c1"), card("b", "c2")])
+    result = ind.run_induction(library, [found], settings=settings)
+    assert [p.name for p in result.version.patterns] == ["Celebrity endorsement"]
+    assert len(result.version.patterns[0].positive_examples) == 2
 
-        # Shuffle cards
-        import random
 
-        shuffled = cards.copy()
-        random.shuffle(shuffled)
+@pytest.mark.parametrize("ids", [["invented", "other"], ["a"]])
+def test_uncited_or_one_campaign_evidence_is_rejected(library, settings, monkeypatch, ids):
+    fake_reader(monkeypatch, draft(ids))
+    found = cluster(0, [card("a", "c1"), card("b", "c2")])
+    result = ind.run_induction(library, [found], settings=settings)
+    assert result.version is None
+    assert result.candidates == [found]
 
-        # Second run on shuffled input
-        clusters2 = cluster_cards_reproducible(shuffled, seed=42)
 
-        # Same cards should be in same clusters (order may differ)
-        def cluster_signature(clusters):
-            return sorted(
-                [
-                    tuple(sorted((c.view_id, c.card_name) for c in cluster.cards))
-                    for cluster in clusters
-                ]
-            )
+@pytest.mark.parametrize("reason", ["no_key", "timeout", "schema", "error"])
+def test_model_failure_never_writes_a_partial_library(library, settings, monkeypatch, reason):
+    fake_reader(monkeypatch, ModelResult.not_observable(reason))
+    found = cluster(0, [card("a", "c1"), card("b", "c2")])
+    result = ind.run_induction(library, [found], settings=settings)
+    assert (result.version, result.reason) == (None, reason)
+    assert library.latest_version() is None
 
-        assert cluster_signature(clusters1) == cluster_signature(clusters2)
 
-    def test_centroid_computation(self):
-        """Cluster centroid is the mean of card embeddings."""
-        cards = [
-            TechniqueCardForClustering(
-                card_name="Card A",
-                card_description="Description A",
+def test_ids_stay_stable_and_splits_are_recorded(library, settings, monkeypatch):
+    fake_reader(monkeypatch, draft(["a", "b"]))
+    first = ind.run_induction(
+        library, [cluster(0, [card("a", "c1"), card("b", "c2")])], settings=settings
+    ).version
+    library.save_version(first)
+    original = first.patterns[0].pattern_id
+
+    def answer(task, content):
+        ids = [c["id"] for c in json.loads(content)["cards"]]
+        return draft(ids, name=f"Variant {ids[0]}")
+
+    fake_reader(monkeypatch, answer)
+    big = cluster(0, [card("a", "c1"), card("b", "c2"), card("d", "c3")], (1.0, 0.0))
+    small = cluster(1, [card("e", "c1"), card("f", "c2")], (0.99, 0.05))
+    second = ind.run_induction(library, [big, small], settings=settings).version
+    kept = next(p for p in second.patterns if p.pattern_id == original)
+    assert len(second.patterns) == 2
+    assert kept.metadata.created_in_version == first.version_id
+    assert len(kept.metadata.split_into) == 1
+
+
+def test_same_input_does_not_create_a_new_version(library, settings, monkeypatch):
+    calls = fake_reader(monkeypatch, draft(["a", "b"]))
+    clusters = [cluster(0, [card("a", "c1"), card("b", "c2")])]
+    library.save_version(ind.run_induction(library, clusters, settings=settings).version)
+    count = len(calls)
+    assert ind.run_induction(library, clusters, settings=settings).unchanged
+    assert len(calls) == count
+
+
+def test_novelty_needs_two_campaigns_and_logs_promotion(tmp_path):
+    novelty = NoveltyStore(tmp_path / "novelty")
+    novelty.sync([cluster(0, [card("a", "c1"), card("b", "c1")])], set())
+    assert [c.promotion_ready for c in novelty.candidates().values()] == [False]
+    assert novelty.sync([], {"a"}) == {"candidates": 0, "promoted": 1}
+
+
+@dataclass
+class Embedded:
+    vector: list
+
+
+def pattern(pid="pattern.1_x", centroid=(1.0, 0.0)):
+    return PatternDefinition(
+        pattern_id=pid,
+        name="Countdown",
+        description="Time pressure",
+        centroid=list(centroid),
+        metadata=PatternMetadata(created_in_version="v1", last_seen_in_version="v1"),
+    )
+
+
+VERSION = LibraryVersion(version_id="v0001", created_at="now", patterns=[pattern()])
+
+
+@pytest.fixture
+def ctx(store):
+    view = View(view_id="v1", incident_id="i", kind=ViewKind.PAGE, label="p", primary="p.html")
+    store.put_incident(Incident(incident_id="i", root="."), [], [view])
+    store.put_observations(
+        "v1",
+        "page.text",
+        [
+            Observation(
                 view_id="v1",
-                incident_id="1",
-                source_text="A",
-            ),
-            TechniqueCardForClustering(
-                card_name="Card B",
-                card_description="Description B",
-                view_id="v2",
-                incident_id="2",
-                source_text="B",
-            ),
+                signal_id="F1",
+                namespace="page.clean_text",
+                value=TEXT,
+                source=Source(file="p.html"),
+                extractor="page.text",
+                version="1",
+            )
+        ],
+    )
+    return Context(store)
+
+
+def judged(state, quote=None, confidence=0.9):
+    return mat.PatternJudgements(
+        judgements=[
+            mat.PatternJudgement(
+                pattern_id="pattern.1_x", state=state, confidence=confidence, quote=quote
+            )
         ]
-
-        clusters = cluster_cards(cards, n_clusters=1)
-        assert len(clusters[0].centroid) > 0  # has an embedding
+    )
 
 
-class TestPatternLibraryStore:
-    """Test pattern library persistence and versioning."""
+def fake_embed(monkeypatch, failure=None):
+    def embed(texts, task, **kwargs):
+        if failure:
+            return [ModelResult.not_observable(failure) for _ in texts]
+        return [ModelResult.ok(Embedded([1.0, 0.0])) for _ in texts]
 
-    def test_save_and_load_version(self, tmp_library):
-        """Save and load a library version."""
-        pattern = PatternDefinition(
-            pattern_id="pattern.1_celebrity",
-            name="Celebrity Endorser",
-            description="A famous person recommends or uses the product",
-            positive_examples=[{"card_name": "Celebrity endorser", "evidence": "text quote"}],
-        )
-
-        version = LibraryVersion(
-            version_id="v1.0.0",
-            created_at="2026-11-21T10:00:00",
-            patterns=[pattern],
-        )
-
-        tmp_library.save_version(version)
-        loaded = tmp_library.load_version("v1.0.0")
-
-        assert loaded is not None
-        assert loaded.version_id == "v1.0.0"
-        assert len(loaded.patterns) == 1
-        assert loaded.patterns[0].name == "Celebrity Endorser"
-
-    def test_latest_version(self, tmp_library):
-        """latest_version returns the most recent version."""
-        v1 = LibraryVersion(
-            version_id="v1.0.0",
-            created_at="2026-11-21T10:00:00",
-            patterns=[],
-        )
-        v2 = LibraryVersion(
-            version_id="v1.0.1",
-            created_at="2026-11-21T11:00:00",
-            patterns=[],
-        )
-
-        tmp_library.save_version(v1)
-        tmp_library.save_version(v2)
-
-        latest = tmp_library.latest_version()
-        assert latest is not None
-        assert latest.version_id == "v1.0.1"
-
-    def test_pattern_by_id(self, tmp_library):
-        """pattern_by_id retrieves a pattern by ID."""
-        pattern1 = PatternDefinition(
-            pattern_id="pattern.1_celebrity",
-            name="Celebrity",
-            description="Celebrity endorsement",
-        )
-        pattern2 = PatternDefinition(
-            pattern_id="pattern.2_scarcity",
-            name="Scarcity",
-            description="Limited availability claim",
-        )
-
-        version = LibraryVersion(
-            version_id="v1.0.0",
-            created_at="2026-11-21T10:00:00",
-            patterns=[pattern1, pattern2],
-        )
-
-        tmp_library.save_version(version)
-
-        p = tmp_library.pattern_by_id("pattern.2_scarcity", "v1.0.0")
-        assert p is not None
-        assert p.name == "Scarcity"
+    monkeypatch.setattr("ftf.models.embed", embed)
 
 
-class TestNoveltyStore:
-    """Test candidate pattern tracking and promotion."""
-
-    def test_add_candidate(self, tmp_novelty):
-        """Add a technique card as a candidate pattern."""
-        card = TechniqueCardForClustering(
-            card_name="New Technique",
-            card_description="A technique we have not seen before",
-            view_id="v1",
-            incident_id="1",
-            source_text="Text",
-        )
-
-        candidate = tmp_novelty.add_candidate(card, "v1", "1")
-
-        assert candidate.card_name == "New Technique"
-        assert candidate.first_seen_incident == "1"
-        assert candidate.first_seen_view == "v1"
-        assert not candidate.promotion_ready
-
-    def test_candidate_seen_twice_independent(self, tmp_novelty):
-        """Candidate becomes promotion-ready when seen in 2+ independent incidents."""
-        card = TechniqueCardForClustering(
-            card_name="Repeated Technique",
-            card_description="This technique appeared in multiple incidents",
-            view_id="v1",
-            incident_id="1",
-            source_text="Text",
-        )
-
-        # First sighting
-        c1 = tmp_novelty.add_candidate(card, "v1", "1")
-        assert not c1.promotion_ready
-
-        # Second sighting in different incident
-        c2 = tmp_novelty.add_candidate(card, "v2", "2")
-        assert c2.promotion_ready
-
-    def test_ready_for_promotion(self, tmp_novelty):
-        """ready_for_promotion returns candidates seen in 2+ incidents."""
-        # Add candidate seen once
-        card1 = TechniqueCardForClustering(
-            card_name="Technique A",
-            card_description="Once seen",
-            view_id="v1",
-            incident_id="1",
-            source_text="A",
-        )
-        tmp_novelty.add_candidate(card1, "v1", "1")
-
-        # Add candidate seen twice
-        card2 = TechniqueCardForClustering(
-            card_name="Technique B",
-            card_description="Seen twice in different incidents",
-            view_id="v2",
-            incident_id="1",
-            source_text="B",
-        )
-        tmp_novelty.add_candidate(card2, "v2", "1")
-        tmp_novelty.add_candidate(card2, "v3", "2")
-
-        ready = tmp_novelty.ready_for_promotion()
-        assert len(ready) == 1
-        assert ready[0].card_name == "Technique B"
-
-    def test_promote_candidate(self, tmp_novelty):
-        """promote_candidate removes from active candidates."""
-        card = TechniqueCardForClustering(
-            card_name="To Promote",
-            card_description="Ready to be promoted",
-            view_id="v1",
-            incident_id="1",
-            source_text="Text",
-        )
-
-        c = tmp_novelty.add_candidate(card, "v1", "1")
-        candidate_id = c.candidate_id
-
-        tmp_novelty.promote_candidate(candidate_id)
-
-        # Should no longer appear in candidates
-        candidates = tmp_novelty._load_candidates()
-        assert candidate_id not in candidates
-
-        # Should appear in promoted log
-        promoted = json.loads(tmp_novelty.promoted_path.read_text())
-        assert any(p["candidate_id"] == candidate_id for p in promoted)
+def scores(ctx):
+    return [o for o in ctx.store.observations("v1") if o.namespace == "pattern.score"]
 
 
-class TestPatternDefinition:
-    """Test pattern definition metadata."""
-
-    def test_pattern_with_metadata(self):
-        """PatternDefinition includes discovery metadata."""
-        metadata = PatternMetadata(
-            created_in_version="v1.0.0",
-            last_seen_in_version="v1.0.1",
-        )
-
-        pattern = PatternDefinition(
-            pattern_id="pattern.1_celebrity",
-            name="Celebrity",
-            description="Celebrity endorsement",
-            metadata=metadata,
-        )
-
-        assert pattern.metadata.created_in_version == "v1.0.0"
-        assert pattern.metadata.last_seen_in_version == "v1.0.1"
-
-    def test_pattern_analyst_edit(self):
-        """Analyst can rename a pattern."""
-        metadata = PatternMetadata(
-            created_in_version="v1.0.0",
-            last_seen_in_version="v1.0.1",
-            analyst_renamed_from="Old Name",
-        )
-
-        pattern = PatternDefinition(
-            pattern_id="pattern.1_celebrity",
-            name="Celebrity Endorser (Revised)",
-            description="...",
-            metadata=metadata,
-        )
-
-        assert pattern.metadata.analyst_renamed_from == "Old Name"
+def test_verified_match_reaches_pattern_mo(ctx, monkeypatch):
+    fake_embed(monkeypatch)
+    fake_reader(monkeypatch, judged("present", "kończy się za 10 minut"))
+    mat.run_matching(ctx, VERSION)
+    load_plugins()
+    fingerprint = PatternMo().build(ctx.store.get_view("v1"), ctx.store.observations("v1"))
+    assert fingerprint.payload == [{"ns": "pattern", "value": "pattern.1_x", "score": 0.9}]
 
 
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+@pytest.mark.parametrize(
+    "answer",
+    [
+        judged("present", "cytat, którego nie ma"),
+        judged("uncertain"),
+        mat.PatternJudgements(judgements=[]),
+    ],
+)
+def test_unverified_judgement_is_not_observable(ctx, monkeypatch, answer):
+    fake_embed(monkeypatch)
+    fake_reader(monkeypatch, answer)
+    mat.run_matching(ctx, VERSION)
+    assert [o.state for o in scores(ctx)] == [State.NOT_OBSERVABLE]
+    assert PatternMo().build(ctx.store.get_view("v1"), ctx.store.observations("v1")) is None
+
+
+@pytest.mark.parametrize("step", ["embed", "read"])
+@pytest.mark.parametrize("reason", ["no_key", "refusal", "timeout"])
+def test_model_failure_never_becomes_absent(ctx, monkeypatch, step, reason):
+    fake_embed(monkeypatch, reason if step == "embed" else None)
+    fake_reader(
+        monkeypatch,
+        ModelResult.not_observable(reason) if step == "read" else judged("absent"),
+    )
+    summary = mat.run_matching(ctx, VERSION)
+    assert summary["matched"] == 0
+    assert State.ABSENT not in {o.state for o in scores(ctx)}
+
+
+def test_passing_failure_keeps_the_earlier_vector(ctx, monkeypatch):
+    fake_embed(monkeypatch)
+    fake_reader(monkeypatch, judged("present", "kończy się za 10 minut"))
+    mat.run_matching(ctx, VERSION)
+    fake_reader(monkeypatch, ModelResult.not_observable("timeout"))
+    assert mat.run_matching(ctx, VERSION)["kept"] == 1
+    assert [o.state for o in scores(ctx)] == [State.PRESENT]
+
+
+def test_view_without_text_is_not_observable(store, monkeypatch):
+    view = View(view_id="v1", incident_id="i", kind=ViewKind.IMAGE, label="p")
+    store.put_incident(Incident(incident_id="i", root="."), [], [view])
+    fake_embed(monkeypatch)
+    fake_reader(monkeypatch, judged("absent"))
+    summary = mat.run_matching(Context(store), VERSION)
+    assert summary["not_observable"] == 1
+
+
+def test_pattern_evidence_alone_never_merges_a_campaign():
+    assert PatternMo.tier.name == "PLAYBOOK"

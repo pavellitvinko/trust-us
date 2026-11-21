@@ -9,7 +9,6 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -46,6 +45,7 @@ class PatternDefinition(BaseModel):
     positive_examples: list[dict[str, Any]] = Field(default_factory=list)  # {card_name, evidence}
     near_misses: list[dict[str, Any]] = Field(default_factory=list)  # similar but different
     related_patterns: list[str] = Field(default_factory=list)  # pattern IDs of near-neighbours
+    centroid: list[float] = Field(default_factory=list)  # keeps IDs stable across versions
     metadata: PatternMetadata | None = None
 
 
@@ -93,9 +93,13 @@ class PatternLibraryStore:
     def save_version(self, version: LibraryVersion) -> None:
         """Write a library version and update the index."""
         path = self.versions_dir / f"{version.version_id}.json"
-        path.write_text(json.dumps(version.model_dump(), indent=2), encoding="utf-8")
+        temp = path.with_suffix(".tmp")
+        temp.write_text(json.dumps(version.model_dump(), ensure_ascii=False), encoding="utf-8")
+        temp.replace(path)
         self._index = None  # invalidate cache
-        log.info(f"saved pattern library version {version.version_id} with {len(version.patterns)} patterns")
+        log.info(
+            f"saved pattern library version {version.version_id} with {len(version.patterns)} patterns"
+        )
 
     def load_version(self, version_id: str) -> LibraryVersion | None:
         """Load a specific library version."""
@@ -110,14 +114,16 @@ class PatternLibraryStore:
         if not versions:
             return None
         # Sort by stem (version ID), which works for semantic versions
-        latest_stem = sorted(p.stem for p in versions)[-1]
+        latest_stem = max(p.stem for p in versions)
         return self.load_version(latest_stem)
 
     def list_versions(self) -> list[str]:
         """List all version IDs in order."""
         return sorted(p.stem for p in self.versions_dir.glob("v*.json"))
 
-    def pattern_by_id(self, pattern_id: str, version_id: str | None = None) -> PatternDefinition | None:
+    def pattern_by_id(
+        self, pattern_id: str, version_id: str | None = None
+    ) -> PatternDefinition | None:
         """Find a pattern in a specific version or the latest."""
         if version_id is None:
             v = self.latest_version()
@@ -139,6 +145,9 @@ class TechniqueCardForClustering:
     view_id: str
     incident_id: str
     source_text: str  # full text from which the card came
+    card_id: str = ""  # stable hash of the view and card name
+    campaign_id: str | None = None  # from the deterministic grouping; None counts for nothing
+    evidence: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass

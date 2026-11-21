@@ -1,146 +1,94 @@
-"""Pattern novelty tracking: candidates and promotion to library.
-
-Technique cards that match no library pattern are kept as candidates.
-When the same candidate appears in a second independent campaign,
-the next induction run promotes it to the library.
-"""
+"""Candidates: technique clusters not yet seen in two independent campaigns."""
 
 from __future__ import annotations
 
+import hashlib
 import json
-import logging
-from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field
 
-from .library import TechniqueCardForClustering
-
-log = logging.getLogger(__name__)
+from .library import ClusterResult
 
 
 class CandidatePattern(BaseModel):
-    """A technique card waiting for promotion to the library."""
+    """A technique waiting for a sighting in a second independent campaign."""
 
-    candidate_id: str  # hash of normalized card text
+    candidate_id: str
     card_name: str
     card_description: str
     first_seen_incident: str
     first_seen_view: str
-    first_seen_at: str  # ISO timestamp
-    seen_in: list[dict[str, Any]] = Field(default_factory=list)  # {incident, view, timestamp}
-    promotion_ready: bool = False  # True when seen in 2+ independent incidents
+    first_seen_at: str
+    seen_in: list[dict[str, Any]] = Field(default_factory=list)
+    promotion_ready: bool = False
+
+
+def _campaigns(candidate: CandidatePattern) -> set[str]:
+    return {s["campaign"] for s in candidate.seen_in if s.get("campaign")}
 
 
 class NoveltyStore:
-    """Persistent storage for candidate patterns and promotion history."""
+    """Active candidates and the log of those that reached the library."""
 
     def __init__(self, base_dir: Path):
         self.base_dir = Path(base_dir)
         self.base_dir.mkdir(parents=True, exist_ok=True)
         self.candidates_path = self.base_dir / "candidates.json"
         self.promoted_path = self.base_dir / "promoted.json"
-        self._candidates = None
 
-    def _load_candidates(self) -> dict[str, CandidatePattern]:
-        """Load candidates from disk."""
-        if self._candidates is not None:
-            return self._candidates
+    def candidates(self) -> dict[str, CandidatePattern]:
         if not self.candidates_path.exists():
             return {}
-        try:
-            data = json.loads(self.candidates_path.read_text(encoding="utf-8"))
-            return {k: CandidatePattern.model_validate(v) for k, v in data.items()}
-        except Exception as e:
-            log.warning(f"error loading candidates: {e}")
-            return {}
+        data = json.loads(self.candidates_path.read_text(encoding="utf-8"))
+        return {key: CandidatePattern.model_validate(value) for key, value in data.items()}
 
-    def _save_candidates(self, candidates: dict[str, CandidatePattern]) -> None:
-        """Write candidates to disk."""
-        data = {k: v.model_dump() for k, v in candidates.items()}
-        self.candidates_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-        self._candidates = candidates
+    def _write(self, path: Path, data: Any) -> None:
+        temp = path.with_suffix(".tmp")
+        temp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+        temp.replace(path)
 
-    def add_candidate(
-        self,
-        card: TechniqueCardForClustering,
-        view_id: str,
-        incident_id: str,
-    ) -> CandidatePattern:
-        """Record a technique card as a candidate pattern.
-
-        Args:
-            card: the technique card
-            view_id: view where it appeared
-            incident_id: incident ID
-
-        Returns:
-            The candidate pattern (new or existing).
-        """
-        import hashlib
-
-        # Normalize for hashing: lowercase, remove extra whitespace
-        normalized = " ".join(card.card_description.lower().split())
-        candidate_id = hashlib.sha256(normalized.encode()).hexdigest()[:12]
-
-        candidates = self._load_candidates()
-        now = datetime.now().isoformat()
-
-        if candidate_id not in candidates:
-            candidates[candidate_id] = CandidatePattern(
-                candidate_id=candidate_id,
-                card_name=card.card_name,
-                card_description=card.card_description,
-                first_seen_incident=incident_id,
-                first_seen_view=view_id,
-                first_seen_at=now,
+    def sync(self, clusters: list[ClusterResult], library_card_ids: set[str]) -> dict[str, int]:
+        """Replace active candidates. Earlier ones whose cards reached the library are logged."""
+        previous = self.candidates()
+        now = datetime.now(UTC).isoformat()
+        current: dict[str, CandidatePattern] = {}
+        for cluster in clusters:
+            ids = sorted(c.card_id for c in cluster.cards)
+            key = hashlib.sha256("|".join(ids).encode()).hexdigest()[:12]
+            first = cluster.cards[0]
+            earlier = previous.get(key)
+            candidate = CandidatePattern(
+                candidate_id=key,
+                card_name=first.card_name,
+                card_description=first.card_description,
+                first_seen_incident=first.incident_id,
+                first_seen_view=first.view_id,
+                first_seen_at=earlier.first_seen_at if earlier else now,
+                seen_in=[
+                    {
+                        "card": c.card_id,
+                        "incident": c.incident_id,
+                        "view": c.view_id,
+                        "campaign": c.campaign_id,
+                    }
+                    for c in cluster.cards
+                ],
             )
-
-        candidate = candidates[candidate_id]
-        # Add this sighting if not already recorded
-        if not any(
-            s["incident"] == incident_id and s["view"] == view_id for s in candidate.seen_in
-        ):
-            candidate.seen_in.append({
-                "incident": incident_id,
-                "view": view_id,
-                "timestamp": now,
-            })
-
-        # Check if promotion-ready: seen in 2+ different incidents
-        incidents_seen = set(s["incident"] for s in candidate.seen_in)
-        candidate.promotion_ready = len(incidents_seen) >= 2
-
-        self._save_candidates(candidates)
-        return candidate
-
-    def ready_for_promotion(self) -> list[CandidatePattern]:
-        """Return all candidates that have been seen twice independently."""
-        candidates = self._load_candidates()
-        return [c for c in candidates.values() if c.promotion_ready]
-
-    def promote_candidate(self, candidate_id: str) -> None:
-        """Move a candidate to the promoted list (before library insertion)."""
-        candidates = self._load_candidates()
-        if candidate_id not in candidates:
-            return
-
-        candidate = candidates.pop(candidate_id)
-        self._save_candidates(candidates)
-
-        # Append to promoted log
+            candidate.promotion_ready = len(_campaigns(candidate)) >= 2
+            current[key] = candidate
         promoted = []
-        if self.promoted_path.exists():
-            try:
-                promoted = json.loads(self.promoted_path.read_text(encoding="utf-8"))
-            except Exception:
-                pass
-        promoted.append({
-            "candidate_id": candidate_id,
-            "promoted_at": datetime.now().isoformat(),
-            "candidate": candidate.model_dump(),
-        })
-        self.promoted_path.write_text(json.dumps(promoted, indent=2), encoding="utf-8")
-        log.info(f"promoted candidate {candidate_id}: {candidate.card_name}")
+        for key, candidate in previous.items():
+            if key not in current and {s.get("card") for s in candidate.seen_in} & library_card_ids:
+                promoted.append(
+                    {"candidate_id": key, "promoted_at": now, "candidate": candidate.model_dump()}
+                )
+        if promoted:
+            log = []
+            if self.promoted_path.exists():
+                log = json.loads(self.promoted_path.read_text(encoding="utf-8"))
+            self._write(self.promoted_path, log + promoted)
+        self._write(self.candidates_path, {k: v.model_dump() for k, v in current.items()})
+        return {"candidates": len(current), "promoted": len(promoted)}

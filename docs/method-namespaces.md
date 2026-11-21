@@ -37,7 +37,7 @@ verified HTTP redirect or exact visit sequence.
 
 Still missing on the sample and read from fixtures only: `asset.sha256`, `image.phash`,
 `creative.phash`, `video.frame_phash`, `dom.class`, `firstparty.sha256`, `code.evasion_filter`,
-`pattern.score`, `expect.element`.
+`expect.element`. `pattern.score` is written by `ftf patterns discover`.
 
 ## Identity tier (T1): supports *same campaign*
 

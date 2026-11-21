@@ -1,206 +1,120 @@
-"""Pattern discovery: embed technique cards and cluster them.
-
-Uses the embedding model to vectorize technique card descriptions, then clusters
-using k-means or similar. Clusters are then sent to the induction model.
-"""
+"""Gather technique cards, embed them through the gateway and cluster them deterministically."""
 
 from __future__ import annotations
 
-import logging
-import math
-from pathlib import Path
+import hashlib
+from typing import Any
 
 import numpy as np
-from sklearn.cluster import KMeans
-from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import AgglomerativeClustering
 
 from ..config import Settings
-from ..contracts import Observation, State
+from ..contracts import State
 from .library import ClusterResult, TechniqueCardForClustering
 
-log = logging.getLogger(__name__)
+CARD_NAMESPACE = "technique.card"
+DISTANCE_THRESHOLD = 0.30  # cosine distance; average linkage
 
 
-def embed_text(text: str, model_name: str, settings: Settings | None = None) -> list[float] | None:
-    """Embed a text string using the configured embedding model.
-
-    Args:
-        text: text to embed
-        model_name: "embed" for the main embedder
-        settings: app config (optional for testing)
-
-    Returns:
-        Embedding vector, or None if the model is not configured.
-    """
-    # TODO: integrate with the actual embedding API (Google Gemini or similar)
-    # For now, return a mock embedding based on text hash for deterministic testing
-    import hashlib
-
-    h = hashlib.sha256(text.encode()).digest()
-    seed = int.from_bytes(h[:8], "big")
-    rng = np.random.RandomState(seed % 2**31)
-    return rng.randn(768).tolist()
+def card_id(view_id: str, name: str) -> str:
+    return hashlib.sha256(f"{view_id}|{name}".encode()).hexdigest()[:12]
 
 
 def gather_technique_cards(
-    store,
-    view_ids: list[str] | None = None,
+    store, view_ids: list[str] | None = None, campaign_of: dict[str, str] | None = None
 ) -> list[TechniqueCardForClustering]:
-    """Gather all technique cards from observations.
-
-    Args:
-        store: data store
-        view_ids: if provided, only cards from these views; else all cards
-
-    Returns:
-        List of cards ready for embedding.
-    """
+    """Verified cards under the namespace written by `perception.techniques`, in stable order."""
+    wanted = None if view_ids is None else set(view_ids)
     cards = []
+    for view in store.views():
+        if wanted is not None and view.view_id not in wanted:
+            continue
+        for o in store.observations(view.view_id):
+            if o.namespace != CARD_NAMESPACE or o.state is not State.PRESENT:
+                continue
+            if not isinstance(o.value, dict):
+                continue
+            name, description = o.value.get("name"), o.value.get("description")
+            if not name or not description:
+                continue
+            cards.append(
+                TechniqueCardForClustering(
+                    card_name=name,
+                    card_description=description,
+                    view_id=view.view_id,
+                    incident_id=view.incident_id,
+                    source_text=description,
+                    card_id=card_id(view.view_id, name),
+                    campaign_id=(campaign_of or {}).get(view.view_id),
+                    evidence=list(o.value.get("evidence") or []),
+                )
+            )
+    return sorted(cards, key=lambda c: c.card_id)
 
-    if view_ids is None:
-        # Get all views
-        all_views = []
-        for incident in store.incidents():
-            all_views.extend(store.views(incident.incident_id))
-        view_ids = [v.view_id for v in all_views]
 
-    for view_id in view_ids:
-        # Find all technique card observations for this view
-        obs_list = store.observations(view_id)
-        for obs in obs_list:
-            if obs.namespace == "technique.card" and obs.state == State.PRESENT:
-                # Parse the card JSON from the observation value
-                try:
-                    if isinstance(obs.value, dict):
-                        card = obs.value
-                    else:
-                        import json
+def embed_cards(
+    cards: list[TechniqueCardForClustering],
+    *,
+    settings: Settings | None = None,
+    client: Any = None,
+) -> tuple[list[TechniqueCardForClustering], list[list[float]], dict[str, int]]:
+    """Embedded cards and vectors, plus how many failed for each reason."""
+    from ..models import EmbedTask, embed
 
-                        card = json.loads(obs.value) if isinstance(obs.value, str) else obs.value
+    results = embed(
+        [f"{c.card_name}: {c.card_description}" for c in cards],
+        EmbedTask.CLUSTERING,
+        settings=settings,
+        client=client,
+    )
+    kept, vectors, failed = [], [], {}
+    for card, result in zip(cards, results, strict=True):
+        if result.state is State.PRESENT and result.value is not None:
+            kept.append(card)
+            vectors.append(result.value.vector)
+        else:
+            reason = result.reason or "error"
+            failed[reason] = failed.get(reason, 0) + 1
+    return kept, vectors, failed
 
-                    card_name = card.get("name", "Unknown")
-                    card_description = card.get("description", "")
-                    # Get the view's incident_id
-                    view = store.get_view(view_id)
-                    incident = store.get_incident(view.incident_id)
 
-                    cards.append(
-                        TechniqueCardForClustering(
-                            card_name=card_name,
-                            card_description=card_description,
-                            view_id=view_id,
-                            incident_id=view.incident_id,
-                            source_text=card_description,
-                        )
-                    )
-                except Exception as e:
-                    log.warning(f"error parsing technique card for {view_id}: {e}")
-                    continue
-
-    return cards
+def _unit(vector: np.ndarray) -> list[float]:
+    norm = float(np.linalg.norm(vector))
+    return (vector / norm).tolist() if norm else vector.tolist()
 
 
 def cluster_cards(
     cards: list[TechniqueCardForClustering],
-    embeddings: list[list[float]] | None = None,
-    n_clusters: int | None = None,
+    embeddings: list[list[float]],
+    threshold: float = DISTANCE_THRESHOLD,
 ) -> list[ClusterResult]:
-    """Cluster technique cards by embedding similarity.
-
-    Args:
-        cards: technique cards to cluster
-        embeddings: pre-computed embeddings (one per card); if None, computed here
-        n_clusters: number of clusters; if None, estimated from card count
-
-    Returns:
-        List of ClusterResult objects with cards grouped by cluster.
-    """
+    """Cluster by cosine distance. Input order does not change the result."""
     if not cards:
-        log.warning("no cards to cluster")
         return []
-
-    if embeddings is None:
-        embeddings = []
-        for card in cards:
-            # For testing, use a deterministic mock embedding
-            embedding = embed_text(card.card_description, "embed", Settings("", "", "", "", "", ""))
-            if embedding is None:
-                log.error(f"failed to embed card: {card.card_name}")
-                return []
-            embeddings.append(embedding)
-
-    embeddings_array = np.array(embeddings, dtype=np.float32)
-
-    # Estimate cluster count if not provided
-    if n_clusters is None:
-        # Heuristic: aim for ~3-5 cards per cluster
-        n_clusters = max(2, min(len(cards) // 4, 20))
-        log.info(f"estimated {n_clusters} clusters for {len(cards)} cards")
-
-    # Normalize embeddings
-    scaler = StandardScaler()
-    embeddings_scaled = scaler.fit_transform(embeddings_array)
-
-    # K-means clustering
-    kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
-    labels = kmeans.fit_predict(embeddings_scaled)
-
-    # Group cards by cluster
-    clusters = []
-    for cluster_id in range(n_clusters):
-        mask = labels == cluster_id
-        cluster_cards = [cards[i] for i in range(len(cards)) if mask[i]]
-        cluster_embeddings = embeddings_array[mask].tolist()
-
-        if cluster_cards:
-            # Centroid is the mean of cluster embeddings
-            centroid = np.mean(cluster_embeddings, axis=0).tolist()
-            clusters.append(
-                ClusterResult(
-                    cluster_id=cluster_id,
-                    cards=cluster_cards,
-                    centroid=centroid,
-                )
-            )
-
-    log.info(f"clustered {len(cards)} cards into {len(clusters)} clusters")
-    return sorted(clusters, key=lambda c: len(c.cards), reverse=True)
-
-
-def cluster_cards_reproducible(
-    cards: list[TechniqueCardForClustering],
-    seed: int = 42,
-    n_clusters: int | None = None,
-) -> list[ClusterResult]:
-    """Cluster with guaranteed reproducibility across runs.
-
-    Uses deterministic embedding and k-means to ensure two runs on
-    shuffled input (same card set) produce identical clusters.
-
-    Args:
-        cards: technique cards
-        seed: random seed for k-means
-        n_clusters: number of clusters
-
-    Returns:
-        Clustered results (order stable across runs with same input).
-    """
-    # Ensure consistent ordering despite possible shuffling
-    sorted_cards = sorted(cards, key=lambda c: (c.incident_id, c.view_id, c.card_name))
-
-    embeddings = []
-    for card in sorted_cards:
-        # Deterministic mock embedding based on card content
-        import hashlib
-
-        h = hashlib.sha256(
-            (card.incident_id + "|" + card.card_name + "|" + card.card_description).encode()
-        ).digest()
-        seed_val = int.from_bytes(h[:8], "big")
-        rng = np.random.RandomState(seed_val % 2**31)
-        embeddings.append(rng.randn(768).tolist())
-
-    clusters = cluster_cards(sorted_cards, embeddings=embeddings, n_clusters=n_clusters)
-
-    # Sort clusters by size (descending) for reproducibility
-    return sorted(clusters, key=lambda c: (len(c.cards), c.cluster_id), reverse=True)
+    if len(cards) != len(embeddings):
+        raise ValueError("one embedding per card is required")
+    order = sorted(range(len(cards)), key=lambda i: cards[i].card_id)
+    ordered = [cards[i] for i in order]
+    matrix = np.array([embeddings[i] for i in order], dtype=np.float64)
+    if len(ordered) == 1:
+        labels = np.zeros(1, dtype=int)
+    else:
+        labels = AgglomerativeClustering(
+            n_clusters=None,
+            metric="cosine",
+            linkage="average",
+            distance_threshold=threshold,
+        ).fit_predict(matrix)
+    groups: dict[int, list[int]] = {}
+    for index, label in enumerate(labels):
+        groups.setdefault(int(label), []).append(index)
+    # The first card id names each group, so numbering does not depend on the algorithm's labels.
+    members = sorted(groups.values(), key=lambda g: ordered[g[0]].card_id)
+    return [
+        ClusterResult(
+            cluster_id=number,
+            cards=[ordered[i] for i in group],
+            centroid=_unit(matrix[group].mean(axis=0)),
+        )
+        for number, group in enumerate(members)
+    ]
