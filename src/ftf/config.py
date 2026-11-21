@@ -26,10 +26,15 @@ class Settings:
     openai_model: str
     embedding_model: str
     video_model: str
+    enrich_mode: str = "on"  # on | cache | off — outside lookups (DNS, RDAP)
 
     @property
     def db_path(self) -> Path:
         return self.data_dir / "ftf.sqlite"
+
+    @property
+    def enrich_cache_dir(self) -> Path:
+        return self.data_dir / "enrich_cache"
 
     @property
     def model_cache_dir(self) -> Path:
@@ -46,4 +51,5 @@ def get_settings() -> Settings:
         openai_model=env("FTF_OPENAI_MODEL", "gpt-6-luna"),
         embedding_model=env("FTF_EMBEDDING_MODEL", "gemini-embedding-2"),
         video_model=env("FTF_VIDEO_MODEL", "gemini-4-hydrogen"),
+        enrich_mode=env("FTF_ENRICH", "on"),
     )
