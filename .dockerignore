@@ -1,0 +1,15 @@
+# Keep the build context small: only pyproject, README, uv.lock, src and app are copied.
+.git
+.venv
+.idea
+.claude
+.env
+data
+testing_sample
+docs
+tests
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.ruff_cache
+.DS_Store
