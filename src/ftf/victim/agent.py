@@ -12,7 +12,7 @@ from __future__ import annotations
 import contextlib
 import secrets
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -293,6 +293,8 @@ class VictimRun:
             return
         kind = rules.stage_kind(state, sent_before=self.forms_sent > 0)
         if kind != "other" and kind not in self.stage.kinds:
+            if self.stage.kinds == ["other"]:  # judged before the page had rendered
+                self.stage.kinds = []
             self.stage.kinds.append(kind)
             if self.stage.kind == "other":
                 self.stage.kind = kind
@@ -528,6 +530,8 @@ class VictimRun:
             )
             if d.topic:
                 self.history.answers.setdefault(d.topic, c.text)
+            if d.question:
+                self.history.asked.setdefault((self.page.url.split("#")[0], d.question), c.text)
         target.click(timeout=5000)
         return {}
 
@@ -671,6 +675,21 @@ class VictimRun:
             ok, why = rules.candidate_verdict(chosen, state)
             if not ok:
                 return self.stop_on(rules.Block(why, chosen.describe()))
+            # Pages re-render (a chat's "still there?" nudge): act on the element as it is now.
+            fresh = next(
+                (c for c in now.candidates if History.signature(c) == History.signature(chosen)),
+                None,
+            )
+            if fresh is None or fresh.detail.get("covered"):
+                self.say("the chosen action is gone or covered (a pop-up?); looking again")
+                self.step -= 1
+                idle += 1
+                if idle >= self.options.no_progress_steps:
+                    return rules.NO_PROGRESS, f"no new stage in {idle} steps"
+                continue
+            chosen = replace(chosen, xpath=fresh.xpath, detail=fresh.detail)
+            if chosen.kind == "form":
+                state = now  # fill the form as it is now
             before_shot = self.rec.step_screenshot(self.page, self.step)
             url_before, digest_before, started = self.page.url, state.digest(), now_iso()
             self.nav_mark = self.nav.mark()

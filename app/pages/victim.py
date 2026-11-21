@@ -239,6 +239,19 @@ else:
                     "shared": "; ".join(f"{s['ns']}={s['value']}" for s in e.shared),
                 }
             )
+    from ftf.victim.cli import shared_identifiers
+
+    shared = shared_identifiers(store, root.name)
+    rows += [
+        {
+            "stage": "",
+            "other view": ", ".join(sorted(where)),
+            "layer": "shared identifier",
+            "score": None,
+            "shared": f"{ns}={value}",
+        }
+        for (ns, value), where in sorted(shared.items())
+    ]
     if rows:
         st.dataframe(rows, width="stretch")
     else:

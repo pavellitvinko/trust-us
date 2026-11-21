@@ -153,8 +153,27 @@ def _ingest(root: Path) -> None:
                 others.setdefault(other, []).append(f"{e.layer_id} {e.score:.2f}")
     for other, layers in sorted(others.items()):
         print(f"  linked to {labels.get(other, other)}: {', '.join(layers)}")
-    if not others:
+    shared = shared_identifiers(store, incident.incident_id)
+    for (ns, value), where in sorted(shared.items()):
+        print(f"  shares {ns}={str(value)[:60]} with {', '.join(sorted(where))}")
+    if not others and not shared:
         print("  no links to other material yet")
+
+
+def shared_identifiers(store: Any, incident_id: str) -> dict[tuple[str, str], set[str]]:
+    """Identity-type values (signal groups A and I) the run shares with other incidents."""
+    out: dict[tuple[str, str], set[str]] = {}
+    for view in store.views(incident_id):
+        for o in store.observations(view.view_id):
+            if o.state.value != "present" or not o.signal_id.startswith(("A", "I")):
+                continue
+            if o.namespace.startswith(("funnel.", "victim.")) or not isinstance(o.value, str):
+                continue
+            others = {v.split(":")[0] for v in store.views_with_value(o.namespace, o.value)}
+            others.discard(incident_id)
+            if others:
+                out.setdefault((o.namespace, o.value), set()).update(others)
+    return out
 
 
 def _show(root: Path) -> None:

@@ -39,8 +39,8 @@ _PAYMENT_FRAME = re.compile(
     re.IGNORECASE,
 )
 _PAYMENT_ACTION = re.compile(
-    r"zapła[ćc]|płac[eę]|wpła[ćc]|wpłata|depozyt|deposit|\bpay\b|pay now|checkout|kup teraz|"
-    r"buy now|doładuj|top.?up|blik|przelew|transfer funds|zasil konto",
+    r"zapła[ćc]|płac[eę]|wpła[ćc]|wpłata|depozyt|deposit|\bpay\b|pay now|checkout|"
+    r"doładuj|top.?up|blik|przelew|transfer funds|zasil konto",
     re.IGNORECASE,
 )
 _DOWNLOAD_HREF = re.compile(
@@ -162,8 +162,10 @@ def page_block(state: PageState) -> Block | None:
     for frame in [*state.frames, *(f.get("url", "") for f in state.frame_flags)]:
         if frame and _PAYMENT_FRAME.search(frame):
             return Block(FORBIDDEN_PAYMENT, f"a payment widget frame: {frame[:160]}")
-    if _UPLOAD_TEXT.search(state.text):
-        match = _UPLOAD_TEXT.search(state.text)
+    match = _UPLOAD_TEXT.search(state.text)
+    if (
+        match and len(state.text.split()) < 400
+    ):  # a short page that asks; not an article mentioning it
         return Block(FORBIDDEN_UPLOAD, f"the page asks for a document: {match.group(0)!r}")
     if _PAYMENT_FRAME.search(urlsplit(state.url).path):
         return Block(FORBIDDEN_PAYMENT, f"a payment page: {state.url[:160]}")

@@ -46,6 +46,22 @@ OBSERVE_JS = r"""
     if (!t) { const l = el.closest('label'); if (l) t = l.innerText; }
     return clean(t || el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.title || '');
   };
+  // Chat bubbles fade in: present in the layout counts, whatever the opacity.
+  const shown = (el) => {
+    if (!el || !el.getClientRects || el.getClientRects().length === 0) return false;
+    for (let n = el; n && n.nodeType === 1; n = n.parentElement) {
+      const s = getComputedStyle(n);
+      if (s.visibility === 'hidden' || s.display === 'none') return false;
+    }
+    return true;
+  };
+  // Something else on top at the element's centre (a pop-up over a chat): not clickable now.
+  const covered = (el) => {
+    const r = el.getBoundingClientRect();
+    if (r.bottom <= 0 || r.top >= innerHeight || r.right <= 0 || r.left >= innerWidth) return false;
+    const t = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return !!t && t !== el && !el.contains(t) && !t.contains(el);
+  };
   const inView = (el) => { const r = el.getBoundingClientRect(); return r.bottom > 0 && r.top < innerHeight; };
   const marks = (el) => clean(((el.className && el.className.baseVal !== undefined) ? el.className.baseVal : el.className) + ' ' + (el.id || ''));
   const ancestorMarks = (el) => { let t = ''; for (let n = el, k = 0; n && k < 6; n = n.parentElement, k++) t += ' ' + marks(n); return t.toLowerCase(); };
@@ -77,7 +93,7 @@ OBSERVE_JS = r"""
   const bubbles = document.querySelectorAll(".msg, .message, [class*='chat__message'], [class*='chat-message'], [class*='bubble'], [data-role='bot'] .msg, [data-role='user'] .msg");
   const seen = new Set();
   for (const el of bubbles) {
-    if (!vis(el) || el.querySelector('.msg, .message')) continue;
+    if (!shown(el) || el.querySelector('.msg, .message')) continue;
     const t = clean(el.innerText);
     if (!t || seen.has(el)) continue;
     seen.add(el);
@@ -105,10 +121,11 @@ OBSERVE_JS = r"""
     if (!href || href.startsWith('javascript:') || href.startsWith('mailto:') || href.startsWith('tel:')) continue;
     push({ kind: 'link', text: clean(a.innerText || a.getAttribute('aria-label') || a.title).slice(0, 160), href,
            download: a.hasAttribute('download'), target: a.target || '', in_view: inView(a), xpath: xpath(a),
-           marks: ancestorMarks(a).slice(0, 300), button_like: /btn|button|cta/.test(marks(a).toLowerCase()) });
+           marks: ancestorMarks(a).slice(0, 300), button_like: /btn|button|cta/.test(marks(a).toLowerCase()),
+           covered: covered(a) });
   }
   for (const b of document.querySelectorAll("button, input[type='button'], input[type='submit'], [role='button']")) {
-    if (!vis(b)) continue;
+    if (!vis(b) || b.disabled || b.getAttribute('aria-disabled') === 'true') continue;
     if (b.closest('a[href]')) continue;
     const m = ancestorMarks(b);
     const form = b.closest('form');
@@ -119,7 +136,7 @@ OBSERVE_JS = r"""
     else if (/chat|quiz|question|option|answer|survey|ankiet|pytani/.test(m) && !form) kind = 'chat_option';
     push({ kind, text, in_view: inView(b), xpath: xpath(b), marks: m.slice(0, 300),
            form_index: form ? forms.indexOf(form) : null,
-           type: (b.getAttribute('type') || '').toLowerCase() });
+           type: (b.getAttribute('type') || '').toLowerCase(), covered: covered(b) });
   }
   for (const el of document.querySelectorAll("input[type='radio'], input[type='checkbox']")) {
     const form = el.closest('form');

@@ -6,6 +6,7 @@ browser over local fixture pages.
 
 import json
 from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace as NS
 
@@ -290,18 +291,37 @@ def test_stage_key_keeps_the_query_and_drops_click_ids():
 # -- decider -------------------------------------------------------------------
 
 
-def test_rule_decider_answers_the_bot_then_marks_dead_actions():
+def test_rule_decider_answers_the_bot_and_never_changes_its_answer():
     s = state(
         candidates=[button("Mężczyzna", kind="chat_option"), button("Kobieta", kind="chat_option")],
         chat=[{"who": "bot", "text": "Jaka jest Twoja płeć?", "xpath": "//div"}],
     )
     allowed, _ = rules.split_candidates(s)
+    by_n = {c.n: c for c in allowed}
     history = History()
     d = RuleDecider().choose(PERSONA, s, allowed, history)
-    assert allowed[[c.n for c in allowed].index(d.n)].text == "Kobieta" and d.topic == "sex"
-    history.record(s, next(c for c in allowed if c.n == d.n), changed=False, note="no change")
-    d2 = RuleDecider().choose(PERSONA, s, allowed, history)
-    assert d2.improvised  # the persona's answer is dead; it gives another plausible one
+    assert by_n[d.n].text == "Kobieta" and d.topic == "sex"
+    history.asked[(s.url, d.question)] = "Kobieta"
+    for _ in range(3):  # the bot is slow: the same answer again, never the other one
+        again = RuleDecider().choose(PERSONA, s, allowed, history)
+        assert by_n[again.n].text == "Kobieta"
+        history.record(s, by_n[again.n], changed=False, note="no change")
+    assert RuleDecider().choose(PERSONA, s, allowed, history) is None
+
+
+def test_dead_links_are_not_offered_again():
+    s = state(
+        candidates=[
+            link("http://shop.localhost/b", "Sprawdź"),
+            link("http://shop.localhost/c", "Dalej"),
+        ]
+    )
+    allowed, _ = rules.split_candidates(s)
+    history = History()
+    first = RuleDecider().choose(PERSONA, s, allowed, history)
+    history.record(s, next(c for c in allowed if c.n == first.n), changed=False, note="no change")
+    second = RuleDecider().choose(PERSONA, s, allowed, history)
+    assert second.n != first.n
 
 
 # -- perception: quotes verified against the material -----------------------------
@@ -602,3 +622,39 @@ def test_layer_comparators():
     )
     mb = fp("victim.money", {"model": "victim.money.v1", "values": [3.06, 0.0, 0.0, 0.0]}, "vector")
     assert money.compare(ma, mb).score == 1.0 and money.compare(ma, mb).comparable
+
+
+def test_the_question_is_the_latest_bot_question():
+    from ftf.victim.decide import last_question
+
+    s = state(
+        chat=[
+            {"who": "bot", "text": "Cześć! Brzmi interesująco, prawda?", "xpath": ""},
+            {"who": "bot", "text": "Jaka jest Twoja płeć?", "xpath": ""},
+            {"who": "bot", "text": "Wybierz jedną odpowiedź.", "xpath": ""},
+        ]
+    )
+    assert last_question(s) == "Jaka jest Twoja płeć?"
+
+
+def test_model_decider_picks_from_the_allowed_list_or_falls_back(settings):
+    from ftf.victim.decide import ModelDecider
+
+    s = state(
+        candidates=[
+            button("Mężczyzna", kind="chat_option"),
+            button("Kobieta", kind="chat_option"),
+            link("http://shop.localhost/app.apk", "Pobierz"),
+        ],
+        chat=[{"who": "bot", "text": "Jaka jest Twoja płeć?", "xpath": ""}],
+    )
+    allowed, _ = rules.split_candidates(s)
+    assert [c.text for c in allowed] == ["Mężczyzna", "Kobieta"]  # the download is never offered
+    client = FakeOpenAI(message({"choice": 2, "text": None, "reason": "I am a woman."}))
+    d = ModelDecider(settings, client).choose(PERSONA, s, allowed, History())
+    assert (d.n, d.by, d.reason, d.topic) == (2, "model", "I am a woman.", "sex")
+    assert "[3]" not in client.requests[0]["input"][0]["content"]  # refused actions not shown
+    bad = FakeOpenAI(message({"choice": 3, "text": None, "reason": "download it"}))
+    fresh = replace(settings, data_dir=settings.data_dir / "other")  # same input is cached
+    d = ModelDecider(fresh, bad).choose(PERSONA, s, allowed, History())
+    assert d.by.startswith("rules (model:") and d.n == 2

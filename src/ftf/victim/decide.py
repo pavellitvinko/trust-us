@@ -56,6 +56,7 @@ class History:
     visited: set[str] = field(default_factory=set)
     scrolls: dict[str, int] = field(default_factory=dict)  # url -> scrolls on it
     answers: dict[str, str] = field(default_factory=dict)  # topic -> option chosen
+    asked: dict[tuple[str, str], str] = field(default_factory=dict)  # (url, question) -> answer
     lines: list[str] = field(default_factory=list)  # short log for the model
 
     @staticmethod
@@ -68,7 +69,8 @@ class History:
     def record(self, before: PageState, c: Candidate, changed: bool, note: str) -> None:
         key = (before.url.split("#")[0], self.signature(c))
         self.tried[key] = self.tried.get(key, 0) + 1
-        if not changed and c.kind not in {"scroll", "media"}:
+        # A chat option that changed nothing is not dead: the bot may just be slow.
+        if not changed and c.kind not in {"scroll", "media", "chat_option"}:
             self.dead.add(key)
         if c.kind == "scroll":
             self.scrolls[before.url] = self.scrolls.get(before.url, 0) + 1
@@ -84,7 +86,11 @@ class Decider(Protocol):
 
 
 def last_question(state: PageState) -> str:
+    """The bot's latest question: its last message ending in "?", else its last message."""
     bot = [m["text"] for m in state.chat if m.get("who") == "bot"]
+    for text in reversed(bot[-3:]):
+        if text.rstrip().endswith("?"):
+            return text
     return bot[-1] if bot else state.text[-600:]
 
 
@@ -117,10 +123,23 @@ class RuleDecider:
     def choose(
         self, persona: Persona, state: PageState, allowed: list[Candidate], history: History
     ) -> Decision | None:
-        live = [c for c in allowed if not history.is_dead(state, c)]
+        live = [c for c in allowed if not history.is_dead(state, c) and not c.detail.get("covered")]
         options = [c for c in live if c.kind == "chat_option"]
         if options:
             question = last_question(state)
+            earlier = history.asked.get((state.url.split("#")[0], question))
+            if earlier is not None:
+                # Already answered: the same answer again (VV-14), never a different one.
+                same = next((c for c in options if c.text == earlier), None)
+                key = (state.url.split("#")[0], History.signature(same)) if same else None
+                if same is None or history.tried.get(key, 0) >= 3:
+                    return None
+                return Decision(
+                    same.n,
+                    f"repeats its answer to '{question[:60]}'; the bot has not moved on",
+                    self.name,
+                    question=question,
+                )
             index, topic = answer_for(persona, question, [c.text for c in options])
             if index is not None:
                 chosen = options[index]
@@ -225,7 +244,7 @@ class ModelDecider:
     def choose(
         self, persona: Persona, state: PageState, allowed: list[Candidate], history: History
     ) -> Decision | None:
-        live = [c for c in allowed if not history.is_dead(state, c)]
+        live = [c for c in allowed if not history.is_dead(state, c) and not c.detail.get("covered")]
         if not live:
             return None
         chat = "\n".join(f"{m['who']}: {m['text'][:300]}" for m in state.chat[-10:])
