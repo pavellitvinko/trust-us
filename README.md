@@ -5,6 +5,7 @@ HackNation challenge "Kolekcjoner fejków", set by NASK.
 
 - Design: [docs/architecture.md](docs/architecture.md)
 - Signals: [docs/signal-catalogue.md](docs/signal-catalogue.md)
+- **NEW**: [Pattern Library](PATTERN_LIBRARY.md) — Pattern discovery, library versioning, novelty tracking
 
 **Status: Method track built; identifier, kit, asset and perception extractors landing.**
 Twenty-three fingerprint layers, five comparator families with rarity weighting and a stoplist,
@@ -17,8 +18,12 @@ conventions, API routes, config key paths, hidden fields, server headers) and as
 (exact by role, grayscale perceptual) produce observations on the sample and the layers consume
 them; the Perception track reads pages and screenshots with the model (`ftf perceive`).
 `docs/method-namespaces.md` lists the namespaces the layers consume. `ftf capture` turns a URL,
-or an archived HAR in replay mode, into a capture bundle (see below). The interface is still to
-be built.
+or an archived HAR in replay mode, into a capture bundle (see below). Warning-list enrichment
+and the basic interface are available below; broader enrichment remains to be built.
+
+Pattern discovery (architecture §6) includes a versioned library with stable IDs and
+merge/split history, embedding and clustering, pattern induction and matching, novelty
+tracking, and pattern-based playbook evidence. See [Pattern Library](PATTERN_LIBRARY.md).
 
 ## Run locally
 
@@ -33,6 +38,8 @@ uv run ftf views
 uv run ftf pairs
 uv run ftf compare <view_id> <view_id>
 uv run ftf explain <view_id> <view_id>   # evidence per layer and the typed relation with reasons
+uv run ftf explain <view_a> <view_b> --format json --output comparison.json
+uv run ftf explain <view_a> <view_b> --output comparison.md
 uv run ftf relations --type same_campaign --reasons
 uv run ftf groups                         # campaigns, families, playbooks
 uv run ftf incidents                      # per-folder roll-up, funnel edges, mismatches
@@ -41,6 +48,9 @@ uv run ftf eval                           # agreement with docs/baseline-report.
 uv run ftf load-fixtures && uv run ftf eval --fixtures   # the same on the hand-made fixtures
 uv run ftf loio                           # leave-one-incident-out on the fixtures
 uv run ftf ablate [--degrade]             # layer ablation / degradation tables
+uv run ftf ablate [--degrade] --sample testing_sample   # the same on real files, model off
+uv run ftf loio --sample testing_sample   # leave-one-out on real files, weights frozen
+uv run ftf validate testing_sample --out docs/method-results-real-sample.md   # the whole real-file validation
 uv run streamlit run app/streamlit_app.py
 uv run pytest
 ```
@@ -55,6 +65,24 @@ The test ingests the real files into a temporary database through the CLI. It ch
 1↔2 campaign, 2↔3 duplicate, 48↔61 family and 61 article→chat funnel. It blocks model
 imports and network access, uses local hashed text vectors, and checks an audit of zero
 attempts. It skips when the private sample is absent.
+
+`ftf explain` produces a complete pair report: object identities and files, confidence
+with its rule, coverage as a group count, scores and weights, shared and differing values
+linked to source observations, contradictions, demoted/ignored matches, and every missing
+or incompatible layer. Observation references include the file, locator, extractor and
+version. Derived text/DOM comparisons include exact input overlaps; Markdown shows labelled
+examples and JSON retains the complete sets. Long source text is a labelled excerpt.
+Reports use stored fingerprints and never call a model or modify the database.
+The same report is available under **Full comparison report** in Streamlit with JSON and
+Markdown downloads. Its separate acceptance check is:
+
+```bash
+uv run pytest tests/test_reporting.py -q
+```
+
+That check covers report completeness on the real sample with model/network access blocked,
+source resolution, missing/incompatible inputs, ignored matches, reversed object order,
+and the Streamlit report view. The real-sample check skips if the sample is absent.
 
 ## Live capture
 
@@ -94,6 +122,87 @@ The sample is not in git, so on a fresh clone either copy it to `./testing_sampl
 Without it `/sample` is empty and `ftf ingest` stops with "no views found" (exit code 1).
 State lives in `./data`. The image installs the exact versions in `uv.lock`;
 `docker compose ps` shows the interface as `healthy` once it answers.
+
+## Warning lists (HAC-17)
+
+`ftf ingest` / `ftf run` check domains and supported entity/offer names against local
+snapshots after extraction. `ftf perceive` repeats the checks after page and image reading.
+These paths make no warning-list network request. To download CERT Polska and KNF once
+at the start of an enrichment session, then check all stored views locally:
+
+```bash
+uv run ftf enrich                         # DNS/RDAP, then CERT/KNF refresh and local checks
+uv run ftf enrich --view <view_id>         # restrict the views, not the source coverage
+uv run ftf enrich --offline               # skip DNS/RDAP; warning snapshots only
+```
+
+Sources: [CERT Polska active domains](https://cert.pl/en/warning-list/) and
+[KNF public warnings](https://www.knf.gov.pl/dla_konsumenta/ostrzezenia_publiczne).
+CERT's published terms permit commercial use without guarantees of completeness,
+currency or maliciousness. This tool records list membership, not a legal conclusion.
+KNF entries describe warnings and proceedings; they are not a register of licensed entities.
+The package and Docker image include a KNF snapshot downloaded on **2026-11-21**
+(669 warning rows; some rows name multiple entities). CERT needs a successful initial
+refresh. The supplement register is omitted because no export has been verified.
+
+Snapshots under `data/warning_lists/` retain the source content, URL, retrieval timestamp
+and SHA-256 of the decoded UTF-8 content. Dated versions are kept in `archive/`, including
+when unchanged source content is downloaded again. A failed refresh keeps the last valid
+snapshot, its original date, and an explicit refresh error. A malformed or missing source
+falls back to the most recently archived valid file, then the bundled KNF or gambling snapshot.
+Without a valid fallback it produces `not_observable`. Interrupted HTTP responses are treated
+as source failures, never negative findings.
+
+The image includes the **2026-11-22 Ministry of Finance snapshot**, downloaded through
+Chrome from the documented [active-register XML API](https://hazard.mf.gov.pl/api/Register).
+It contains 60,231 source records. The snapshot retains the original XML, SHA-256,
+retrieval time with timezone, public record IDs, entry dates and XML locators. All 60,231
+addresses are indexed, including the eight official addresses with underscores in a host
+label. Future unsupported addresses remain in the source with validation errors;
+snapshot provenance reports both the total and unmatchable record counts.
+
+The API is a data source for the dated snapshot, rather than a live per-domain lookup.
+An earlier scripted request was blocked; the browser download succeeded without a bot-check
+workaround. The application retains **no automated fetch path** for this source. To refresh
+it, download the API response in the browser (use **Save Link As** on the API link in the
+[official specification](https://hazard.mf.gov.pl/Content/files/Rejestr_Stron%20Hazardowych_Specyfikacja_WeWy_v1-2.pdf))
+and import the XML with its actual retrieval date. UTF-8 domain-per-line files remain supported:
+
+```bash
+uv run ftf enrich --offline --import-gambling /path/to/Register.xml --snapshot-date 2026-11-22
+```
+
+Imported updates live with the persistent application data and take precedence over the
+bundled snapshot. To ship a newer snapshot, replace `src/ftf/enrich/snapshots/gambling.json`
+with the generated `data/warning_lists/gambling.json`. N5 is now available offline from the
+bundled source; missing inputs or unavailable valid data still yield `not_observable`.
+
+`warning.cert`, `warning.knf` and `warning.gambling` observations include the checked input
+and its provenance, snapshot metadata, original matched records and source locators, and
+the matching method. Domains match only at host-label boundaries, including listed
+subdomains. KNF names use case/accent/punctuation normalization and legal-suffix removal;
+fuzzy candidates use `SequenceMatcher` similarity at least 0.90 (not a probability).
+Fuzzy and ambiguous matches are labelled `possible_match` and require verification.
+Only the entity column is searched; prosecutor and case-note names are excluded.
+
+A miss is **"not listed as of <snapshot date>"** and says nothing about legitimacy.
+Warnings are risk-only observations and do not alter campaign grouping. Exact, unambiguous
+name references to the same KNF entity provide contextual links between views. Domain
+membership alone does not establish entity identity. Numbered and separately labelled
+entities in one KNF row are kept separate, and parenthetical/platform-list aliases are indexed.
+After upgrading from parser version 1, rerun enrichment to rebuild entity links; older
+observations remain visible but cannot create contextual links. Material shows
+these links and full provenance; comparison JSON/Markdown carries both views' warning
+observations and shared listed entities. The HAC-44 adapter is
+`warning_risk_reasons(warning_observations(store, view_id))`: it returns only hits and possible
+matches, preserving uncertainty and a stable reference to the full source observation.
+Misses and unavailable checks are excluded. Material and comparison JSON use this adapter;
+the complete HAC-44 summary is a separate issue. The Material **Check warning lists** button uses
+offline snapshots by default; clear its offline checkbox to refresh both online sources.
+
+```bash
+uv run pytest tests/test_warning_lists.py -q
+```
 
 ## Layout and ownership
 

@@ -53,6 +53,8 @@
   {"a": "61:article", "b": "61:chat", "expected": "same_campaign", "source": "13 sub-folder: shared campaign and navigation history"},
   {"a": "48:page", "b": "61:article", "expected": "same_family", "source": "13 sub-folder: template ID, images, logo, bundle"},
   {"a": "1:page", "b": "61:article", "expected": "same_family", "also_accept": ["same_playbook"], "source": "13 sub-folder: exact main.css reuse, weak for campaign"},
-  {"a": "2:page", "b": "2:healthlinkq", "expected": "unrelated", "also_accept": ["same_playbook"], "source": "section 5: shared folder is not an edge"}
+  {"a": "2:page", "b": "2:healthlinkq", "expected": "unrelated", "also_accept": ["same_playbook"], "source": "section 5: shared folder is not an edge"},
+  {"a": "61:business", "b": "61:article", "expected": "same_family", "also_accept": ["unrelated", "insufficient_evidence"], "source": "section 14 file list only; catalogue J1", "note": "HAC-54: the baseline names no shared campaign record, asset or text; the shared domain shows shared infrastructure, never a campaign"},
+  {"a": "61:business", "b": "61:chat", "expected": "same_family", "also_accept": ["unrelated", "insufficient_evidence"], "source": "section 14 file list only; catalogue J1", "note": "HAC-54: as above; real sample only, the fixtures hold no business page"}
  ]
 }
