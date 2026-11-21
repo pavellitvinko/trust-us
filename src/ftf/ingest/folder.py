@@ -115,6 +115,40 @@ def ingest_folder(
         for a in attachments:
             roles[a] = "attachment"
 
+    # 1b. Ad-library ads written by discovery: a directory holding ad.json is one image view.
+    #     Its picture is ad.png (or ad.jpg); the creatives in ad_files/ are its resources.
+    for ad_json in sorted(p for p in files if p.name == "ad.json" and p not in roles):
+        adir = ad_json.parent
+        picture = next((adir / n for n in ("ad.png", "ad.jpg") if (adir / n).is_file()), None)
+        if picture is None:
+            picture = next(
+                (
+                    q
+                    for q in files
+                    if q.parent == adir / "ad_files" and q.suffix.lower() in IMAGE_EXT
+                ),
+                None,
+            )
+        try:
+            ad_id = str(json.loads(ad_json.read_text(encoding="utf-8"))["ad"]["ad_id"])
+        except (OSError, ValueError, KeyError, TypeError):
+            ad_id = None
+        views.append(
+            View(
+                view_id=_view_id(incident_id, rel(ad_json)),
+                incident_id=incident_id,
+                kind=ViewKind.IMAGE,
+                label=f"{incident_id} · Ad Library ad {ad_id or adir.name}",
+                primary=rel(picture) if picture else None,
+                resources_dir=rel(adir / "ad_files") if (adir / "ad_files").is_dir() else None,
+                attachments=[rel(ad_json)],
+                meta={"origin": "ad_library", **({"ad_library_id": ad_id} if ad_id else {})},
+            )
+        )
+        roles[ad_json] = "attachment"
+        if picture is not None and picture.parent == adir:
+            roles[picture] = "primary"
+
     # 2. Resource directories: "<page>_files" next to a saved page, and anything inside a bundle.
     resource_dirs = {
         p for p in root.rglob("*") if p.is_dir() and p.name.endswith("_files")
