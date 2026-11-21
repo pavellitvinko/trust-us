@@ -92,8 +92,10 @@ def test_landing_variants_in_one_folder_are_one_campaign(fused_store):
 
 
 def test_co_captured_views_are_not_linked_by_the_folder(fused_store):
-    # the Brzoska page and the healthlinkq capture share folder 2 and nothing else
-    assert relation(fused_store, "2:page", "2:healthlinkq").type is RelationType.UNRELATED
+    # the Brzoska page and the healthlinkq capture share folder 2 and a narrative, not a campaign
+    r = relation(fused_store, "2:page", "2:healthlinkq")
+    assert r.type in (RelationType.SAME_PLAYBOOK, RelationType.UNRELATED)
+    assert r.tier_scores["T1"] == 0.0 and r.tier_scores["T2"] == 0.0
 
 
 # -- unit behaviour of fuse() ---------------------------------------------------------------

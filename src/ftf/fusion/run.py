@@ -13,9 +13,10 @@ from itertools import combinations
 from typing import TYPE_CHECKING
 
 from .. import pipeline
+from ..compare.vector import calibrate
 from ..compare.weights import weights
-from ..contracts import Relation
-from ..registry import load_plugins
+from ..contracts import FingerprintKind, Relation
+from ..registry import layers, load_plugins
 from .config import DEFAULT, FusionConfig
 from .demotion import find_demotions
 from .fuse import fuse
@@ -31,6 +32,9 @@ def prepare(
     load_plugins()
     weights.fit(store, campaigns)
     weights.demoted, _ = find_demotions(store, config)
+    for layer in layers.all():
+        if layer.kind is FingerprintKind.VECTOR:
+            calibrate(store, layer.name)
 
 
 def fuse_pair(

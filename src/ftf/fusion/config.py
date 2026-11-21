@@ -37,6 +37,12 @@ class FusionConfig:
             "asset": 0.9,
             "text": 0.9,
             "infra": 0.3,
+            # playbook: pattern and narrative carry it; absence, cast and layout only support
+            "pattern": 0.8,
+            "narrative": 0.8,
+            "absence": 0.5,
+            "cast": 0.5,
+            "layout": 0.4,
         }
     )
     tier_weights: dict[str, float] = field(default_factory=lambda: dict(DEFAULT_TIER_WEIGHT))

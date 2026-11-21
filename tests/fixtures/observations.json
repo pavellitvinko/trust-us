@@ -6967,6 +6967,2710 @@
    }
   },
   {
+   "view_id": "1:page",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H1_celebrity_endorser\", \"score\": 0.95}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "1:page",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H2_fake_news_framing\", \"score\": 0.95}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "1:page",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H12_fake_comments\", \"score\": 0.9}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "1:page",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H15_callback\", \"score\": 0.8}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "2:page",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H1_celebrity_endorser\", \"score\": 0.95}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "2:page",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H2_fake_news_framing\", \"score\": 0.95}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "2:page",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H12_fake_comments\", \"score\": 0.9}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "2:page",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H15_callback\", \"score\": 0.8}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "2:healthlinkq",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H1_celebrity_endorser\", \"score\": 0.95}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "2:healthlinkq",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H2_fake_news_framing\", \"score\": 0.95}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "2:healthlinkq",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H12_fake_comments\", \"score\": 0.9}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "2:healthlinkq",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H15_callback\", \"score\": 0.8}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "3:page",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H1_celebrity_endorser\", \"score\": 0.95}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "3:page",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H2_fake_news_framing\", \"score\": 0.95}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "3:page",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H12_fake_comments\", \"score\": 0.9}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "3:page",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H15_callback\", \"score\": 0.8}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "48:page",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H1_celebrity_endorser\", \"score\": 0.95}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "48:page",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H2_fake_news_framing\", \"score\": 0.95}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "48:page",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H12_fake_comments\", \"score\": 0.9}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "48:page",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H15_callback\", \"score\": 0.8}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "61:article",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H1_celebrity_endorser\", \"score\": 0.95}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "61:article",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H2_fake_news_framing\", \"score\": 0.95}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "61:article",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H12_fake_comments\", \"score\": 0.9}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "61:article",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H15_callback\", \"score\": 0.8}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "1:page",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H3_suppression_story\", \"score\": 0.9}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "1:page",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H4_violence_hook\", \"score\": 0.85}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "1:page",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H5_elites_hide\", \"score\": 0.9}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "2:page",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H3_suppression_story\", \"score\": 0.9}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "2:page",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H4_violence_hook\", \"score\": 0.85}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "2:page",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H5_elites_hide\", \"score\": 0.9}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "2:healthlinkq",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H3_suppression_story\", \"score\": 0.9}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "2:healthlinkq",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H4_violence_hook\", \"score\": 0.85}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "2:healthlinkq",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H5_elites_hide\", \"score\": 0.9}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "3:page",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H3_suppression_story\", \"score\": 0.9}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "3:page",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H4_violence_hook\", \"score\": 0.85}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "3:page",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H5_elites_hide\", \"score\": 0.9}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "48:page",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H3_suppression_story\", \"score\": 0.9}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "48:page",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H4_violence_hook\", \"score\": 0.85}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "48:page",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H5_elites_hide\", \"score\": 0.9}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "1:page",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H6_profit_proof\", \"score\": 0.9}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "2:page",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H6_profit_proof\", \"score\": 0.9}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "61:article",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H7_regulator_backing\", \"score\": 0.9}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "61:article",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H14_chat_qualification\", \"score\": 0.9}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "61:article",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H19_low_entry_amount\", \"score\": 0.85}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "61:chat",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H7_regulator_backing\", \"score\": 0.9}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "61:chat",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H14_chat_qualification\", \"score\": 0.9}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "61:chat",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H19_low_entry_amount\", \"score\": 0.85}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "61:chat",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H15_callback\", \"score\": 0.9}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "61:chat",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H1_celebrity_endorser\", \"score\": 0.6}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "14:page",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H8_authority_uniform\", \"score\": 0.9}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "14:page",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H9_scarcity_counter\", \"score\": 0.9}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "14:page",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H10_countdown\", \"score\": 0.85}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "14:page",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H11_deep_discount\", \"score\": 0.9}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "14:page",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H12_fake_comments\", \"score\": 0.8}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "14:page",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H15_callback\", \"score\": 0.85}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "14:page",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H16_miracle_health\", \"score\": 0.95}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "14:page",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H18_video_sales_letter\", \"score\": 0.9}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "14:capture",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H8_authority_uniform\", \"score\": 0.9}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "14:capture",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H9_scarcity_counter\", \"score\": 0.9}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "14:capture",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H10_countdown\", \"score\": 0.85}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "14:capture",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H11_deep_discount\", \"score\": 0.9}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "14:capture",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H12_fake_comments\", \"score\": 0.8}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "14:capture",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H15_callback\", \"score\": 0.85}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "14:capture",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H16_miracle_health\", \"score\": 0.95}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "14:capture",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H18_video_sales_letter\", \"score\": 0.9}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "47:page",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H8_authority_uniform\", \"score\": 0.9}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "47:page",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H9_scarcity_counter\", \"score\": 0.9}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "47:page",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H10_countdown\", \"score\": 0.85}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "47:page",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H11_deep_discount\", \"score\": 0.9}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "47:page",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H12_fake_comments\", \"score\": 0.8}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "47:page",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H15_callback\", \"score\": 0.85}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "47:page",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H16_miracle_health\", \"score\": 0.95}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "47:page",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H18_video_sales_letter\", \"score\": 0.9}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "14:page",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H13_gamified_discount\", \"score\": 0.9}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "14:capture",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H13_gamified_discount\", \"score\": 0.9}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "10:page",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H6_profit_proof\", \"score\": 0.8}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "10:page",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H12_fake_comments\", \"score\": 0.85}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "10:page",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H17_marketplace_imitation\", \"score\": 0.95}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "36:page",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H20_event_credibility\", \"score\": 0.9}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "36:page",
+   "signal_id": "H",
+   "namespace": "pattern.score",
+   "value": "{\"pattern\": \"H9_scarcity_counter\", \"score\": 0.4}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "1:page",
+   "signal_id": "G1",
+   "namespace": "entity.cast",
+   "value": "{\"entity\": \"Rafał Brzoska\", \"role\": \"protagonist\"}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "1:page",
+   "signal_id": "G1",
+   "namespace": "entity.cast",
+   "value": "{\"entity\": \"Kacper\", \"role\": \"testimonial\"}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "1:page",
+   "signal_id": "G1",
+   "namespace": "entity.cast",
+   "value": "{\"entity\": \"PKO\", \"role\": \"bank\"}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "1:page",
+   "signal_id": "G1",
+   "namespace": "entity.cast",
+   "value": "{\"entity\": \"Gazeta.pl\", \"role\": \"publisher\"}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "1:page",
+   "signal_id": "G1",
+   "namespace": "entity.cast",
+   "value": "{\"entity\": \"Mateusz Morawiecki\", \"role\": \"supporting\"}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "2:page",
+   "signal_id": "G1",
+   "namespace": "entity.cast",
+   "value": "{\"entity\": \"Rafał Brzoska\", \"role\": \"protagonist\"}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "2:page",
+   "signal_id": "G1",
+   "namespace": "entity.cast",
+   "value": "{\"entity\": \"Kacper\", \"role\": \"testimonial\"}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "2:page",
+   "signal_id": "G1",
+   "namespace": "entity.cast",
+   "value": "{\"entity\": \"PKO\", \"role\": \"bank\"}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "2:page",
+   "signal_id": "G1",
+   "namespace": "entity.cast",
+   "value": "{\"entity\": \"Gazeta.pl\", \"role\": \"publisher\"}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "2:page",
+   "signal_id": "G1",
+   "namespace": "entity.cast",
+   "value": "{\"entity\": \"Mateusz Morawiecki\", \"role\": \"supporting\"}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "2:healthlinkq",
+   "signal_id": "G1",
+   "namespace": "entity.cast",
+   "value": "{\"entity\": \"Monika Olejnik\", \"role\": \"protagonist\"}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "2:healthlinkq",
+   "signal_id": "G1",
+   "namespace": "entity.cast",
+   "value": "{\"entity\": \"Adam Glapiński\", \"role\": \"villain\"}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "2:healthlinkq",
+   "signal_id": "G1",
+   "namespace": "entity.cast",
+   "value": "{\"entity\": \"NBP\", \"role\": \"institution\"}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "2:healthlinkq",
+   "signal_id": "G1",
+   "namespace": "entity.cast",
+   "value": "{\"entity\": \"TVN24\", \"role\": \"publisher\"}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "2:healthlinkq",
+   "signal_id": "G1",
+   "namespace": "entity.cast",
+   "value": "{\"entity\": \"Anna\", \"role\": \"testimonial\"}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "3:page",
+   "signal_id": "G1",
+   "namespace": "entity.cast",
+   "value": "{\"entity\": \"Monika Olejnik\", \"role\": \"protagonist\"}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "3:page",
+   "signal_id": "G1",
+   "namespace": "entity.cast",
+   "value": "{\"entity\": \"Adam Glapiński\", \"role\": \"villain\"}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "3:page",
+   "signal_id": "G1",
+   "namespace": "entity.cast",
+   "value": "{\"entity\": \"NBP\", \"role\": \"institution\"}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "3:page",
+   "signal_id": "G1",
+   "namespace": "entity.cast",
+   "value": "{\"entity\": \"TVN24\", \"role\": \"publisher\"}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "3:page",
+   "signal_id": "G1",
+   "namespace": "entity.cast",
+   "value": "{\"entity\": \"Anna\", \"role\": \"testimonial\"}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "48:page",
+   "signal_id": "G1",
+   "namespace": "entity.cast",
+   "value": "{\"entity\": \"Tomasz Lis\", \"role\": \"protagonist\"}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "48:page",
+   "signal_id": "G1",
+   "namespace": "entity.cast",
+   "value": "{\"entity\": \"Anita Werner\", \"role\": \"interviewer\"}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "48:page",
+   "signal_id": "G1",
+   "namespace": "entity.cast",
+   "value": "{\"entity\": \"Mateusz Morawiecki\", \"role\": \"villain\"}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "48:page",
+   "signal_id": "G1",
+   "namespace": "entity.cast",
+   "value": "{\"entity\": \"Rafał Brzoska\", \"role\": \"endorser\"}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "48:page",
+   "signal_id": "G1",
+   "namespace": "entity.cast",
+   "value": "{\"entity\": \"TVN24\", \"role\": \"publisher\"}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "61:article",
+   "signal_id": "G1",
+   "namespace": "entity.cast",
+   "value": "{\"entity\": \"Donald Tusk\", \"role\": \"protagonist\"}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "61:article",
+   "signal_id": "G1",
+   "namespace": "entity.cast",
+   "value": "{\"entity\": \"Agnieszka Dziemianowicz-Bąk\", \"role\": \"interviewer\"}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "61:article",
+   "signal_id": "G1",
+   "namespace": "entity.cast",
+   "value": "{\"entity\": \"KNF\", \"role\": \"regulator\"}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "61:article",
+   "signal_id": "G1",
+   "namespace": "entity.cast",
+   "value": "{\"entity\": \"ZUS\", \"role\": \"institution\"}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "61:chat",
+   "signal_id": "G1",
+   "namespace": "entity.cast",
+   "value": "{\"entity\": \"Sara\", \"role\": \"agent\"}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "61:chat",
+   "signal_id": "G1",
+   "namespace": "entity.cast",
+   "value": "{\"entity\": \"KNF\", \"role\": \"regulator\"}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "14:page",
+   "signal_id": "G1",
+   "namespace": "entity.cast",
+   "value": "{\"entity\": \"Tomasz Nowicki\", \"role\": \"doctor\"}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "14:page",
+   "signal_id": "G1",
+   "namespace": "entity.cast",
+   "value": "{\"entity\": \"Katarzyna\", \"role\": \"testimonial\"}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "14:capture",
+   "signal_id": "G1",
+   "namespace": "entity.cast",
+   "value": "{\"entity\": \"Tomasz Nowicki\", \"role\": \"doctor\"}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "14:capture",
+   "signal_id": "G1",
+   "namespace": "entity.cast",
+   "value": "{\"entity\": \"Katarzyna\", \"role\": \"testimonial\"}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "47:page",
+   "signal_id": "G1",
+   "namespace": "entity.cast",
+   "value": "{\"entity\": \"Andrzej Wolski\", \"role\": \"doctor\"}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "47:page",
+   "signal_id": "G1",
+   "namespace": "entity.cast",
+   "value": "{\"entity\": \"Janusz\", \"role\": \"testimonial\"}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "10:page",
+   "signal_id": "G1",
+   "namespace": "entity.cast",
+   "value": "{\"entity\": \"Marcin\", \"role\": \"testimonial\"}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "10:page",
+   "signal_id": "G1",
+   "namespace": "entity.cast",
+   "value": "{\"entity\": \"App Store\", \"role\": \"brand\"}",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "1:page",
+   "signal_id": "K",
+   "namespace": "page.kind",
+   "value": "advertorial",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "1:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "publication_date",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "1:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "author_name",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "1:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "comments_block",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "1:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "publisher_logo",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "1:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "author_profile_link",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   },
+   "state": "absent"
+  },
+  {
+   "view_id": "1:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "working_navigation",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   },
+   "state": "absent"
+  },
+  {
+   "view_id": "1:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "source_links",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   },
+   "state": "absent"
+  },
+  {
+   "view_id": "1:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "imprint",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   },
+   "state": "absent"
+  },
+  {
+   "view_id": "1:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "contact_page",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   },
+   "state": "absent"
+  },
+  {
+   "view_id": "1:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "related_articles",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   },
+   "state": "absent"
+  },
+  {
+   "view_id": "2:page",
+   "signal_id": "K",
+   "namespace": "page.kind",
+   "value": "advertorial",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "2:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "publication_date",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "2:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "author_name",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "2:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "comments_block",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "2:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "publisher_logo",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "2:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "author_profile_link",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   },
+   "state": "absent"
+  },
+  {
+   "view_id": "2:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "working_navigation",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   },
+   "state": "absent"
+  },
+  {
+   "view_id": "2:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "source_links",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   },
+   "state": "absent"
+  },
+  {
+   "view_id": "2:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "imprint",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   },
+   "state": "absent"
+  },
+  {
+   "view_id": "2:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "contact_page",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   },
+   "state": "absent"
+  },
+  {
+   "view_id": "2:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "related_articles",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   },
+   "state": "absent"
+  },
+  {
+   "view_id": "2:healthlinkq",
+   "signal_id": "K",
+   "namespace": "page.kind",
+   "value": "advertorial",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "2:healthlinkq",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "publication_date",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "2:healthlinkq",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "author_name",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "2:healthlinkq",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "comments_block",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "2:healthlinkq",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "publisher_logo",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "2:healthlinkq",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "author_profile_link",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   },
+   "state": "absent"
+  },
+  {
+   "view_id": "2:healthlinkq",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "working_navigation",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   },
+   "state": "absent"
+  },
+  {
+   "view_id": "2:healthlinkq",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "source_links",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   },
+   "state": "absent"
+  },
+  {
+   "view_id": "2:healthlinkq",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "imprint",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   },
+   "state": "absent"
+  },
+  {
+   "view_id": "2:healthlinkq",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "contact_page",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   },
+   "state": "absent"
+  },
+  {
+   "view_id": "2:healthlinkq",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "related_articles",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   },
+   "state": "absent"
+  },
+  {
+   "view_id": "3:page",
+   "signal_id": "K",
+   "namespace": "page.kind",
+   "value": "advertorial",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "3:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "publication_date",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "3:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "author_name",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "3:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "comments_block",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "3:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "publisher_logo",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "3:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "author_profile_link",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   },
+   "state": "absent"
+  },
+  {
+   "view_id": "3:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "working_navigation",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   },
+   "state": "absent"
+  },
+  {
+   "view_id": "3:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "source_links",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   },
+   "state": "absent"
+  },
+  {
+   "view_id": "3:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "imprint",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   },
+   "state": "absent"
+  },
+  {
+   "view_id": "3:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "contact_page",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   },
+   "state": "absent"
+  },
+  {
+   "view_id": "3:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "related_articles",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   },
+   "state": "absent"
+  },
+  {
+   "view_id": "48:page",
+   "signal_id": "K",
+   "namespace": "page.kind",
+   "value": "advertorial",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "48:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "publication_date",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "48:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "author_name",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "48:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "comments_block",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "48:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "publisher_logo",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "48:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "author_profile_link",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   },
+   "state": "absent"
+  },
+  {
+   "view_id": "48:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "working_navigation",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   },
+   "state": "absent"
+  },
+  {
+   "view_id": "48:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "source_links",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   },
+   "state": "absent"
+  },
+  {
+   "view_id": "48:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "imprint",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   },
+   "state": "absent"
+  },
+  {
+   "view_id": "48:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "contact_page",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   },
+   "state": "absent"
+  },
+  {
+   "view_id": "48:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "related_articles",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   },
+   "state": "absent"
+  },
+  {
+   "view_id": "61:article",
+   "signal_id": "K",
+   "namespace": "page.kind",
+   "value": "advertorial",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "61:article",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "publication_date",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "61:article",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "author_name",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "61:article",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "comments_block",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "61:article",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "publisher_logo",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "61:article",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "author_profile_link",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   },
+   "state": "absent"
+  },
+  {
+   "view_id": "61:article",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "working_navigation",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   },
+   "state": "absent"
+  },
+  {
+   "view_id": "61:article",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "source_links",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   },
+   "state": "absent"
+  },
+  {
+   "view_id": "61:article",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "imprint",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   },
+   "state": "absent"
+  },
+  {
+   "view_id": "61:article",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "contact_page",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   },
+   "state": "absent"
+  },
+  {
+   "view_id": "61:article",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "related_articles",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   },
+   "state": "absent"
+  },
+  {
+   "view_id": "14:page",
+   "signal_id": "K",
+   "namespace": "page.kind",
+   "value": "product_lander",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "14:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "price",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "14:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "order_form",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "14:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "testimonials",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "14:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "company_name",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   },
+   "state": "absent"
+  },
+  {
+   "view_id": "14:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "terms_link",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   },
+   "state": "absent"
+  },
+  {
+   "view_id": "14:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "imprint",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   },
+   "state": "absent"
+  },
+  {
+   "view_id": "14:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "ingredients_list",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   },
+   "state": "absent"
+  },
+  {
+   "view_id": "14:capture",
+   "signal_id": "K",
+   "namespace": "page.kind",
+   "value": "product_lander",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "14:capture",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "price",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "14:capture",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "order_form",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "14:capture",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "testimonials",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "14:capture",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "company_name",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   },
+   "state": "absent"
+  },
+  {
+   "view_id": "14:capture",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "terms_link",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   },
+   "state": "absent"
+  },
+  {
+   "view_id": "14:capture",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "imprint",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   },
+   "state": "absent"
+  },
+  {
+   "view_id": "14:capture",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "ingredients_list",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   },
+   "state": "absent"
+  },
+  {
+   "view_id": "47:page",
+   "signal_id": "K",
+   "namespace": "page.kind",
+   "value": "product_lander",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "47:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "price",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "47:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "order_form",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "47:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "testimonials",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "47:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "company_name",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   },
+   "state": "absent"
+  },
+  {
+   "view_id": "47:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "terms_link",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   },
+   "state": "absent"
+  },
+  {
+   "view_id": "47:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "imprint",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   },
+   "state": "absent"
+  },
+  {
+   "view_id": "47:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "ingredients_list",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   },
+   "state": "absent"
+  },
+  {
+   "view_id": "10:page",
+   "signal_id": "K",
+   "namespace": "page.kind",
+   "value": "app_store",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "10:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "rating",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "10:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "install_button",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "10:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "developer_link",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   },
+   "state": "absent"
+  },
+  {
+   "view_id": "10:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "privacy_policy",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   },
+   "state": "absent"
+  },
+  {
+   "view_id": "10:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "app_size",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   },
+   "state": "absent"
+  },
+  {
+   "view_id": "36:page",
+   "signal_id": "K",
+   "namespace": "page.kind",
+   "value": "event",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "36:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "agenda",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "36:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "organiser",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "36:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "imprint",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "36:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "terms_link",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "36:page",
+   "signal_id": "K",
+   "namespace": "expect.element",
+   "value": "speaker_bios",
+   "extractor": "fixture.ext",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   },
+   "state": "absent"
+  },
+  {
    "view_id": "5:video",
    "signal_id": "M1",
    "namespace": "video.frame_phash",
