@@ -157,6 +157,27 @@ def cmd_enrich(args) -> None:
     store.close()
 
 
+def cmd_patterns(args) -> None:
+    """Model stage: needs technique cards from `ftf perceive` and groups from `ftf run`."""
+    from .patterns.workflow import library_rows, run_discover, run_match, run_stability
+    from .registry import Context
+
+    ctx = Context(_store())
+    if args.action == "list":
+        for row in library_rows():
+            print(row)
+        return
+    if args.action == "stability":
+        print(run_stability(ctx))
+        return
+    run = run_discover if args.action == "discover" else run_match
+    summary = run(ctx, args.view or None)
+    print(summary)
+    if summary.get("reason"):
+        raise SystemExit(1)
+    print("run `ftf run` to rebuild fingerprints, comparisons and groups with pattern.score")
+
+
 def cmd_views(args) -> None:
     for v in _store().views():
         print(f"{v.view_id}  {v.kind.value:5}  {v.label}")
@@ -405,6 +426,11 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--min-coverage", type=float, default=0.0)
     p.add_argument("--reasons", action="store_true", help="print the reasons under each row")
     p.set_defaults(func=cmd_relations)
+
+    p = sub.add_parser("patterns", help="induce, match and inspect the pattern library (model)")
+    p.add_argument("action", choices=("discover", "match", "list", "stability"))
+    p.add_argument("--view", action="append", help="only this view id; may be repeated")
+    p.set_defaults(func=cmd_patterns)
 
     p = sub.add_parser("explain", help="layer-by-layer evidence and the typed relation for a pair")
     p.add_argument("view_a")

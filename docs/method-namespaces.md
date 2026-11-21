@@ -35,6 +35,10 @@ page to the downstream capture, independent of view-ID ordering. Its own landing
 does not establish a transition. The stored state supports navigation, not an independently
 verified HTTP redirect or exact visit sequence.
 
+Still missing on the sample and read from fixtures only: `asset.sha256`, `image.phash`,
+`creative.phash`, `video.frame_phash`, `dom.class`, `firstparty.sha256`, `code.evasion_filter`,
+`expect.element`. `pattern.score` is written by `ftf patterns discover`.
+
 ## Identity tier (T1): supports *same campaign*
 
 | Layer | Namespace | Value shape | Catalogue | Example |

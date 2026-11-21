@@ -5,6 +5,7 @@ HackNation challenge "Kolekcjoner fejków", set by NASK.
 
 - Design: [docs/architecture.md](docs/architecture.md)
 - Signals: [docs/signal-catalogue.md](docs/signal-catalogue.md)
+- **NEW**: [Pattern Library](PATTERN_LIBRARY.md) — Pattern discovery, library versioning, novelty tracking
 
 **Status: Method track built; identifier, kit, asset and perception extractors landing.**
 Twenty-three fingerprint layers, five comparator families with rarity weighting and a stoplist,
@@ -18,6 +19,10 @@ conventions, API routes, config key paths, hidden fields, server headers) and as
 them; the Perception track reads pages and screenshots with the model (`ftf perceive`).
 `docs/method-namespaces.md` lists the namespaces the layers consume. Warning-list enrichment
 and the basic interface are available below; live capture and broader enrichment remain to be built.
+
+Pattern discovery (architecture §6) includes a versioned library with stable IDs and
+merge/split history, embedding and clustering, pattern induction and matching, novelty
+tracking, and pattern-based playbook evidence. See [Pattern Library](PATTERN_LIBRARY.md).
 
 ## Run locally
 
