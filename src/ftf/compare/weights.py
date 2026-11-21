@@ -115,10 +115,22 @@ class RarityCurve:
         return (self.zero_from - holders) / (self.zero_from - self.full_until)
 
 
+# Views sharing a value here are one campaign record by definition, so they count as one
+# holder from the first pass on. Otherwise a campaign deployed on six domains would make its
+# own UUID look common and suppress it before grouping could ever see it.
+BOOTSTRAP_NAMESPACES = ("aio.campaign_uuid",)
+
+
 class WeightTable:
-    def __init__(self, base: Mapping[str, float] | None = None, curve: RarityCurve | None = None):
+    def __init__(
+        self,
+        base: Mapping[str, float] | None = None,
+        curve: RarityCurve | None = None,
+        bootstrap_namespaces: tuple[str, ...] = BOOTSTRAP_NAMESPACES,
+    ):
         self.base: dict[str, float] = dict(BASE_WEIGHTS if base is None else base)
         self.curve = curve or RarityCurve()
+        self.bootstrap_namespaces = bootstrap_namespaces
         self.reset()
 
     def reset(self) -> None:
@@ -145,9 +157,13 @@ class WeightTable:
             domains_by_view[v.view_id] = ds
             domains_by_incident[v.incident_id] |= ds
 
+        provisional = self._bootstrap_campaigns(views, observations) if not campaigns else {}
+
         def holders_of(view) -> set[str]:
             if campaigns and view.view_id in campaigns:
                 return {f"campaign:{campaigns[view.view_id]}"}
+            if view.view_id in provisional:
+                return {f"record:{provisional[view.view_id]}"}
             ds = domains_by_view[view.view_id] or domains_by_incident[view.incident_id]
             return {f"domain:{d}" for d in ds} or {f"incident:{view.incident_id}"}
 
@@ -164,6 +180,27 @@ class WeightTable:
         self.holders = {k: len(hs) for k, hs in holders.items()}
         self.learned_stoplist = {k for k, n in self.holders.items() if self.curve(n) == 0.0}
         self.fitted = True
+
+    def _bootstrap_campaigns(self, views, observations) -> dict[str, str]:
+        """view -> provisional campaign id: views sharing a bootstrap-namespace value are one."""
+        parent: dict[str, str] = {}
+
+        def find(x: str) -> str:
+            while parent.setdefault(x, x) != x:
+                x = parent[x]
+            return x
+
+        by_value: dict[Key, list[str]] = defaultdict(list)
+        for v in views:
+            for o in observations[v.view_id]:
+                if o.namespace in self.bootstrap_namespaces and o.state is State.PRESENT:
+                    by_value[(o.namespace, str(o.value))].append(v.view_id)
+        for members in by_value.values():
+            for other in members[1:]:
+                ra, rb = find(members[0]), find(other)
+                if ra != rb:
+                    parent[rb] = ra
+        return {v: find(v) for v in parent}
 
     # -- lookups ---------------------------------------------------------------------
 

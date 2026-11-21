@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING
 
 from ..compare.minhash import bands
 from ..compare.weights import weights
-from ..contracts import FingerprintKind, Purpose, Relation, RelationType, State, Tier
+from ..contracts import FingerprintKind, Relation, RelationType, Tier
 from ..fusion.config import DEFAULT, FusionConfig
 from ..registry import layers, load_plugins
 
@@ -34,33 +34,40 @@ def _pair(a: str, b: str) -> Pair:
     return (a, b) if a <= b else (b, a)
 
 
-def candidate_pairs(store: Store, band_size: int = 4) -> set[Pair]:
+def fingerprint_keys(fp, band_size: int = 4) -> list[tuple]:
+    """Index keys of one fingerprint: the items a comparator would actually match on.
+    Set items (weight > 0), the page kind of a three-state vector, MinHash bands, and one
+    bucket per dense layer. Indexing fingerprints rather than raw observations means a
+    layer's transformation (pattern ids without their scores, case-folded offers) is
+    indexed the way it is compared."""
+    keys: list[tuple] = []
+    if fp.kind is FingerprintKind.SET:
+        if isinstance(fp.payload, list):
+            for item in fp.payload:
+                ns, value = item["ns"], str(item["value"])
+                if weights.weight(ns, value) > 0:
+                    keys.append((fp.layer_id, ns, value))
+        elif isinstance(fp.payload, dict) and "kind" in fp.payload:
+            keys.append((fp.layer_id, "kind", str(fp.payload["kind"])))
+    elif fp.kind is FingerprintKind.HASH and fp.payload.get("algo") == "minhash":
+        keys += [(fp.layer_id, "band", key) for key in bands(fp.payload["values"], band_size)]
+    else:  # perceptual hashes and vectors: every holder of the layer is a candidate
+        keys.append((fp.layer_id, "*"))
+    return keys
+
+
+def build_index(store: Store, band_size: int = 4) -> dict[tuple, set[str]]:
     load_plugins()
-    views = store.views()
-    found: set[Pair] = set()
-
-    # identifier index
-    holders: dict[tuple[str, str], set[str]] = defaultdict(set)
-    for v in views:
-        for o in store.observations(v.view_id):
-            if o.state is not State.PRESENT or o.purpose is Purpose.RISK or o.value is None:
-                continue
-            key = (o.namespace, str(o.value))
-            if weights.weight(*key) > 0:
-                holders[key].add(v.view_id)
-    for members in holders.values():
-        found |= {_pair(a, b) for a, b in combinations(sorted(members), 2)}
-
-    # MinHash bands, perceptual hashes, vectors
-    by_band: dict[tuple[str, str], set[str]] = defaultdict(set)
-    dense: dict[str, set[str]] = defaultdict(set)
+    index: dict[tuple, set[str]] = defaultdict(set)
     for fp in store.fingerprints():
-        if fp.kind is FingerprintKind.HASH and fp.payload.get("algo") == "minhash":
-            for key in bands(fp.payload["values"], band_size):
-                by_band[(fp.layer_id, key)].add(fp.view_id)
-        elif fp.kind in (FingerprintKind.HASH, FingerprintKind.VECTOR):
-            dense[fp.layer_id].add(fp.view_id)
-    for members in list(by_band.values()) + list(dense.values()):
+        for key in fingerprint_keys(fp, band_size):
+            index[key].add(fp.view_id)
+    return index
+
+
+def candidate_pairs(store: Store, band_size: int = 4) -> set[Pair]:
+    found: set[Pair] = set()
+    for members in build_index(store, band_size).values():
         found |= {_pair(a, b) for a, b in combinations(sorted(members), 2)}
     return found
 

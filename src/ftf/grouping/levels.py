@@ -89,19 +89,52 @@ def build_campaigns(
     config: FusionConfig = DEFAULT,
     funnel: list[tuple[str, str]] = (),
 ):
+    """Union-find over duplicate and same-campaign edges, strongest first, with two guards:
+    the edge itself must rest on identity or two artifact groups, and the two components
+    being joined must not contain a contradicting pair (A-B and B-C may each look like one
+    campaign while A and C declare different campaign records; then B joins the stronger
+    side and the other merge is refused). Funnel unions go through the same check."""
     uf = UnionFind(view_ids)
-    rejected = []
+    rejected: list[tuple[str, str, str]] = []
+    contradicting = {
+        (r.view_a, r.view_b)
+        for r in relations
+        if any(x.startswith("contradiction") for x in r.reasons)
+    }
+
+    def members(root: str) -> list[str]:
+        return [v for v in uf.parent if uf.find(v) == root]
+
+    def safe_union(a: str, b: str) -> bool:
+        ra, rb = uf.find(a), uf.find(b)
+        if ra == rb:
+            return True
+        if contradicting:
+            for x in members(ra):
+                for y in members(rb):
+                    if ((x, y) if x <= y else (y, x)) in contradicting:
+                        rejected.append((a, b, f"contradiction between the components: {x} vs {y}"))
+                        return False
+        uf.union(a, b)
+        return True
+
+    def strength(r: Relation) -> float:
+        bonus = 1.0 if r.type is RelationType.DUPLICATE else 0.0
+        return (
+            bonus
+            + r.tier_scores.get(Tier.IDENTITY.value, 0.0)
+            + r.tier_scores.get(Tier.ARTIFACT.value, 0.0)
+        )
+
+    edges = [r for r in relations if r.type in (RelationType.DUPLICATE, RelationType.SAME_CAMPAIGN)]
+    for r in sorted(edges, key=strength, reverse=True):
+        if merge_guard(r, config):
+            safe_union(r.view_a, r.view_b)
+        else:
+            rejected.append((r.view_a, r.view_b, "merge guard: no identity or two artifact groups"))
     for a, b in funnel:  # campaign membership propagates along funnel edges, never co-capture
         if a in uf.parent and b in uf.parent:
-            uf.union(a, b)
-    for r in relations:
-        if r.type in (RelationType.DUPLICATE, RelationType.SAME_CAMPAIGN):
-            if merge_guard(r, config):
-                uf.union(r.view_a, r.view_b)
-            else:
-                rejected.append(
-                    (r.view_a, r.view_b, "merge guard: no identity or two artifact groups")
-                )
+            safe_union(a, b)
     comps = uf.groups()
     campaigns = {f"c:{root}": views for root, views in comps.items()}
     campaign_of = {v: cid for cid, views in campaigns.items() for v in views}

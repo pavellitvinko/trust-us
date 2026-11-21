@@ -29,15 +29,24 @@ def cmd_ingest(args) -> None:
         cmd_run(args)
 
 
+def _compare_and_group(store, args) -> None:
+    """Shared tail of run and load-fixtures. With --candidates the brute-force pass is skipped:
+    fusion compares the candidate pairs itself and stores their evidence."""
+    candidates = getattr(args, "candidates", False)
+    if not candidates:
+        print(f"evidence rows: {pipeline.run_compare_all(store)}")
+    groups = run_method(store, candidates=candidates)
+    print(
+        f"relations: {len(store.relations())}; campaigns: {len(groups.campaigns)}; "
+        f"families: {len(groups.families)}"
+    )
+
+
 def cmd_run(args) -> None:
     store = _store()
     print(f"observations: {pipeline.run_extract(store)}")
     print(f"fingerprints: {pipeline.run_fingerprint(store)}")
-    print(f"evidence rows: {pipeline.run_compare_all(store)}")
-    groups = run_method(store)
-    print(
-        f"relations: {len(store.relations())}; campaigns: {len(groups.campaigns)}; families: {len(groups.families)}"
-    )
+    _compare_and_group(store, args)
 
 
 def cmd_load_fixtures(args) -> None:
@@ -47,11 +56,7 @@ def cmd_load_fixtures(args) -> None:
     store = store_from_fixtures(Path(args.path) if args.path else OBSERVATIONS, store=_store())
     print(f"views: {len(store.views())}")
     print(f"fingerprints: {pipeline.run_fingerprint(store)}")
-    print(f"evidence rows: {pipeline.run_compare_all(store)}")
-    groups = run_method(store)
-    print(
-        f"relations: {len(store.relations())}; campaigns: {len(groups.campaigns)}; families: {len(groups.families)}"
-    )
+    _compare_and_group(store, args)
 
 
 def cmd_views(args) -> None:

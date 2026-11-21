@@ -17,8 +17,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
-from ..compare.weights import weights
-from ..contracts import FingerprintKind, Purpose, Relation, RelationType, State
+from ..contracts import Relation, RelationType
 from ..fusion import DEFAULT, FusionConfig, fuse_pair, prepare
 from .levels import Groups, build_groups, merge_guard
 
@@ -62,17 +61,15 @@ class Assignment:
 
 
 def candidate_views(store: Store, view_id: str, exclude_incident: bool = True) -> set[str]:
+    """Views sharing an index key with this one: identifier values, MinHash bands, dense layers."""
+    from .candidates import build_index, fingerprint_keys
+
     own = store.get_view(view_id)
+    index = build_index(store)
     found: set[str] = set()
-    for o in store.observations(view_id):
-        if o.state is not State.PRESENT or o.purpose is Purpose.RISK or o.value is None:
-            continue
-        if weights.weight(o.namespace, str(o.value)) <= 0:
-            continue
-        found |= set(store.views_with_value(o.namespace, o.value))
     for fp in store.fingerprints(view_id=view_id):
-        if fp.kind is not FingerprintKind.SET:
-            found |= {f.view_id for f in store.fingerprints(layer_id=fp.layer_id)}
+        for key in fingerprint_keys(fp):
+            found |= index.get(key, set())
     found.discard(view_id)
     if exclude_incident:
         same = {v.view_id for v in store.views(own.incident_id)}
@@ -143,7 +140,31 @@ def assign(
             f"compared with {len(seen)} candidates at adequate coverage; no tier reached its threshold"
         )
         return Assignment(view_id, Outcome.NOVEL, None, related, len(candidates), reasons)
-    reasons.append("no candidate could be compared at adequate coverage")
+    # No candidate at adequate coverage. Well-observed material that shares nothing with the
+    # corpus is novel, not insufficient: check coverage against the non-candidates by layer
+    # presence alone (the comparison would score 0 on every set layer anyway).
+    from .candidates import cheap_relation
+
+    own_incident = store.get_view(view_id).incident_id
+    others = [
+        v.view_id
+        for v in store.views()
+        if v.view_id != view_id
+        and v.view_id not in candidates
+        and (not exclude_incident or v.incident_id != own_incident)
+    ]
+    observable = [
+        o
+        for o in others
+        if cheap_relation(store, view_id, o, config).coverage >= config.min_coverage
+    ]
+    if observable:
+        reasons.append(
+            f"shares no indexed value with {len(observable)} views it is comparable with "
+            f"at adequate coverage"
+        )
+        return Assignment(view_id, Outcome.NOVEL, None, related, len(candidates), reasons)
+    reasons.append("no view could be compared at adequate coverage")
     return Assignment(view_id, Outcome.INSUFFICIENT, None, related, len(candidates), reasons)
 
 
