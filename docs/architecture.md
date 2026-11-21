@@ -288,6 +288,38 @@ Each layer declares: which observations it consumes, the fingerprint kind, the c
 
 Layers are added by registering a class; nothing else changes. The entity-masked narrative layer deserves a note: before embedding, every person, organisation, product, amount and date is replaced with a role placeholder (`[CELEBRITY]`, `[BANK]`, `[PLATFORM]`, `[AMOUNT]`). The Brzoska, Olejnik and Lis stories then land near each other because their skeleton is the same, while `text.semantic`, which keeps the names, still separates them. Together the two layers distinguish "same text" from "same story with a different cast".
 
+
+### 8a. As built (Method track, 2026-11-21)
+
+Twenty-three layers are registered; each declares tier, correlation group and comparator and is built by `src/ftf/layers/`. The namespaces each one reads are the contract with the other tracks (`docs/method-namespaces.md`).
+
+| Layer | Tier | Group | Comparator | Built from |
+| --- | --- | --- | --- | --- |
+| `ids.domain` | T1 | domain | shared_value | `domain.registrable`, `url.host_path`, `outbound.domain`, `redirect.domain` |
+| `ids.campaign` | T1 | campaign | shared_value | `aio.campaign_uuid`*, `aio.owner_uuid`*, `aio.landing_uuid`, `aio.flow_uuid`, `campaign.label`, `landing.label`, `nav.landing_uuid` |
+| `ids.tracking` | T1 | tracking | shared_value | `fb_pixel`, `gads_id`, `gtm_id`, `ga_id`, other pixel IDs, `cdn.zone_id` |
+| `ids.conversion` | T1 | conversion | shared_value | `aff.*`, `form_endpoint_host/path`, `api_key_id`, `tracker.host`, `contact.*` |
+| `brand.offer` | T1 | brand | shared_value | `brand.offer` (case-folded) |
+| `asset.exact` | T2 | asset | shared_value | `asset.sha256`, `avatar.sha256` |
+| `text.shingle` | T2 | text | minhash | word 5-grams of `text.body`, 128 permutations |
+| `text.semantic` | T2 | semantic | calibrated_cosine | embedding of `text.body` |
+| `asset.perceptual`, `ad.creative`, `media.video` | T2 | perceptual / creative / video | phash | `image.phash`, `creative.phash`, `video.frame_phash` |
+| `kit.config` | T3 | kit_config | set_overlap | `aio.template_uuid`, `aio.landing_type_uuid`, `config.key_path`, `api.route_shape`, `traffic_source` |
+| `kit.url` | T3 | kit_url | set_overlap | `url.param_name`, `url.param_shape`, `url.path_convention` |
+| `kit.form` | T3 | kit_form | set_overlap | `form.field` |
+| `kit.dom` | T3 | kit_dom | minhash | `dom.class` minus framework and translator classes |
+| `kit.code` | T3 | kit_code | set_overlap | `firstparty.sha256`, `code.comment_lang`, `code.residue_lang`, `code.naming`, `code.evasion_filter` |
+| `infra.host` | T3 | infra | shared_value | `dns.ns_pair`, `rdap.registrar`, `http.server`, `origin.asn` |
+| `narrative.skeleton` | T4 | narrative | calibrated_cosine | `text.body` after scripted masking of people, organisations, products, amounts, dates |
+| `pattern.mo` | T4 | pattern | pattern_overlap | `pattern.score` rows with score ≥ 0.5 |
+| `kit.absence` | T4 | absence | absence_agreement | `expect.element` three-state + `page.kind`; same kind of page only |
+| `entity.cast`, `entity.roles` | T4 | cast | set_overlap | `entity.cast` pairs; roles alone |
+| `visual.layout` | T4 | layout | set_overlap | `layout.block` (stand-in for the screenshot embedding) |
+
+\* exclusive namespace: two different values are a contradiction.
+
+Embeddings go through one interface (`layers/_embedder.py`): `FakeEmbedder` (hashed word stems, deterministic, no network) for tests and the model-off run; `GatewayEmbedder` (Gemini through the content-hash cache, chunked and mean-pooled) when a key is present. The gateway path was not exercised against a live key during the build.
+
 ---
 
 ## 9. Comparing two views
@@ -339,6 +371,17 @@ A **contradiction** is two different values in a namespace marked exclusive — 
 
 Confidence is reported as a label derived from score, coverage and how many independent groups agree — not as a probability, since ten folders cannot calibrate one.
 
+
+### 9a. As built
+
+**Comparators** (`src/ftf/compare/`): `shared_value` (1 − Π(1 − w)), `set_overlap` (weighted Jaccard), `minhash` (signature agreement), `phash` (best-match pairing, Hamming ≤ 10 of 64 bits, score = matched share of the smaller side), `calibrated_cosine` (cosine rescaled against the background: score = clip((cos − μ − 2σ)/(1 − μ − 2σ)); μ, σ fitted per layer in `fusion.prepare` from pairs in different incidents without identity evidence), `pattern_overlap` (Σmin/Σmax over pattern scores), `absence_agreement`.
+
+**Weights** (`compare/weights.py`): w = namespace base weight × rarity. Base weights: campaign UUID 0.95, owner, landing, flow UUIDs and pixel/Ads IDs 0.9, API key 0.85, form host 0.8, template UUID 0.7, exact asset 0.7, first-party file hash 0.6, URL parameter 0.5, config key path and form field 0.3, name-server pair 0.4, registrar and server header 0.2 (full table in the file). Rarity = 1 up to 2 independent holders, falling linearly to 0 at 6; holders are registrable domains until campaigns exist, then campaigns (the second fusion pass). Weight 0 adds the value to the learned stoplist. Seed stoplist: CDN and platform hosts, jQuery / fbevents / `saved_resource` hashes, 25 platform URL parameters and the platforms' own value shapes for them (`utm_id:digits18`), unresolved template macros.
+
+**Fusion** (`src/ftf/fusion/`): group score = max of the group's layers; tier score = 1 − Π(1 − weight_g × group); coverage = comparable groups / registered groups. Group weights: identity groups 1.0 (brand 0.7, conversion 0.9), artifact groups 0.9, kit groups 0.6 (one kit group alone caps at 0.6 and cannot make a family), pattern and narrative 0.8, absence and cast 0.5, layout 0.4, infra 0.3. Thresholds: duplicate text 0.9, identity 0.8, artifact 0.8 from at least two groups each ≥ 0.5, kit 0.7, playbook 0.7, minimum coverage 0.3. All of this lives in `FusionConfig` and loads from JSON.
+
+Decisions in order: **duplicate** (shared `url.host_path` or primary hash, or an ad creative within 6 bits, and text ≥ 0.9 or absent); **same campaign** (identity ≥ 0.8, or artifact ≥ 0.8 from two groups; never across a contradiction); **same family** (kit ≥ 0.7, or a contradiction with strong artifact or identity evidence); **same playbook** (playbook ≥ 0.7); **unrelated** (coverage ≥ 0.3); **insufficient evidence**. Contradictions are computed from fingerprints over the exclusive namespaces, and every identity value shared across a contradicting pair is demoted corpus-wide; demoted items are re-scored inside the kit tier under a `demoted:<group>` group. On the sample's fixtures the demoted set is exactly `APPA-165`, `shadowtracecore.com`, `/v1/landing/form-event` and `showflashdaily.com`. Confidence is a label: high (score ≥ 0.9, two agreeing groups, coverage ≥ 0.4), medium, low.
+
 ---
 
 ## 10. Grouping and assigning new material
@@ -360,6 +403,17 @@ Chaining through hubs — the failure mode of plain connected components — is 
 followed by the ranked related items at each level. "Novel pattern" and "insufficient evidence" are first-class outcomes with their own reasons, because the hidden test set contains material that must *not* be attached to anything.
 
 **Incident roll-up.** Results are computed per view, carried along funnel edges, and summarised per incident, because test material arrives as folders. A screenshot-only incident that matches a known ad view therefore inherits the campaign of the page that ad led to. An incident may map to more than one campaign; folder 2 does.
+
+
+### 10a. As built
+
+`grouping/levels.py`: campaigns by union-find over duplicate and same-campaign edges with the merge guard (identity ≥ 0.8, or artifact ≥ 0.8 with the artifact reason, or an anchored duplicate); families by union-find over campaigns joined by same-family edges; playbooks by average-linkage agglomerative clustering on 1 − T4, cut at 0.3, a view may carry several labels. Groups are recomputed from stored relations (`ftf groups`); a groups table is requested in `docs/method-requests.md`.
+
+`grouping/funnel.py`: inside an incident an ad or screenshot joins a page only with evidence (shown domain = page host, shared ad ID, shared brand or named person, redirect or stored navigation naming the landing); `co_captured` edges are returned for display and never grouped; with pages present and no evidence, a `funnel.mismatch` observation (purpose risk) is written instead. Campaign membership propagates along funnel edges (`ftf incidents`).
+
+`grouping/assign.py`: candidates from the identifier index (`store.views_with_value`, weight > 0) plus every view sharing a hash or vector layer; six outcomes in the order duplicate of X, new variant of campaign C, new campaign in family F, new campaign with known playbook P, novel pattern (compared at adequate coverage, no tier reached), insufficient evidence; ranked related items per relation type (`ftf assign`, `ftf loio`).
+
+`grouping/candidates.py`: inverted index plus MinHash bands (band size 4) plus dense-layer buckets; on the fixtures 81 of 171 pairs are compared in full and the relation table, coverage and all three group levels are identical to the all-pairs run (`ftf run --candidates`).
 
 ---
 
@@ -433,6 +487,21 @@ Where the system should exceed the baseline:
 - **New material in seconds**, with an explicit open-set outcome.
 - **Live capture and a cloaking test**, which the baseline lists as work it could not do.
 
+
+### 13a. Results on the fixtures (2026-11-21)
+
+The organiser sample was not on the build machine, so every number below is on `tests/fixtures/observations.json`: 19 views in 11 incidents, hand-made from the values in the baseline report (identifiers, hashes, kit schemas, text with the sample's near-duplicate structure, pattern and cast rows as the Perception track will emit them). `ftf eval --fixtures`, `ftf loio`, `ftf ablate`, `ftf ablate --degrade` reproduce them; `ftf eval` runs the same harness on an ingested sample.
+
+**Reference agreement** (52 pairs: the 45-pair matrix plus 7 sub-folder edges; `tests/fixtures/reference_pairs.json`): 100 % agreement when accepted deviations count, 73 % exact, **0 false merges**. Per type: duplicate 2/2, same campaign 4/4, same family precision 0.43 and recall 1.0 (the four extra family links are 1/2 ↔ 48/61 through the shared AIO kit, which the baseline files as narrative only and this document's §13 argues is a kit), same playbook precision 0.80 and recall 0.40 (the misses are the video-only case 5, which has no transcript yet, and 1 ↔ 61), unrelated precision 1.0. The 14 accepted deviations are the family-for-playbook pairs above, nine "insufficient evidence" results against case 5, and the Brzoska ↔ Olejnik pages in folder 2 coming out as same playbook.
+
+**Leave-one-incident-out:** 2 → new variant of case 1's campaign; 3 → duplicate of the healthlinkq capture; 61 → new campaign in 48's family; 5 → insufficient evidence; 36 → novel pattern; 99 (a re-encoded copy of the case-1 ad, nothing else) → duplicate of that ad and, through the funnel edge, case 1's campaign.
+
+**Layer ablation** (one layer off at a time, 23 runs): only two layers change a headline result. Without `ids.campaign` the contradiction rule has nothing to work on and 48 ↔ 61 become one campaign: the two false merges in the whole study. Without `ids.domain` the healthlinkq capture and case 3 lose their duplicate anchor and fall to same campaign. Without `pattern.mo` four playbook pairs fall to unrelated; `entity.roles` and `kit.absence` each move one. Every other layer is redundant on this corpus, which says more about the fixtures' redundancy than about the layers: the sample's own data will decide.
+
+**Degradation:** no HAR-derived evidence: no change. Images re-encoded and hue-shifted (2–3 bits of pHash, exact hashes gone): no change. Incident 2 on a swapped domain: 1 ↔ 2 stays same campaign; healthlinkq ↔ 3 drops from duplicate to same campaign (two artifact groups). Screenshots and video only: every page pair is insufficient evidence, the copied ad still links (duplicate). Model off, deterministic evidence only (16 layers): all four identity and kit headline pairs hold, 0 false merges, the playbook relations disappear.
+
+**What was cut or left unverified:** the Gemini embedder path has no live-key run; `narrative.skeleton` closeness of the Brzoska, Olejnik and Lis stories is verified only as an ordering with the fake embedder (above the unrelated pairs, above the name-keeping semantic layer), not as an absolute score; `visual.layout` is a named-block stand-in, not an embedding; threshold tuning stayed at the hand-set values because they reproduce the reference without a false merge; groups are not persisted.
+
 ---
 
 ## 14. Twelve-hour build plan
@@ -483,6 +552,9 @@ Organiser material may be used only for the challenge and must not be redistribu
 **Still open, for the mentors**
 
 1. In what form does the hidden set arrive, and is assignment scored per folder or per artifact?
+
+
+**Method track status of the open question (2026-11-21):** not yet asked. Until answered, results are computed per view, carried along funnel edges and rolled up per incident (`ftf incidents`), so either scoring unit is served.
 
 ---
 

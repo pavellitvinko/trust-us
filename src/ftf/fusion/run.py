@@ -50,14 +50,24 @@ def fuse_pair(
     return relation
 
 
-def run_method(store: Store, config: FusionConfig = DEFAULT):
+def run_method(store: Store, config: FusionConfig = DEFAULT, candidates: bool = False):
     """Fuse, group, then fuse again with rarity counted over the campaigns just found.
-    Returns the final groups."""
+    With `candidates`, only indexed candidate pairs are compared in full. Returns the groups."""
     from ..grouping import build_groups
 
-    run_fuse(store, config)
+    if candidates:
+        from ..grouping.candidates import run_fuse_with_candidates as _run
+
+        def fuse_all(campaigns=None):
+            _run(store, config, campaigns)
+    else:
+
+        def fuse_all(campaigns=None):
+            run_fuse(store, config, campaigns=campaigns)
+
+    fuse_all()
     groups = build_groups(store, config)
-    run_fuse(store, config, campaigns=groups.campaign_of)
+    fuse_all(groups.campaign_of)
     return build_groups(store, config)
 
 
