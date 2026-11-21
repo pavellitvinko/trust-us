@@ -203,7 +203,7 @@ def ingest_folder(
             attachments = [
                 q
                 for q in files
-                if q.parent == p.parent and q.name.startswith(p.stem) and q.suffix == ".json"
+                if q.parent == p.parent and q.name.startswith(f"{p.stem}.") and q.suffix == ".json"
             ]
         else:
             continue

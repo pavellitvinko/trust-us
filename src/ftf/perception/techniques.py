@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import logging
 import re
 import subprocess
 from dataclasses import dataclass
@@ -34,6 +35,8 @@ from .image import (
 )
 from .image import NAME as IMAGE_READER
 
+log = logging.getLogger(__name__)
+
 NAME = "perception.technique"
 VERSION = "1"
 PROMPT_VERSION = "1"
@@ -41,6 +44,7 @@ SIGNAL = "H"
 NAMESPACE = "technique.card"
 
 MAX_TEXT_CHARS = 40_000
+MAX_METADATA_CHARS = 1_000_000
 MAX_IMAGES = 6
 MAX_FACTS = 120
 MAX_FACT_CHARS = 160
@@ -71,10 +75,30 @@ fraction of the image from 0 to 1 with the origin at the top left."""
 
 _SKIPPED_TAGS = frozenset({"script", "style", "noscript", "template", "svg"})
 _STRUCK_TAGS = frozenset({"s", "strike", "del"})
+_VOID_TAGS = frozenset(
+    {
+        "area",
+        "base",
+        "br",
+        "col",
+        "embed",
+        "hr",
+        "img",
+        "input",
+        "link",
+        "meta",
+        "param",
+        "source",
+        "track",
+        "wbr",
+    }
+)
+_HIDDEN_STYLE = re.compile(r"(?i)display\s*:\s*none|visibility\s*:\s*hidden")
 _TEXT_ATTRS = ("alt", "title", "placeholder", "aria-label")
 _BUTTON_TYPES = frozenset({"button", "submit"})
 _TIMER_WORD = re.compile(r"(?i)count[-_ ]?down|\btimer\b|licznik|odliczani")
 _TIMER_CALL = re.compile(r"\bset(?:Interval|Timeout)\s*\(")
+_TIMER_WRITE = re.compile(r"\.(?:textContent|innerText|innerHTML)\s*=|\.(?:text|html)\s*\(")
 _TYPOGRAPHY = str.maketrans(
     {
         "“": '"',
@@ -114,6 +138,10 @@ class TechniqueCards(BaseModel):
     cards: list[TechniqueCard]
 
 
+class _MediaError(Exception):
+    """A file or media tool failed for now, so this says nothing about the view's content."""
+
+
 @dataclass(frozen=True)
 class _Image:
     media_type: str
@@ -126,8 +154,17 @@ class _Image:
 class _Input:
     text: str
     text_file: str | None
+    segments: tuple[tuple[str | None, str], ...]  # searchable text of each source file
     facts: tuple[str, ...]
     images: tuple[_Image, ...]
+
+
+def _close(stack: list[str], tag: str) -> None:
+    """Close the nearest open `tag` and anything left unclosed inside it."""
+    for index in range(len(stack) - 1, -1, -1):
+        if stack[index] == tag:
+            del stack[index:]
+            return
 
 
 class _PageText(HTMLParser):
@@ -141,33 +178,30 @@ class _PageText(HTMLParser):
         self._struck_tags: list[str] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        is_void = tag in _VOID_TAGS
         if self._skip:
-            if tag in _SKIPPED_TAGS:
+            if not is_void:
                 self._skip.append(tag)
             return
-        if tag in _SKIPPED_TAGS:
-            self._skip.append(tag)
-            return
         values = {k.lower(): v or "" for k, v in attrs}
+        style = values.get("style", "")
+        if tag in _SKIPPED_TAGS or "hidden" in values or _HIDDEN_STYLE.search(style):
+            if not is_void:
+                self._skip.append(tag)
+            return
         self.parts.extend(values[a] for a in _TEXT_ATTRS if values.get(a))
         if tag == "input" and values.get("type", "").lower() in _BUTTON_TYPES:
             self.parts.append(values.get("value", ""))
-        if tag in _STRUCK_TAGS or "line-through" in values.get("style", "").lower():
+        if not is_void and (
+            self._struck_tags or tag in _STRUCK_TAGS or "line-through" in style.lower()
+        ):
             self._struck_tags.append(tag)
-
-    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if not self._skip and tag not in _SKIPPED_TAGS:
-            before = len(self._struck_tags)
-            self.handle_starttag(tag, attrs)
-            del self._struck_tags[before:]
 
     def handle_endtag(self, tag: str) -> None:
         if self._skip:
-            if self._skip[-1] == tag:
-                self._skip.pop()
-            return
-        if self._struck_tags and self._struck_tags[-1] == tag:
-            self._struck_tags.pop()
+            _close(self._skip, tag)
+        else:
+            _close(self._struck_tags, tag)
 
     def handle_data(self, data: str) -> None:
         if self._skip or not data.strip():
@@ -182,14 +216,37 @@ def searchable(text: str) -> str:
     return normalise_text(text.translate(_TYPOGRAPHY))
 
 
-def _page_text(html: str) -> tuple[str, list[str]]:
+def _page_text(html: str) -> tuple[list[str], list[str]]:
+    """Separate text blocks, so redacting one `cookie:` line cannot swallow the next block."""
     parser = _PageText()
     try:
         parser.feed(html)
         parser.close()
     except (AssertionError, ValueError):  # keep what was read from badly broken markup
         pass
-    return " ".join(" ".join(parser.parts).split()), [" ".join(s.split()) for s in parser.struck]
+    blocks = [" ".join(part.split()) for part in parser.parts]
+    return [block for block in blocks if block], [" ".join(s.split()) for s in parser.struck]
+
+
+def _assemble(
+    blocks: list[tuple[str | None, str]],
+) -> tuple[str, tuple[tuple[str | None, str], ...]]:
+    """Redact block by block, cap the total, and keep the text of each source file."""
+    kept: list[str] = []
+    by_file: dict[str | None, list[str]] = {}
+    used = 0
+    for file, block in blocks:
+        room = MAX_TEXT_CHARS - used
+        if room <= 0:
+            break
+        safe = redact_text(block)[:room]
+        if not safe:
+            continue
+        kept.append(safe)
+        by_file.setdefault(file, []).append(safe)
+        used += len(safe) + 1
+    segments = tuple((file, searchable(" ".join(parts))) for file, parts in by_file.items())
+    return " ".join(kept)[:MAX_TEXT_CHARS], segments
 
 
 def _read_image(path: Path, file: str | None, prefix: str = "") -> _Image | None:
@@ -198,16 +255,24 @@ def _read_image(path: Path, file: str | None, prefix: str = "") -> _Image | None
         if not MIN_IMAGE_BYTES <= size <= MAX_IMAGE_BYTES:
             return None
         data = path.read_bytes()
-    except OSError:
-        return None
+    except OSError as exc:
+        raise _MediaError(str(exc)) from exc
     media_type = sniff_media_type(data)
-    if media_type is None or (media_type == "image/gif" and _is_animated_gif(data)):
+    if media_type is None:
+        return None
+    try:
+        if media_type == "image/gif" and _is_animated_gif(data):
+            return None
+    except Exception:  # noqa: BLE001 - a damaged image is simply not usable
         return None
     return _Image(media_type, data, file, prefix)
 
 
-def _page_images(view: View, ctx: Context, material: _material.Material) -> list[_Image]:
-    """The largest distinct images, since icons and tracking pixels say little."""
+def _page_images(
+    view: View, ctx: Context, material: _material.Material
+) -> tuple[list[_Image], bool]:
+    """Capture screenshots first, then the largest distinct images. Also reports read failures."""
+    failed = False
     sized: list[tuple[int, str]] = []
     for resource in material.resource_names:
         file = resource.source.file
@@ -216,11 +281,19 @@ def _page_images(view: View, ctx: Context, material: _material.Material) -> list
         try:
             sized.append((ctx.path(view, file).stat().st_size, file))
         except OSError:
-            continue
+            failed = True
+    attachments = sorted(
+        view.attachments, key=lambda f: ("screenshot" not in Path(f).name.lower(), f)
+    )
+    ordered = [*attachments, *(f for _, f in sorted(sized, key=lambda i: (-i[0], i[1])))]
     images: list[_Image] = []
     seen: set[str] = set()
-    for _, file in sorted(sized, key=lambda item: (-item[0], item[1])):
-        image = _read_image(ctx.path(view, file), file)
+    for file in ordered:
+        try:
+            image = _read_image(ctx.path(view, file), file)
+        except _MediaError:
+            failed = True
+            continue
         if image is None:
             continue
         digest = hashlib.sha256(image.data).hexdigest()
@@ -230,7 +303,7 @@ def _page_images(view: View, ctx: Context, material: _material.Material) -> list
         images.append(image)
         if len(images) == MAX_IMAGES:
             break
-    return images
+    return images, failed
 
 
 def _video_duration(path: Path) -> float | None:
@@ -251,7 +324,9 @@ def _video_duration(path: Path) -> float | None:
             command, check=True, capture_output=True, text=True, timeout=FRAME_TIMEOUT_SECONDS
         )
         duration = float(done.stdout.strip())
-    except (OSError, subprocess.SubprocessError, ValueError):
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise _MediaError(str(exc)) from exc
+    except (subprocess.CalledProcessError, ValueError):  # not a readable video
         return None
     return duration if 0 < duration < float("inf") else None
 
@@ -284,7 +359,9 @@ def _video_frame(path: Path, seconds: float) -> bytes | None:
         done = subprocess.run(
             command, check=True, capture_output=True, timeout=FRAME_TIMEOUT_SECONDS
         )
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise _MediaError(str(exc)) from exc
+    except subprocess.CalledProcessError:
         return None
     return done.stdout if done.stdout.startswith(b"\xff\xd8\xff") else None
 
@@ -307,14 +384,34 @@ def _video_images(view: View, ctx: Context) -> list[_Image]:
     return images
 
 
-def _video_metadata(view: View, ctx: Context) -> str:
-    parts = []
+def _json_strings(raw: str) -> list[str]:
+    """The decoded string values of a JSON sidecar, or the raw text when it is not JSON."""
+    try:
+        pending = [json.loads(raw)]
+    except (ValueError, RecursionError):
+        return [raw]
+    strings: list[str] = []
+    while pending:
+        value = pending.pop()
+        if isinstance(value, str):
+            strings.append(value)
+        elif isinstance(value, dict):
+            pending.extend(reversed(list(value.values())))
+        elif isinstance(value, list):
+            pending.extend(reversed(value))
+    return strings
+
+
+def _video_metadata(view: View, ctx: Context) -> list[tuple[str | None, str]]:
+    blocks: list[tuple[str | None, str]] = []
     for file in view.attachments:
         try:
-            parts.append(ctx.read_text(view, file, limit=MAX_TEXT_CHARS))
-        except OSError:
-            continue
-    return " ".join(" ".join(parts).split())
+            raw = ctx.read_text(view, file, limit=MAX_METADATA_CHARS)
+        except OSError as exc:
+            raise _MediaError(str(exc)) from exc
+        cleaned = (" ".join(text.split()) for text in _json_strings(raw))
+        blocks.extend((file, text) for text in cleaned if text)
+    return blocks
 
 
 def _stored_facts(observations: list[Observation]) -> list[str]:
@@ -336,8 +433,11 @@ def _page_facts(material: _material.Material, struck: list[str]) -> list[str]:
         label = tag.attrs.get("name") or tag.attrs.get("placeholder") or tag.attrs.get("id") or ""
         facts.append(f"form asks for: {kind} field {label[:MAX_FACT_CHARS]}".rstrip())
     has_timer = any(
-        _TIMER_WORD.search(script.text) and _TIMER_CALL.search(script.text)
+        _TIMER_WORD.search(script.text)
+        and _TIMER_CALL.search(script.text)
+        and _TIMER_WRITE.search(script.text)
         for script in material.script_texts()
+        if not _material.is_library_script(script.source.file)
     )
     if has_timer:
         facts.append("a script runs a countdown timer")
@@ -347,38 +447,47 @@ def _page_facts(material: _material.Material, struck: list[str]) -> list[str]:
 def build_input(view: View, ctx: Context) -> _Input | None:
     """Collect what the model may read about one view, or None when there is nothing."""
     observations = ctx.store.observations(view.view_id)
-    facts = _stored_facts(observations)
-    text = ""
+    page_facts: list[str] = []
+    blocks: list[tuple[str | None, str]] = []
     images: list[_Image] = []
+    failed = False
     text_file = view.primary or view.har
     if view.kind is ViewKind.PAGE:
         material = _material.load(view, ctx)
         struck: list[str] = []
         if material.html is not None:
-            text, struck = _page_text(material.html.text)
+            parts, struck = _page_text(material.html.text)
             text_file = material.html.source.file
-        facts = sorted({*facts, *_page_facts(material, struck)})
-        images = _page_images(view, ctx, material)
+            blocks = [(text_file, part) for part in parts]
+        page_facts = _page_facts(material, struck)
+        images, failed = _page_images(view, ctx, material)
+        failed = failed or bool(material.errors)
     elif view.kind is ViewKind.IMAGE:
-        text = " ".join(
-            o.raw or ""
+        blocks = [
+            (view.primary, o.raw)
             for o in observations
-            if o.extractor == IMAGE_READER
+            if o.raw
+            and o.extractor == IMAGE_READER
             and o.namespace == "image.text"
             and o.state is State.PRESENT
-        )
+        ]
         if view.primary is not None:
             image = _read_image(ctx.path(view, view.primary), view.primary)
             images = [image] if image is not None else []
     else:
-        text = _video_metadata(view, ctx)
+        blocks = _video_metadata(view, ctx)
         text_file = view.attachments[0] if view.attachments else view.primary
         images = _video_images(view, ctx)
-    safe_text = redact_text(text)[:MAX_TEXT_CHARS]
+    safe_text, segments = _assemble(blocks)
     if not safe_text and not images:
+        if failed:
+            raise _MediaError("nothing could be read")
         return None
+    # Facts about the page come first: identifiers must not push them past the cap.
+    own = set(page_facts)
+    facts = [*page_facts, *(f for f in _stored_facts(observations) if f not in own)]
     safe_facts = tuple(redact_text(fact) for fact in facts[:MAX_FACTS])
-    return _Input(safe_text, text_file, safe_facts, tuple(images))
+    return _Input(safe_text, text_file, segments, safe_facts, tuple(images))
 
 
 def _content(view: View, data: _Input) -> list[dict[str, Any]]:
@@ -412,7 +521,10 @@ def _verified_evidence(card: TechniqueCard, data: _Input, haystack: str) -> list
                     {
                         "kind": "quote",
                         "quote": quote,
-                        "file": data.text_file,
+                        "file": next(
+                            (file for file, text in data.segments if needle in text),
+                            data.text_file,
+                        ),
                         "locator": f"text:offset[{haystack.index(needle)}]",
                     }
                 )
@@ -486,7 +598,10 @@ def observe_view(
     view: View, ctx: Context, *, settings: Settings | None = None, client: Any = None
 ) -> tuple[list[Observation], str | None]:
     """Return one view's technique cards and the failure reason, if any."""
-    data = build_input(view, ctx)
+    try:
+        data = build_input(view, ctx)
+    except _MediaError:
+        return _not_observable(view, "media_error"), "media_error"
     if data is None:
         return _not_observable(view, "no_content"), "no_content"
     result: ModelResult[TechniqueCards] = read_structured(
@@ -526,7 +641,11 @@ def run_techniques(
     for view in ctx.store.views():
         if view_ids is not None and view.view_id not in view_ids:
             continue
-        observations, reason = observe_view(view, ctx, settings=settings, client=client)
+        try:
+            observations, reason = observe_view(view, ctx, settings=settings, client=client)
+        except Exception:
+            log.exception("technique observation failed for view %s", view.view_id)
+            observations, reason = _not_observable(view, "error"), "error"
         summary["views"] += 1
         if reason and reason not in STABLE_FAILURES and _has_cards(ctx, view):
             summary["kept"] += 1

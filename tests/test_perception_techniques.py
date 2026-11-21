@@ -12,6 +12,8 @@ from PIL import Image
 from ftf import pipeline
 from ftf.config import Settings
 from ftf.contracts import Incident, Observation, State, View, ViewKind
+from ftf.ingest import ingest_folder
+from ftf.perception import techniques
 from ftf.perception.image import NAME as IMAGE_READER
 from ftf.perception.techniques import (
     MAX_IMAGES,
@@ -30,7 +32,7 @@ PAGE = """<html><head><title>Wielki sekret</title><style>.x{color:red}</style></
 <h1>Tylko dziś: zostało 17 miejsc</h1><p>Cena <s>999 zł</s> teraz 99 zł</p>
 <img alt="Przelew z banku" src="a.png"><form><input type="tel" name="phone">
 <input type="hidden" name="csrf_token" value="HIDDENSECRET"></form>
-<script>var timer = setInterval(function(){ countdown(); }, 1000);</script>
+<script>var timer = setInterval(function(){ el.textContent = left(); }, 1000);</script>
 <a href="https://x.pl/?token=URLSECRET">Dołącz teraz</a></body></html>"""
 
 
@@ -306,3 +308,171 @@ def test_video_view_sends_frames_and_metadata(ctx, settings):
     assert locators[1].startswith(f"video:frame[{MAX_IMAGES - 1}]@")
     parts = client.requests[0]["input"][0]["content"]
     assert sum(part["type"] == "input_image" for part in parts) == MAX_IMAGES
+
+
+def page_text(html):
+    return " ".join(techniques._page_text(html)[0])
+
+
+def test_cookie_banner_does_not_erase_the_article(ctx):
+    html = "<p>Ta strona używa pliki cookie: akceptuj</p><h1>Zarobisz 5000 zł dziennie</h1>"
+    assert "Zarobisz 5000 zł dziennie" in build_input(page_view(ctx, html), ctx).text
+
+
+def test_broken_markup_does_not_hide_the_page():
+    assert "Zarobisz" in page_text("<noscript><svg></noscript><h1>Zarobisz 5000</h1>")
+
+
+def test_strike_tracking_handles_void_and_nested_tags():
+    _, struck = techniques._page_text(
+        '<img style="text-decoration:line-through" alt="x"><p>zwykły</p>'
+        "<s>a<s>b</s>c</s><p>dalej</p>"
+    )
+    assert struck == ["a", "b", "c"]
+
+
+@pytest.mark.parametrize(
+    "hidden",
+    [
+        '<div style="display:none">ukryte <b>słowo</b> tutaj</div>',
+        '<div style="visibility: hidden">ukryte słowo tutaj</div>',
+        "<section hidden><p>ukryte słowo tutaj</p></section>",
+    ],
+)
+def test_hidden_text_is_not_material(hidden):
+    text = page_text(f"{hidden}<p>Przepis na ciasto</p>")
+    assert "ukryte" not in text and "Przepis na ciasto" in text
+
+
+def video_view(ctx, attachments=()):
+    root = ctx.store.get_incident("i1").root
+    command = "ffmpeg -nostdin -v error -f lavfi -i testsrc=size=160x120:rate=5:duration=2"
+    subprocess.run([*command.split(), "-y", f"{root}/clip.mp4"], check=True, timeout=30)
+    return add_view(
+        ctx,
+        View(
+            view_id="v1",
+            incident_id="i1",
+            kind=ViewKind.VIDEO,
+            label="clip",
+            primary="clip.mp4",
+            attachments=list(attachments),
+        ),
+    )
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
+def test_temporary_video_failure_keeps_good_cards(ctx, settings, monkeypatch):
+    video_view(ctx)
+    run(ctx, settings, FakeOpenAI(message(card("Shown proof", shown(0)))))
+
+    def timed_out(*args, **kwargs):
+        raise subprocess.TimeoutExpired("ffprobe", 60)
+
+    monkeypatch.setattr(techniques.subprocess, "run", timed_out)
+    summary = run(ctx, settings, FakeOpenAI())
+    assert summary["kept"] == 1 and cards_of(ctx)[0].state is State.PRESENT
+
+
+def test_damaged_gif_is_skipped(ctx, settings, monkeypatch):
+    root = ctx.store.get_incident("i1").root
+    __import__("os").mkdir(f"{root}/page_files")
+    with open(f"{root}/page_files/banner.gif", "wb") as fh:
+        fh.write(b"GIF89a" + b"0" * 2000)
+
+    def broken(data):
+        raise IndexError("index out of range")
+
+    monkeypatch.setattr(techniques, "_is_animated_gif", broken)
+    page_view(ctx, resources=True)
+    assert run(ctx, settings, FakeOpenAI(message(card())))["with_cards"] == 1
+
+
+def test_one_failing_view_does_not_stop_the_others(ctx, settings, monkeypatch):
+    page_view(ctx)
+    second = View(
+        view_id="v2", incident_id="i1", kind=ViewKind.PAGE, label="b", primary="page.html"
+    )
+    add_view(ctx, second)
+    real = techniques.observe_view
+
+    def flaky(view, *args, **kwargs):
+        if view.view_id == "v1":
+            raise IndexError("boom")
+        return real(view, *args, **kwargs)
+
+    monkeypatch.setattr(techniques, "observe_view", flaky)
+    summary = run(ctx, settings, FakeOpenAI(message(card())))
+    assert summary["views"] == 2 and summary["with_cards"] == 1
+    assert cards_of(ctx, "v1")[0].raw == "error"
+
+
+def test_library_script_is_not_a_countdown_fact(ctx):
+    root = ctx.store.get_incident("i1").root
+    __import__("os").mkdir(f"{root}/page_files")
+    with open(f"{root}/page_files/jquery.min.js", "w", encoding="utf-8") as fh:
+        fh.write("jQuery.fx.timer=function(timer){setTimeout(a,1);b.text(c)}")
+    view = page_view(ctx, "<p>Zwykła strona bez licznika</p>", resources=True)
+    assert "a script runs a countdown timer" not in build_input(view, ctx).facts
+
+
+def test_timer_word_without_a_visible_update_is_not_a_fact(ctx):
+    html = "<p>Zwykła strona</p><script>var timer = setTimeout(load, 100);</script>"
+    assert "a script runs a countdown timer" not in build_input(page_view(ctx, html), ctx).facts
+
+
+def test_page_facts_survive_many_identifiers(ctx):
+    view = page_view(ctx)
+    many = [
+        Observation(
+            view_id=view.view_id,
+            signal_id="A1",
+            namespace="ad.param",
+            value=f"id{index:03}",
+            extractor="test",
+            version="1",
+        )
+        for index in range(130)
+    ]
+    ctx.store.put_observations(view.view_id, "test", many)
+    facts = build_input(view, ctx).facts
+    assert "crossed-out text: 999 zł" in facts and "form asks for: tel field phone" in facts
+
+
+def test_capture_screenshot_is_sent_first(ctx):
+    root = ctx.store.get_incident("i1").root
+    __import__("os").mkdir(f"{root}/page_files")
+    image_bytes(f"{root}/page_files/large.png", size=(300, 200))
+    image_bytes(f"{root}/screenshot.png", size=(120, 100))
+    with open(f"{root}/manifest.json", "w", encoding="utf-8") as fh:
+        fh.write("{}" + " " * 2000)
+    page_view(ctx, resources=True)
+    view = ctx.store.get_view("v1").model_copy(
+        update={"attachments": ["manifest.json", "screenshot.png"]}
+    )
+    files = [image.file for image in build_input(view, ctx).images]
+    assert files == ["screenshot.png", "page_files/large.png"]
+
+
+def test_video_takes_only_its_own_sidecars(store, tmp_path):
+    root = tmp_path / "videos"
+    root.mkdir()
+    for name in ("clip.mp4", "clip2.mp4", "clip.json", "clip.info.json", "clip2.json"):
+        (root / name).write_bytes(b"{}")
+    _, views = ingest_folder(root, store)
+    attached = {v.primary: v.attachments for v in views}
+    assert sorted(attached["clip.mp4"]) == ["clip.info.json", "clip.json"]
+    assert attached["clip2.mp4"] == ["clip2.json"]
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
+def test_polish_quote_from_escaped_json_names_its_own_file(ctx, settings):
+    root = ctx.store.get_incident("i1").root
+    with open(f"{root}/a.json", "w", encoding="utf-8") as fh:
+        json.dump({"title": "Pierwszy opis filmu"}, fh)
+    with open(f"{root}/b.json", "w", encoding="utf-8") as fh:
+        json.dump({"caption": "Zarobiłem 5000 zł dziś"}, fh)
+    video_view(ctx, ["a.json", "b.json"])
+    run(ctx, settings, FakeOpenAI(message(card("Profit claim", quote("Zarobiłem 5000 zł dziś")))))
+    [stored] = cards_of(ctx)
+    assert stored.state is State.PRESENT and stored.source.file == "b.json"
