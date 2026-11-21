@@ -18,11 +18,18 @@ from ._lang import detect, has_cyrillic
 
 _FILTER_FUNCS = r"hue-rotate|invert|blur|saturate|grayscale|sepia|contrast|brightness"
 # A literal call such as `hue-rotate(7deg)`; `var(--tw-hue-rotate)` has no `(` after the name.
-_EVASION = re.compile(rf"(?<![\w-])({_FILTER_FUNCS})\(\s*[-\d.]", re.IGNORECASE)
+_EVASION = re.compile(
+    rf"(?<![\w-])({_FILTER_FUNCS})\(\s*([-+]?(?:\d+\.?\d*|\.\d+))\s*(%?)", re.IGNORECASE
+)
+_SCALING = {"saturate", "contrast", "brightness"}  # 1 (100%) changes nothing; others 0
 # `backdrop-filter` and custom properties such as `--x-filter` are not the page's filter.
 _FILTER_DECL = re.compile(r"(?<![\w-])(?:-webkit-)?filter\s*:[^;}]*", re.IGNORECASE)
+# A scarcity phrase, not any number near a unit: `Pozostałe pytania? 22 123…`,
+# `3 miejscowości` and a `100 sztuk` pack size are not stock counters.
 _STOCK = re.compile(
-    r"pozostał[oa]?\D{0,30}\d+|zostało\s+(?:tylko\s+)?\d+|\d+\s*(?:sztuk\w*|szt\.|miejsc\w*)"
+    r"\bpozostał[oa]?\b[^.!?\d]{0,30}\d+"
+    r"|\bzostał[oa]?\s+(?:tylko\s+|jeszcze\s+)?\d+"
+    r"|\b(?:tylko|jeszcze|ostatnie|ostatnich)\s+\d+\s*(?:sztuk\w*|szt\.|miejsc(?:a|e)?\b)"
     r"|only\s+\d+\s+left",
     re.IGNORECASE,
 )
@@ -36,8 +43,10 @@ def evasion_filters(dom: Dom) -> list[tuple[str, str]]:
     found: list[tuple[str, str]] = []
     for css in (dom.html_style, dom.body_style, *dom.root_css):
         for decl in _FILTER_DECL.findall(css):
-            for name in _EVASION.findall(decl):
-                found.append((name.lower(), decl.strip()))
+            for name, number, percent in _EVASION.findall(decl):
+                name, amount = name.lower(), float(number) / (100 if percent else 1)
+                if amount != (1 if name in _SCALING else 0):  # a no-op filter evades nothing
+                    found.append((name, decl.strip()))
     return found
 
 

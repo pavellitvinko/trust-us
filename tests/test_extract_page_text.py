@@ -297,3 +297,96 @@ def test_hidden_fields_are_not_visible_fields():
 def test_italian_e_is_not_french():
     text = "Il prodotto è ottimo, è economico, è veloce, è sicuro, è facile da usare ogni giorno"
     assert detect(text, min_words=8) == "it"
+
+
+# --- clean-context re-review fixes (PR 10) --------------------------------------------------
+
+CS = (
+    "Včera večer motocyklista vystřelil několik ran na auto na hlavní třídě. Policie zajistila "
+    "záznam z kamer a neřekla, kdo za tím stojí, ale je jasné, že šlo o útok na zakladatele "
+    "firmy a jeho rodinu, který se stal před domem."
+)
+PT = (
+    "Ontem à noite um motociclista disparou vários tiros contra o carro na avenida principal. "
+    "A polícia recolheu as gravações e não disse quem está por trás, mas é claro que foi um "
+    "ataque ao fundador da empresa e à sua família, e a investigação continua."
+)
+BG = (
+    "Вчера вечерта мотоциклист стреля няколко пъти по колата на главния булевард. Полицията "
+    "събра записите и не съобщи кой стои зад това, но е ясно, че това е нападение срещу "
+    "основателя на компанията и неговото семейство."
+)
+
+
+@pytest.mark.parametrize("text", [CS, PT, BG])
+def test_languages_outside_the_set_are_not_guessed(text):
+    assert detect(text) is None
+
+
+def test_undetectable_declared_language_is_no_mismatch(store, tmp_path):
+    root = page(tmp_path / "a", f"<p>{CS}</p>")
+    html = root / "page.html"
+    html.write_text(html.read_text().replace("<html>", '<html lang="cs">'))
+    obs = run(PageText(), store, root)
+    assert values(obs, "page.lang_mismatch") == []
+    assert values(obs, "page.lang_detected") == []
+
+
+def test_cookie_banner_does_not_set_the_page_language(store, tmp_path):
+    root = page(
+        tmp_path / "a",
+        f'<h1>Zamach</h1><p>Krótka treść.</p><div class="cookie-banner">{EN} {EN}</div>',
+    )
+    html = root / "page.html"
+    html.write_text(html.read_text().replace("<html>", '<html lang="pl">'))
+    obs = run(PageText(), store, root)
+    assert values(obs, "page.lang_mismatch") == []
+    assert values(obs, "page.lang_detected") == []
+
+
+@pytest.mark.parametrize("cls", ["page has-sidebar", "review-page", "opinie-wrapper"])
+def test_class_wrapper_around_the_whole_page_is_the_page(cls):
+    dom = parse(f'<body><div class="{cls}"><p>Główny tekst artykułu.</p></div></body>')
+    assert {b.zone for b in dom.blocks} == {"body"}
+
+
+def test_real_navigation_next_to_body_stays_chrome():
+    dom = parse('<body><div class="menu"><a>Sport</a></div><p>Treść</p></body>')
+    assert {b.text: b.zone for b in dom.blocks} == {"Sport": "chrome", "Treść": "body"}
+
+
+def test_mega_menu_stays_chrome():
+    links = "".join(f"<li><a href='/{i}'>Kategoria numer {i}</a></li>" for i in range(300))
+    dom = parse(f'<body><div class="menu"><ul>{links}</ul></div><h1>Tytuł</h1><p>Treść</p>')
+    assert "Kategoria numer 7" in dom.text("chrome")
+    assert dom.text("body") == "Tytuł\nTreść"
+    nav = parse(f"<body><nav><ul>{links}</ul></nav><p>Treść</p></body>")
+    assert nav.text("body") == "Treść"
+
+
+@pytest.mark.parametrize(
+    "css",
+    [
+        "/* reset */ html{filter:hue-rotate(7deg)}",
+        "@import url(x.css); html{filter:hue-rotate(7deg)}",
+        "@charset 'utf-8';\nbody { filter: hue-rotate(7deg) }",
+    ],
+)
+def test_css_comment_or_at_rule_does_not_hide_the_filter(css):
+    assert [n for n, _ in evasion_filters(parse(f"<style>{css}</style>"))] == ["hue-rotate"]
+
+
+@pytest.mark.parametrize(
+    "value", ["grayscale(0)", "brightness(100%)", "blur(0)", "contrast(1)", "hue-rotate(0deg)"]
+)
+def test_no_op_filter_is_not_evasion(value):
+    assert evasion_filters(parse(f'<html style="filter: {value}"></html>')) == []
+
+
+def test_stock_counter_needs_a_scarcity_phrase():
+    from ftf.extract.page_structure import stock_counters
+
+    text = "Pozostałe pytania? Zadzwoń 22 123 45 67. Dostawa do 3 miejscowości. Zestaw 100 sztuk."
+    assert stock_counters(text) == []
+    found = [s for s, _ in stock_counters("Zostało tylko 5 sztuk! Ostatnie 3 miejsca.")]
+    assert found == ["Zostało tylko <n>", "Ostatnie <n> miejsca"]

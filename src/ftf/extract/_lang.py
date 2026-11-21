@@ -49,10 +49,14 @@ _LETTERS: dict[str, frozenset[str]] = {
     "fr": frozenset("çêëîïôûœ"),  # not `è`: Italian `è` is its most common word
     "es": frozenset("ñ"),
 }
+# Letters of languages outside the set (cs/sk, pt, ro). Text that holds them is not
+# Polish, Spanish or Italian just because it shares stopwords with them: None.
+_OUTSIDE_LETTERS = frozenset("ěřůťďňľĺŕãõășțşţ")
+SUPPORTED = frozenset({"pl", "en", "de", "fr", "nl", "es", "it", "ru", "uk"})
 _WORD = re.compile(r"[^\W\d_]+", re.UNICODE)
 _CYRILLIC = re.compile(r"[Ѐ-ӿ]")
 _UK_LETTERS = set("іїєґ")
-_RU_LETTERS = set("ыэъё")
+_RU_LETTERS = set("ыэё")  # not `ъ`: rare in Russian, common in Bulgarian
 _MIN_SHARE = 0.05  # share of words that are stopwords of the winning language
 _MARGIN = 1.5  # the winner must beat the runner-up by this factor
 
@@ -77,6 +81,9 @@ def detect(text: str, min_words: int = 20) -> str | None:
             return "uk"
         if letters & _RU_LETTERS and not letters & _UK_LETTERS:
             return "ru"
+        return None
+    outside = sum(not _OUTSIDE_LETTERS.isdisjoint(w) for w in tokens)
+    if outside >= max(2, 0.02 * len(tokens)):
         return None
     hits = {
         lang: sum(w in stop or not _LETTERS.get(lang, set()).isdisjoint(w) for w in tokens)

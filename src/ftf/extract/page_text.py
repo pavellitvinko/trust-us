@@ -12,7 +12,7 @@ from ..contracts import Observation, Purpose, Source, View, ViewKind
 from ..registry import Context, extractors
 from . import _material as m
 from ._dom import parse
-from ._lang import detect, words
+from ._lang import SUPPORTED, detect, words
 
 MAX_TEXT = 200_000
 FOREIGN_MIN_WORDS = 8
@@ -62,12 +62,14 @@ class PageText:
 
         def language() -> None:
             declared = primary_subtag(dom.html_lang)
-            detected = detect(body) or detect(dom.text())
+            # Never chrome: an English cookie banner does not make a Polish page English.
+            detected = detect(body) or detect(dom.text("body", "comments"))
             if declared:
                 emit("D14", "page.lang_attr", declared, src("html[lang]"), raw=dom.html_lang)
             if detected:
                 emit("D14", "page.lang_detected", detected, src("text:body"))
-            if declared and detected and declared != detected:
+            # A declared language the detector cannot name (`cs`) is never a mismatch.
+            if declared in SUPPORTED and detected and declared != detected:
                 emit(
                     "D14",
                     "page.lang_mismatch",

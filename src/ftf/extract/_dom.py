@@ -23,6 +23,11 @@ MAX_DEPTH = 6  # tag paths deeper than this are cut (D1)
 # A "chrome" wrapper holding the headline or this much text is a page container
 # (`<header class="header-all">` around a whole lander), not navigation.
 CHROME_MAX_CHARS = 5000
+# ... unless that text is mostly links: a mega-menu or a sitemap footer stays chrome.
+CHROME_MAX_LINK_SHARE = 0.5
+# A zone wrapper holding more than this share of the page's text, when the body zone is
+# otherwise empty, is the page itself (`<div class="review-page">` around a lander).
+PAGE_WRAPPER_SHARE = 0.5
 
 _SKIPPED_TAGS = {
     "script", "style", "noscript", "template", "svg", "math", "head", "title", "select", "datalist",
@@ -54,13 +59,22 @@ _EXTENSION_ATTR = re.compile(r"^data-(?:gr-|lastpass|dashlane|grammarly|honey)",
 _HIDDEN_STYLE = re.compile(r"display\s*:\s*none|visibility\s*:\s*hidden", re.IGNORECASE)
 _LINE_THROUGH = re.compile(r"line-through", re.IGNORECASE)
 _COUNTDOWN = re.compile(r"countdown|timer|odlicz", re.IGNORECASE)
-_TOKEN_SPLIT = re.compile(r"[-_\s]+")
+_TOKEN_SPLIT = re.compile(r"[-_]+")
+# State modifiers on a page wrapper (`has-sidebar`, `menu-open`, `no-comments`) describe
+# the page around it, not the element: they set no zone.
+_MODIFIER = re.compile(
+    r"^(?:has|with|without|no|is|show|hide)[-_]|[-_](?:open|opened|closed|active|visible"
+    r"|enabled|disabled|expanded|collapsed)$",
+    re.IGNORECASE,
+)
 _COMMENT_PREFIXES = ("comment", "koment", "review", "opini", "testimonial")
 _CHROME_PREFIXES = ("nav", "menu", "footer", "sidebar", "breadcrumb", "cookie", "widget")
 _CHROME_WORDS = {"share", "related", "social", "topbar"}
 _CHROME_TAGS = {"nav", "header", "footer", "aside"}
 _ROOT_SELECTORS = {"html", "body", ":root"}
 _CSS_RULE = re.compile(r"([^{}]+)\{([^{}]*)\}")
+_CSS_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
+_CSS_STATEMENT = re.compile(r"@[\w-]+[^;{}]*;")
 _LETTER = re.compile(r"[^\W\d_]")
 _FIELD_TAGS = {"input", "select", "textarea"}
 _NOT_FIELDS = {"hidden", "submit", "button", "image", "reset"}
@@ -100,8 +114,8 @@ def squash(text: str) -> str:
 
 
 def _tokens(attrs: dict[str, str]) -> list[str]:
-    marks = f"{attrs.get('class', '')} {attrs.get('id', '')}".lower()
-    return [t for t in _TOKEN_SPLIT.split(marks) if t]
+    marks = f"{attrs.get('class', '')} {attrs.get('id', '')}".lower().split()
+    return [t for m in marks if not _MODIFIER.search(m) for t in _TOKEN_SPLIT.split(m) if t]
 
 
 def is_polluting(tag: str, attrs: dict[str, str]) -> bool:
@@ -139,6 +153,8 @@ class _Parser(HTMLParser):
         self._line_owner = 0
         self._owners: list[tuple[Zone, int]] = [("body", 0)]  # (zone, parent owner)
         self._chars: dict[int, int] = {}
+        self._link_chars: dict[int, int] = {}
+        self._owner_tags: dict[int, str] = {}
         self._demoted: set[int] = set()
         self.title: list[str] = []
         self._in_title = False
@@ -171,8 +187,7 @@ class _Parser(HTMLParser):
     def _pop_to(self, index: int) -> None:
         while len(self.stack) > index:
             frame = self.stack.pop()
-            too_big = self._chars.get(frame.owner, 0) > CHROME_MAX_CHARS
-            if frame.owns and too_big and self._owners[frame.owner][0] == "chrome":
+            if frame.owns and self._too_big_for_chrome(frame.owner):
                 self._demoted.add(frame.owner)
             if frame.capture is not None:
                 text = squash("".join(frame.capture))
@@ -182,6 +197,13 @@ class _Parser(HTMLParser):
                     self.struck.append(text)
             if frame.tag in _BLOCK_TAGS:
                 self._flush()
+
+    def _too_big_for_chrome(self, owner: int) -> bool:
+        if self._owners[owner][0] != "chrome" or self._owner_tags.get(owner) == "nav":
+            return False
+        chars = self._chars.get(owner, 0)
+        links = self._link_chars.get(owner, 0)
+        return chars > CHROME_MAX_CHARS and links <= CHROME_MAX_LINK_SHARE * chars
 
     def _find(self, tag: str, stop: set[str] = frozenset()) -> int | None:
         for i in range(len(self.stack) - 1, 0, -1):
@@ -281,6 +303,7 @@ class _Parser(HTMLParser):
         if marker is not None:
             self._owners.append((marker, parent.owner))
             owner = len(self._owners) - 1
+            self._owner_tags[owner] = tag
         frame = _Frame(
             tag=tag,
             skipped=skipped,
@@ -329,8 +352,11 @@ class _Parser(HTMLParser):
             self._line_owner = frame.owner
         self._line.append(data)
         size = len(data.strip())
+        in_link = any(f.tag == "a" for f in self.stack)
         for o in self._chain(frame.owner):
             self._chars[o] = self._chars.get(o, 0) + size
+            if in_link:
+                self._link_chars[o] = self._link_chars.get(o, 0) + size
         for f in self.stack:
             if f.capture is not None:
                 f.capture.append(data)
@@ -349,7 +375,10 @@ class _Parser(HTMLParser):
         self.comments.append(squash(text))
 
     def _css(self, css: str) -> None:
+        css = _CSS_COMMENT.sub(" ", css)
+        css = _CSS_STATEMENT.sub(" ", css)  # `@import url(x.css);` before the first rule
         for selectors, body in _CSS_RULE.findall(css):
+            selectors = selectors.rsplit(";", 1)[-1]
             names = {s.strip().lower() for s in selectors.split(",")}
             if names & _ROOT_SELECTORS:
                 self.root_css.append(f"{selectors.strip()}{{{body.strip()}}}")
@@ -368,10 +397,25 @@ class _Parser(HTMLParser):
         ranked = sorted(zip(in_body, self.h1), key=lambda pair: not pair[0])  # stable
         return tuple(text for _, (text, _) in ranked)
 
+    def _page_wrappers(self) -> None:
+        """With no body text left, a class-marked wrapper holding most of the page is the page.
+
+        Semantic `<nav>`, `<header>`, `<footer>` and `<aside>` keep their zone.
+        """
+        if any(self._resolve(owner) == "body" for _, owner in self.lines):
+            return
+        total = sum(len(text) for text, _ in self.lines)
+        for owner, (_, parent) in enumerate(self._owners):
+            if not owner or parent or self._owner_tags.get(owner) in _CHROME_TAGS:
+                continue
+            if self._chars.get(owner, 0) > PAGE_WRAPPER_SHARE * total:
+                self._demoted.add(owner)
+
     def result(self) -> Dom:
         self._pop_to(1)
         self._flush()
         h1 = self._headlines()
+        self._page_wrappers()
         return Dom(
             blocks=tuple(Block(text, self._resolve(owner)) for text, owner in self.lines),
             title=squash("".join(self.title)),
