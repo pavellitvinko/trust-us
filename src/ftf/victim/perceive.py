@@ -250,6 +250,20 @@ def _where(index: list[dict[str, Any]], span: tuple[int, int]) -> dict[str, Any]
     return {}
 
 
+_EDGE_PUNCTUATION = " \t\n.,;:!?…«»\"'„”“‘’()[]-–—"
+
+
+def locate(material: str, quote: str) -> tuple[int, int] | None:
+    """Where the quote is in the material. Models often drop a closing « » or add a full stop,
+    so a quote is tried again without its outer punctuation; what is kept is the text found."""
+    span = find_span(material, quote)
+    if span is None:
+        trimmed = quote.strip(_EDGE_PUNCTUATION)
+        if len(trimmed) >= 8 and trimmed != quote:
+            span = find_span(material, trimmed)
+    return span
+
+
 def verify(reading: Perception, material: str, index: list[dict[str, Any]]) -> dict[str, Any]:
     """Keep only items whose quote is in the material; say why each empty field is empty."""
     out: dict[str, Any] = {}
@@ -259,7 +273,7 @@ def verify(reading: Perception, material: str, index: list[dict[str, Any]]) -> d
         kept = []
         for item in section.items:
             data = item.model_dump()
-            span = find_span(material, item.quote)
+            span = locate(material, item.quote)
             if span is None:
                 dropped.append(
                     {"field": name, "item": data, "why": "quote not found in the material"}
@@ -267,10 +281,14 @@ def verify(reading: Perception, material: str, index: list[dict[str, Any]]) -> d
                 continue
             if name == "money_path":
                 amounts = numbers(item.amount)
-                if len(amounts) != 1 or amounts[0] not in numbers(material[span[0] : span[1]]):
+                quoted = numbers(material[span[0] : span[1]])
+                # One amount, or a range such as "2 800 – 6 500"; every number must be quoted.
+                if not 1 <= len(amounts) <= 2 or not all(a in quoted for a in amounts):
                     dropped.append({"field": name, "item": data, "why": "amount not in its quote"})
                     continue
                 data["value"] = amounts[0]
+                if len(amounts) == 2:
+                    data["value_high"] = amounts[1]
             data["evidence"] = {
                 "quote_found": material[span[0] : span[1]],
                 "locator": f"{RUN_FILES}/material.txt:span[{span[0]},{span[1]}]",
@@ -285,7 +303,7 @@ def verify(reading: Perception, material: str, index: list[dict[str, Any]]) -> d
             reason = section.empty_reason or "the model found nothing for this field"
         out[name] = {"items": kept, "empty_reason": reason}
     verdict = reading.verdict.model_dump()
-    span = find_span(material, verdict["quote"]) if verdict.get("quote") else None
+    span = locate(material, verdict["quote"]) if verdict.get("quote") else None
     if span is None:
         dropped.append(
             {"field": "verdict", "item": verdict, "why": "no quote found in the material"}

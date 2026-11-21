@@ -25,7 +25,7 @@ from .observe import Candidate, PageState
 from .persona import Persona, answer_for, fold
 
 TASK = "victim.decide"
-PROMPT_VERSION = "1"
+PROMPT_VERSION = "2"
 
 _CTA = re.compile(
     r"zarejestruj|dowiedz|sprawd[źz]|do[łl][aą]cz|rozpocznij|zacznij|kliknij|wi[eę]cej|chc[eę]|"
@@ -222,7 +222,8 @@ Return:
 - choice: the number of one allowed action.
 - text: only for a free-text box, what the person types (no phone, card or account numbers);
   otherwise null.
-- reason: one short English sentence, in the first person, why."""
+- reason: one short sentence, in the first person, why. Always in English, even when the
+  page and the persona are Polish."""
 
 
 class Choice(BaseModel):

@@ -685,3 +685,38 @@ def test_generated_contacts_are_refused_for_live_urls(tmp_path, settings):
         VictimRun(
             "https://glowpixel.org/?x=1", PERSONA, tmp_path, settings=settings, test_contacts=True
         )
+
+
+def test_quotes_survive_dropped_guillemets_and_ranges_are_kept():
+    material = "Bot: «Liczba miejsc jest ściśle limitowana». Zysk: 2 800 – 6 500 zł / miesiąc.\n"
+    out = verify(
+        reading(
+            levers=_section(
+                [{"lever": "scarcity", "quote": "Liczba miejsc jest ściśle limitowana."}]
+            ),
+            money_path=_section(
+                [
+                    {
+                        "kind": "promised_return",
+                        "amount": "2 800 – 6 500",
+                        "currency": "zł",
+                        "time_frame": "miesiąc",
+                        "quote": "2 800 – 6 500 zł / miesiąc",
+                    },
+                    {
+                        "kind": "price",
+                        "amount": "9 999",
+                        "currency": "zł",
+                        "time_frame": None,
+                        "quote": "2 800 – 6 500 zł",
+                    },
+                ]
+            ),
+        ),
+        material,
+        [],
+    )
+    lever = out["levers"]["items"][0]
+    assert lever["evidence"]["quote_found"] == "Liczba miejsc jest ściśle limitowana"
+    money = out["money_path"]["items"]
+    assert [(m["value"], m.get("value_high")) for m in money] == [("2800", "6500")]
