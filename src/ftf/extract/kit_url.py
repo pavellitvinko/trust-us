@@ -41,6 +41,9 @@ _MAX_DEPTH = 4
 _STOP_PREFIXES = frozenset({"_next", "cdn-cgi", "wp-content", "wp-includes", "wp-json"})
 _VERSION = re.compile(r"^v\d+$")
 _API_SEGMENTS = frozenset({"api", "ajax", "rpc", "graphql"})
+# A route word: letters with separators. A long run without one is a token, not a word.
+_ROUTE_WORD = re.compile(r"^[A-Za-z][A-Za-z_\-.]*$")
+_MAX_ROUTE_TOKEN = 16
 
 _BASE_HREF = re.compile(r"""<base\b[^>]*?\bhref\s*=\s*\\?["']([^"'\\]+)""", re.IGNORECASE)
 _API_LITERAL = re.compile(r"""["'`](/(?:api|ajax|rpc|graphql)/[^"'`\s?#]{0,200})""")
@@ -117,6 +120,12 @@ def path_convention(path: str) -> str | None:
     return "/" + "/".join(out) + "/"
 
 
+def _is_route_word(segment: str) -> bool:
+    if not _ROUTE_WORD.match(segment):
+        return False
+    return len(segment) < _MAX_ROUTE_TOKEN or any(c in "-_." for c in segment)
+
+
 def api_route(path: str) -> str | None:
     """The static prefix of an API path: `/api/v1/trigger/field/<uuid>/` -> `/api/v1/trigger/field/`."""
     segments = [s for s in path.split("/") if s]
@@ -124,8 +133,8 @@ def api_route(path: str) -> str | None:
         return None
     out: list[str] = []
     for seg in segments:
-        if not _VERSION.match(seg) and (any(c.isdigit() for c in seg) or not seg.isascii()):
-            break  # an ID, a hash or a number: the route's variable part starts here
+        if not _VERSION.match(seg) and not _is_route_word(seg):
+            break  # an ID, a hash, a number or a macro: the route's variable part starts here
         out.append(seg.lower())
     if len(out) < 2:
         return None
@@ -157,13 +166,15 @@ class KitUrl:
             url, source, _ = landing
             for name, value in m.query_params(url):
                 where = m.at(source, f"url:query.{name}")
-                shape = value_shape(value)
+                # An unfilled macro (`{{ad.id}}`) is the platform's template, not a kit value.
+                shape = None if m.is_placeholder(value) else value_shape(value)
                 if name in STANDARD_PARAMS:
-                    if name in _STANDARD_IDS and not _STANDARD_ID_SHAPE.match(shape):
+                    if shape and name in _STANDARD_IDS and not _STANDARD_ID_SHAPE.match(shape):
                         emit("B2", "url.param_shape", f"{name}:{shape}", where, raw=name)
                     continue
                 emit("B1", "url.param_name", name, where, raw=name)
-                emit("B2", "url.param_shape", f"{name}:{shape}", where, raw=name)
+                if shape:
+                    emit("B2", "url.param_shape", f"{name}:{shape}", where, raw=name)
 
         def paths() -> None:
             if landing is not None:

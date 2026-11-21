@@ -24,9 +24,12 @@ _VERSION = re.compile(r"[/\s(].*$")
 def product(value: str) -> str | None:
     """`1.1 Caddy` -> `caddy`; `nginx/1.25.3` -> `nginx`; a stoplisted front -> None."""
     first = value.split(",")[0].strip()
-    first = _PROTOCOL.sub("", first)
-    name = _VERSION.sub("", first).strip().lower()
-    if not name or name in STOP_PRODUCTS or not re.match(r"^[a-z][\w.\-]*$", name):
+    first = _PROTOCOL.sub("", first).lower()
+    # Multiword fronts (`Google Frontend`) are matched before the version is cut off.
+    if any(re.match(rf"{re.escape(stop)}(?:$|[/\s(])", first) for stop in STOP_PRODUCTS):
+        return None
+    name = _VERSION.sub("", first).strip()
+    if not name or not re.match(r"^[a-z][\w.\-]*$", name):
         return None
     return name
 

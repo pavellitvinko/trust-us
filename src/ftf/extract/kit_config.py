@@ -56,7 +56,10 @@ def key_paths(config: Any, prefix: str = "") -> list[str]:
 
 
 def _is_token(name: str) -> bool:
-    found = _TOKEN_SHAPE.match(value_shape(name))
+    shape = value_shape(name)
+    if shape == "uuid":
+        return True
+    found = _TOKEN_SHAPE.match(shape)
     return bool(found) and int(found.group(1)) >= 16 and any(c.isdigit() for c in name)
 
 

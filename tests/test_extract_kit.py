@@ -83,6 +83,9 @@ def test_segment_shape_literal_words():
         ("/api/v1/trigger/field/", "/api/v1/trigger/field/"),
         (f"/api/v1/agent/persist-session-record/{VISIT}/{VISIT}", "/api/v1/agent/persist-session-record/"),
         ("/api/v1/agent/pub-key-push-settings/", "/api/v1/agent/pub-key-push-settings/"),
+        ("/api/v1/trigger/field/abcdefghijklmnopqrst/", "/api/v1/trigger/field/"),
+        ("/api/v1/trigger/field/${id}/", "/api/v1/trigger/field/"),
+        ("/api/v1/pwa/manifest.json", "/api/v1/pwa/manifest.json/"),
         ("/assets/app.js", None),
         ("/api/", None),
     ],
@@ -103,6 +106,13 @@ def test_kit_params_from_landing_url(store, tmp_path):
 def test_standard_params_produce_nothing(store, tmp_path):
     obs = run(KitUrl(), store, page(tmp_path / "v", url=META_URL))
     assert obs == []
+
+
+def test_unfilled_ad_macros_produce_nothing(store, tmp_path):
+    url = "https://shop.example.org/?ad_id={{ad.id}}&campaign_id={{campaign.id}}&sub1={sub1}"
+    obs = run(KitUrl(), store, page(tmp_path / "v", url=url))
+    assert values(obs, "url.param_shape") == []
+    assert values(obs, "url.param_name") == ["sub1"]
 
 
 def test_per_click_values_never_leave(store, tmp_path):
@@ -171,7 +181,8 @@ def test_kit_config_on_a_page(store, tmp_path):
     body = (
         aio_script(config)
         + '<form><input type="hidden" name="sub1" value="a"><input type="hidden" name="X_ID">'
-        + '<input type="hidden" name="fd1a0e09e83e22558893e94cdd2481b2" value="1"></form>'
+        + '<input type="hidden" name="fd1a0e09e83e22558893e94cdd2481b2" value="1">'
+        + f'<input type="hidden" name="{VISIT}"></form>'
     )
     obs = run(KitConfig(), store, page(tmp_path / "v", body=body))
     assert set(values(obs, "config.key_path")) == {"campaign.uuid", "source.name"}
@@ -190,7 +201,8 @@ def test_kit_names():
 @pytest.mark.parametrize(
     ("value", "name"),
     [("1.1 Caddy", "caddy"), ("0.0 Caddy", "caddy"), ("nginx/1.25.3", "nginx"),
-     ("Express", "express"), ("cloudflare", None), ("", None)],
+     ("Express", "express"), ("cloudflare", None), ("Google Frontend", None),
+     ("1.1 google frontend/2", None), ("Google-Cloud-Run", "google-cloud-run"), ("", None)],
 )  # fmt: skip
 def test_product(value, name):
     assert product(value) == name
