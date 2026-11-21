@@ -1,0 +1,569 @@
+{
+ "about": "Hand-made observations for the Method track, so fusion and grouping can be built before real extractors exist. Values come from the sample. Expected results: 1:page and 2:page are the same campaign despite different domains; 2:healthlinkq and 3:page are duplicates on one landing; 48:page and 61:article are one kit family but two campaigns (their campaign UUIDs contradict), so api_key_id and form_endpoint_host must be demoted to kit tier; 61:article and 61:chat are one campaign.",
+ "observations": [
+  {
+   "view_id": "1:page",
+   "signal_id": "A14",
+   "namespace": "domain.registrable",
+   "value": "civicdaybook.live",
+   "extractor": "fixture",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "1:page",
+   "signal_id": "A1",
+   "namespace": "aio.campaign_uuid",
+   "value": "0b9611d9-df5e-44e6-acea-ef85847dc3f1",
+   "extractor": "fixture",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "1:page",
+   "signal_id": "A1",
+   "namespace": "aio.owner_uuid",
+   "value": "edcdf254-3b20-4bcb-bd7f-3cddaf77d9da",
+   "extractor": "fixture",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "1:page",
+   "signal_id": "A1",
+   "namespace": "aio.landing_uuid",
+   "value": "a7b9f833-7f9b-4bd4-ac5a-5d6d5743fbba",
+   "extractor": "fixture",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "1:page",
+   "signal_id": "A2",
+   "namespace": "aio.template_uuid",
+   "value": "9b614b03-f138-4536-8265-b92e478e62a7",
+   "extractor": "fixture",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "1:page",
+   "signal_id": "A3",
+   "namespace": "fb_pixel",
+   "value": "2012165449475163",
+   "extractor": "fixture",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "1:page",
+   "signal_id": "B1",
+   "namespace": "url.param_name",
+   "value": "utm_visit",
+   "extractor": "fixture",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "2:page",
+   "signal_id": "A14",
+   "namespace": "domain.registrable",
+   "value": "acrosscommunities.live",
+   "extractor": "fixture",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "2:page",
+   "signal_id": "A1",
+   "namespace": "aio.campaign_uuid",
+   "value": "0b9611d9-df5e-44e6-acea-ef85847dc3f1",
+   "extractor": "fixture",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "2:page",
+   "signal_id": "A1",
+   "namespace": "aio.owner_uuid",
+   "value": "edcdf254-3b20-4bcb-bd7f-3cddaf77d9da",
+   "extractor": "fixture",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "2:page",
+   "signal_id": "A1",
+   "namespace": "aio.landing_uuid",
+   "value": "a7b9f833-7f9b-4bd4-ac5a-5d6d5743fbba",
+   "extractor": "fixture",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "2:page",
+   "signal_id": "A2",
+   "namespace": "aio.template_uuid",
+   "value": "9b614b03-f138-4536-8265-b92e478e62a7",
+   "extractor": "fixture",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "2:page",
+   "signal_id": "A3",
+   "namespace": "fb_pixel",
+   "value": "2012165449475163",
+   "extractor": "fixture",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "2:page",
+   "signal_id": "B1",
+   "namespace": "url.param_name",
+   "value": "utm_visit",
+   "extractor": "fixture",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "2:healthlinkq",
+   "signal_id": "A14",
+   "namespace": "domain.registrable",
+   "value": "healthlinkq.pro",
+   "extractor": "fixture",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "2:healthlinkq",
+   "signal_id": "A14",
+   "namespace": "url.host_path",
+   "value": "healthlinkq.pro/L41156846fl-923e569-fkf418Z",
+   "extractor": "fixture",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "2:healthlinkq",
+   "signal_id": "A15",
+   "namespace": "outbound.domain",
+   "value": "crimsonbase.pro",
+   "extractor": "fixture",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "3:page",
+   "signal_id": "A14",
+   "namespace": "domain.registrable",
+   "value": "healthlinkq.pro",
+   "extractor": "fixture",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "3:page",
+   "signal_id": "A14",
+   "namespace": "url.host_path",
+   "value": "healthlinkq.pro/L41156846fl-923e569-fkf418Z",
+   "extractor": "fixture",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "3:page",
+   "signal_id": "A15",
+   "namespace": "outbound.domain",
+   "value": "crimsonbase.pro",
+   "extractor": "fixture",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "48:page",
+   "signal_id": "A14",
+   "namespace": "domain.registrable",
+   "value": "novumfy.com",
+   "extractor": "fixture",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "48:page",
+   "signal_id": "A1",
+   "namespace": "aio.campaign_uuid",
+   "value": "ad8555cd-ad11-493f-8c31-c8f0d4799975",
+   "extractor": "fixture",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "48:page",
+   "signal_id": "A1",
+   "namespace": "aio.owner_uuid",
+   "value": "2050d8e9-de7b-4ac0-8df1-594df4b9bf02",
+   "extractor": "fixture",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "48:page",
+   "signal_id": "A1",
+   "namespace": "aio.landing_uuid",
+   "value": "307973dd-e974-4729-8a73-f32195a80f42",
+   "extractor": "fixture",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "48:page",
+   "signal_id": "A2",
+   "namespace": "aio.template_uuid",
+   "value": "25c6c6fd-73af-48cb-b5cf-752154ebc474",
+   "extractor": "fixture",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "48:page",
+   "signal_id": "A8",
+   "namespace": "api_key_id",
+   "value": "APPA-165",
+   "extractor": "fixture",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "48:page",
+   "signal_id": "A7",
+   "namespace": "form_endpoint_host",
+   "value": "shadowtracecore.com",
+   "extractor": "fixture",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "48:page",
+   "signal_id": "B1",
+   "namespace": "url.param_name",
+   "value": "utm_visit",
+   "extractor": "fixture",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "61:article",
+   "signal_id": "A14",
+   "namespace": "domain.registrable",
+   "value": "glowpixel.org",
+   "extractor": "fixture",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "61:article",
+   "signal_id": "A1",
+   "namespace": "aio.campaign_uuid",
+   "value": "849a04c0-c067-4d3f-8317-6c4cb0a89923",
+   "extractor": "fixture",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "61:article",
+   "signal_id": "A1",
+   "namespace": "aio.owner_uuid",
+   "value": "c786ef45-015f-42c4-b575-e5b452b54107",
+   "extractor": "fixture",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "61:article",
+   "signal_id": "A1",
+   "namespace": "aio.landing_uuid",
+   "value": "5c68be98-5565-4610-bf12-736a77480c11",
+   "extractor": "fixture",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "61:article",
+   "signal_id": "A2",
+   "namespace": "aio.template_uuid",
+   "value": "25c6c6fd-73af-48cb-b5cf-752154ebc474",
+   "extractor": "fixture",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "61:article",
+   "signal_id": "A8",
+   "namespace": "api_key_id",
+   "value": "APPA-165",
+   "extractor": "fixture",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "61:article",
+   "signal_id": "A7",
+   "namespace": "form_endpoint_host",
+   "value": "shadowtracecore.com",
+   "extractor": "fixture",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "61:article",
+   "signal_id": "A4",
+   "namespace": "gads_id",
+   "value": "AW-18463917747",
+   "extractor": "fixture",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "61:chat",
+   "signal_id": "A14",
+   "namespace": "domain.registrable",
+   "value": "glowpixel.org",
+   "extractor": "fixture",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "61:chat",
+   "signal_id": "A1",
+   "namespace": "aio.campaign_uuid",
+   "value": "849a04c0-c067-4d3f-8317-6c4cb0a89923",
+   "extractor": "fixture",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "61:chat",
+   "signal_id": "A1",
+   "namespace": "aio.owner_uuid",
+   "value": "c786ef45-015f-42c4-b575-e5b452b54107",
+   "extractor": "fixture",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "61:chat",
+   "signal_id": "A1",
+   "namespace": "aio.landing_uuid",
+   "value": "91837506-95eb-4263-946d-73d5d4f62c73",
+   "extractor": "fixture",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "61:chat",
+   "signal_id": "A2",
+   "namespace": "aio.template_uuid",
+   "value": "25c6c6fd-73af-48cb-b5cf-752154ebc474",
+   "extractor": "fixture",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "61:chat",
+   "signal_id": "A8",
+   "namespace": "api_key_id",
+   "value": "APPA-165",
+   "extractor": "fixture",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "61:chat",
+   "signal_id": "A4",
+   "namespace": "gads_id",
+   "value": "AW-18463917747",
+   "extractor": "fixture",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "10:page",
+   "signal_id": "A14",
+   "namespace": "domain.registrable",
+   "value": "shop-77vault.xyz",
+   "extractor": "fixture",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "10:page",
+   "signal_id": "A3",
+   "namespace": "fb_pixel",
+   "value": "1549107073347817",
+   "extractor": "fixture",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "47:page",
+   "signal_id": "A14",
+   "namespace": "domain.registrable",
+   "value": "shryxla-mynx.icu",
+   "extractor": "fixture",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  },
+  {
+   "view_id": "47:page",
+   "signal_id": "A3",
+   "namespace": "fb_pixel",
+   "value": "4322849547991901",
+   "extractor": "fixture",
+   "version": "1",
+   "source": {
+    "file": null,
+    "locator": "fixture"
+   }
+  }
+ ]
+}
