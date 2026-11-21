@@ -134,13 +134,17 @@ def evaluate(store: Store, reference: list[ReferencePair] | None = None) -> Repo
             hit = by_incidents.get((ref.a, ref.b))
             results.append(PairResult(ref, hit[0].type if hit else None, hit[1] if hit else None))
 
+    # Per-type rates follow the same rule as the headline: evaluated pairs only. A reference
+    # pair with a side missing from the corpus is reported under "not evaluated", not as a
+    # recall miss of its type.
     by_type: dict[RelationType, TypeScore] = defaultdict(TypeScore)
     for res in results:
+        if res.predicted is None:
+            continue
         by_type[res.ref.expected].reference += 1
-        if res.predicted is not None:
-            by_type[res.predicted].predicted += 1
-            if res.predicted == res.ref.expected:
-                by_type[res.predicted].exact += 1
+        by_type[res.predicted].predicted += 1
+        if res.predicted == res.ref.expected:
+            by_type[res.predicted].exact += 1
     return Report(results=results, by_type=dict(by_type))
 
 

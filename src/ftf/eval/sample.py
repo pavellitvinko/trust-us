@@ -12,6 +12,9 @@ transcripts, patterns, expected elements) are reported as unavailable, not as fa
 
 from __future__ import annotations
 
+import base64
+import io
+import json
 import os
 import shutil
 import subprocess
@@ -448,25 +451,97 @@ def derive_tree(
     return count
 
 
-def reencode_image(src: Path, dst: Path, hue_shift: int = 12) -> bool:
-    """Write a hue-shifted, re-encoded copy: other bytes, nearly the same picture."""
-    if src.suffix.lower() not in IMAGE_SUFFIXES:
-        return False
+def reencode_bytes(data: bytes, fmt: str, hue_shift: int = 12) -> bytes | None:
+    """A hue-shifted, re-encoded copy of an image: other bytes, nearly the same picture.
+    `fmt` is a Pillow format name. None when Pillow cannot read the bytes or the image
+    is animated (then the caller keeps the original)."""
     try:
         from PIL import Image
 
-        with Image.open(src) as image:
+        with Image.open(io.BytesIO(data)) as image:
             if getattr(image, "is_animated", False):
-                return False
+                return None
             h, s, v = image.convert("RGB").convert("HSV").split()
             shifted = Image.merge("HSV", (h.point(lambda x: (x + hue_shift) % 256), s, v))
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            fmt = {".png": "PNG", ".webp": "WEBP"}.get(src.suffix.lower(), "JPEG")
+            out = io.BytesIO()
             options = {} if fmt == "PNG" else {"quality": 82}
-            shifted.convert("RGB").save(dst, format=fmt, **options)
-        return True
-    except (OSError, ValueError, SyntaxError):  # not an image Pillow can read: keep the bytes
+            shifted.convert("RGB").save(out, format=fmt, **options)
+            return out.getvalue()
+    except (OSError, ValueError, SyntaxError):
+        return None
+
+
+def _image_format(suffix: str) -> str:
+    return {".png": "PNG", ".webp": "WEBP"}.get(suffix.lower(), "JPEG")
+
+
+def reencode_image(src: Path, dst: Path, hue_shift: int = 12) -> bool:
+    """Write a hue-shifted, re-encoded copy of an image file, or of every image body a HAR
+    carries. The asset extractor hashes HAR response bodies too, so a scenario that rewrites
+    only the image files would leave the original hashes reachable through the HAR."""
+    suffix = src.suffix.lower()
+    if suffix == ".har":
+        return reencode_har_images(src, dst, hue_shift)
+    if suffix not in IMAGE_SUFFIXES:
         return False
+    data = reencode_bytes(src.read_bytes(), _image_format(suffix), hue_shift)
+    if data is None:  # not an image Pillow can read: keep the bytes
+        return False
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    dst.write_bytes(data)
+    return True
+
+
+HAR_IMAGE_FORMATS = {
+    "image/png": "PNG",
+    "image/webp": "WEBP",
+    "image/jpeg": "JPEG",
+    "image/jpg": "JPEG",
+}
+
+
+def reencode_har_images(src: Path, dst: Path, hue_shift: int = 12) -> bool:
+    """Rewrite every base64 image body in a HAR the same way the image files are rewritten.
+    A body Pillow cannot decode (SVG, GIF, a truncated capture) is dropped rather than kept:
+    the point of the scenario is that no original image bytes survive anywhere."""
+    try:
+        with open(src, encoding="utf-8", errors="replace") as fh:
+            har = json.load(fh)
+        entries = har["log"]["entries"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+    changed = False
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        content = (entry.get("response") or {}).get("content")
+        if not isinstance(content, dict):
+            continue
+        mime = str(content.get("mimeType") or "").lower().split(";")[0].strip()
+        text = content.get("text")
+        if not mime.startswith("image/") or not isinstance(text, str) or not text:
+            continue
+        data = None
+        if content.get("encoding") == "base64":
+            try:
+                raw = base64.b64decode(text)
+            except ValueError:
+                raw = b""
+            data = reencode_bytes(raw, HAR_IMAGE_FORMATS.get(mime, "PNG"), hue_shift)
+        if data is None:
+            content.pop("text", None)
+            content.pop("encoding", None)
+        else:
+            content["text"] = base64.b64encode(data).decode("ascii")
+            content["encoding"] = "base64"
+        content["size"] = len(data or b"")
+        changed = True
+    if not changed:
+        return False
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    with open(dst, "w", encoding="utf-8") as fh:
+        json.dump(har, fh, ensure_ascii=False)
+    return True
 
 
 def swap_text(mapping: dict[str, str]) -> Rewrite:
@@ -544,7 +619,8 @@ def scenarios(base: Store, reencode: tuple[str, ...] = ("2", "61"), swap: str = 
         ),
         Scenario(
             f"images re-encoded and hue-shifted (folders {', '.join(reencode)})",
-            "every image file rewritten with Pillow: exact hashes change, the picture barely",
+            "every image file and every image body inside a HAR rewritten with Pillow: exact "
+            "hashes change everywhere they could be read from, the picture barely",
             lambda src, dst: derive_tree(
                 src,
                 dst,

@@ -158,16 +158,19 @@ def assign(
             len(candidates),
             reasons,
         )
-    seen = [
-        x for items in related.values() for x in items if x.relation.coverage >= config.min_coverage
-    ]
-    if seen:
+    # "Novel" is a separation claim about the whole corpus, so it rests on the same rule fusion
+    # uses for one pair: at least one comparison fusion itself called `unrelated` (adequate
+    # coverage *and* the identity tier seen on both sides). Coverage alone is not enough: two
+    # screenshots whose hashes differ were compared, but nothing that defines a campaign was.
+    separated = related[RelationType.UNRELATED.value]
+    if separated:
         reasons.append(
-            f"compared with {len(seen)} candidates at adequate coverage; no tier reached its threshold"
+            f"compared with {len(separated)} candidates fusion could call unrelated; "
+            f"no tier reached its threshold"
         )
         return Assignment(view_id, Outcome.NOVEL, None, related, len(candidates), reasons)
-    # No candidate at adequate coverage. Well-observed material that shares nothing with the
-    # corpus is novel, not insufficient: check coverage against the non-candidates by layer
+    # No candidate separable. Well-observed material that shares nothing with the corpus is
+    # still novel, not insufficient: apply the same rule to the non-candidates from layer
     # presence alone (the comparison would score 0 on every set layer anyway).
     from .candidates import cheap_relation
 
@@ -182,15 +185,21 @@ def assign(
     observable = [
         o
         for o in others
-        if cheap_relation(store, view_id, o, config).coverage >= config.min_coverage
+        if cheap_relation(store, view_id, o, config).type is RelationType.UNRELATED
     ]
     if observable:
         reasons.append(
             f"shares no indexed value with {len(observable)} views it is comparable with "
-            f"at adequate coverage"
+            f"at adequate coverage, identity tier included"
         )
         return Assignment(view_id, Outcome.NOVEL, None, related, len(candidates), reasons)
-    reasons.append("no view could be compared at adequate coverage")
+    if any(x.relation.coverage >= config.min_coverage for items in related.values() for x in items):
+        reasons.append(
+            "candidates were compared at adequate coverage, but the identity tier was not "
+            "comparable on both sides for any of them: the material cannot be called novel"
+        )
+    else:
+        reasons.append("no view could be compared at adequate coverage")
     return Assignment(view_id, Outcome.INSUFFICIENT, None, related, len(candidates), reasons)
 
 
