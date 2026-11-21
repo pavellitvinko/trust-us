@@ -2,8 +2,8 @@
 
 `FakeEmbedder` is deterministic hashed bag-of-words with mean pooling: no network, no key,
 stable across machines. It exists so fusion, calibration and the tests run with the gateway
-off. `GatewayEmbedder` calls the Perception track's Gemini client through the content-hash
-cache, chunking long text and mean-pooling the chunks (8,192-token input limit).
+off. `GatewayEmbedder` calls the Perception track's Gemini client (`ftf.models.embed`), which
+chunks long text, mean-pools the chunks and caches every call by content hash.
 
 Selection: `FTF_EMBEDDER=fake|gateway`; default is gateway when a Gemini key and the client
 exist, else fake. Swapping the model changes the raw cosines; `compare.vector.calibrate`
@@ -28,7 +28,7 @@ _WORD = re.compile(r"\w+", re.UNICODE)
 class Embedder(Protocol):
     model: str
 
-    def embed(self, texts: Sequence[str]) -> list[list[float]]: ...
+    def embed(self, texts: Sequence[str]) -> list[list[float] | None]: ...
 
 
 class FakeEmbedder:
@@ -55,51 +55,25 @@ class FakeEmbedder:
 
 
 class GatewayEmbedder:
-    """Gemini embeddings via the model gateway. The client is the Perception track's
-    `ftf.models.embeddings.embed_texts(texts, model) -> list[list[float]]`."""
-
-    chunk_chars = 20_000  # ~8k tokens of Polish text, with margin
+    """Gemini embeddings through the Perception track's gateway (`ftf.models.embed`), which
+    chunks long text, mean-pools the chunks and caches by content hash. A text the gateway
+    cannot embed (no key, refusal, timeout) yields None, and the layer is left out for that
+    view: a missing layer never counts against a link."""
 
     def __init__(self, model: str):
         self.model = model
 
-    def _call(self, texts: list[str]) -> list[list[float]]:
-        from ..models import cached_call
+    def embed(self, texts: Sequence[str]) -> list[list[float] | None]:
+        from ..models import embed
 
-        try:
-            from ..models.embeddings import embed_texts  # provided by the Perception track
-        except ImportError as exc:  # pragma: no cover - depends on another track
-            raise RuntimeError(
-                "gateway embedder requested but ftf.models.embeddings is not available; "
-                "set FTF_EMBEDDER=fake or add the client"
-            ) from exc
-        settings = get_settings()
-        out = []
-        for text in texts:
-            out.append(
-                cached_call(
-                    settings.model_cache_dir,
-                    "embed",
-                    "1",
-                    self.model,
-                    {"text": text},
-                    lambda text=text: embed_texts([text], self.model)[0],
-                )
-            )
+        out: list[list[float] | None] = []
+        for result in embed(list(texts)):
+            if result.value is None:
+                out.append(None)
+            else:
+                out.append(result.value.vector)
+                self.model = result.value.model
         return out
-
-    def embed(self, texts: Sequence[str]) -> list[list[float]]:
-        vectors = []
-        for text in texts:
-            chunks = [
-                text[i : i + self.chunk_chars] for i in range(0, len(text), self.chunk_chars)
-            ] or [""]
-            parts = self._call(chunks)
-            dim = len(parts[0])
-            pooled = [sum(p[i] for p in parts) / len(parts) for i in range(dim)]
-            norm = math.sqrt(sum(x * x for x in pooled))
-            vectors.append([x / norm for x in pooled] if norm else pooled)
-        return vectors
 
 
 _embedder: Embedder | None = None

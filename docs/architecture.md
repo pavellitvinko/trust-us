@@ -318,7 +318,7 @@ Twenty-three layers are registered; each declares tier, correlation group and co
 
 \* exclusive namespace: two different values are a contradiction.
 
-Embeddings go through one interface (`layers/_embedder.py`): `FakeEmbedder` (hashed word stems, deterministic, no network) for tests and the model-off run; `GatewayEmbedder` (Gemini through the content-hash cache, chunked and mean-pooled) when a key is present. The gateway path was not exercised against a live key during the build.
+Embeddings go through one interface (`layers/_embedder.py`): `FakeEmbedder` (hashed word stems, deterministic, no network) for tests and the model-off run; `GatewayEmbedder` (the Perception track's `ftf.models.embed`: Gemini, chunked, mean-pooled, cached) when a key is present. The gateway path was not exercised against a live key during the build.
 
 ---
 

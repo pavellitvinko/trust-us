@@ -130,6 +130,8 @@ def _vector_fingerprint(view: View, layer_id: str, version: str, text: str) -> F
         return None
     embedder = get_embedder()
     values = embedder.embed([text])[0]
+    if values is None:  # the gateway could not embed this text: leave the layer out
+        return None
     return Fingerprint(
         view_id=view.view_id,
         layer_id=layer_id,
