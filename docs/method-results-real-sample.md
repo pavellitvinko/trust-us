@@ -7,9 +7,9 @@ Results with real gateway embeddings belong to HAC-32 and are not in this file.
 
 ## Run record
 
-- Commit: `0aba053`
-- Date: 2026-11-21
-- Corpus: `testing_sample`: 10 incident folders, 37 views (21 image, 13 page, 3 video), 1290 observations; 3 views carry no fingerprint at all
+- Commit: `8399800`
+- Date: 2026-11-22
+- Corpus: `testing_sample`: 10 incident folders, 37 views (21 image, 13 page, 3 video), 1316 observations; 3 views carry no fingerprint at all
 - Execution mode: model-off: no gateway call; vector layers use the local hashed-word embedder; no screenshot, video, pattern or expected-element reading
 - Layers registered: 24
 - Store: fresh in-memory store per run
