@@ -31,6 +31,7 @@ Needs [uv](https://docs.astral.sh/uv/).
 ```bash
 uv sync
 uv run ftf ingest testing_sample      # a folder of incident folders, or one incident folder
+uv run ftf enrich                     # DNS and RDAP lookups again (cached; also part of run)
 uv run ftf views
 uv run ftf pairs
 uv run ftf compare <view_id> <view_id>
@@ -99,6 +100,19 @@ class MyExtractor:
 
 Layers (`@layers.register`) turn observations into a fingerprint and name their comparator.
 Comparators (`@comparators.register`) turn two fingerprints into an `Evidence`.
+
+## Outside sources
+
+`ftf run` (and `ingest`) looks up each page's domain in DNS and RDAP after extraction; pass
+`--no-enrich` to skip. Answers are cached with their timestamp in `$FTF_DATA_DIR/enrich_cache/`
+(7 days; failures 1 hour), and a failed lookup is recorded as `not_observable`, never as a
+negative; network failures are not cached. `FTF_ENRICH=cache` uses the cache only,
+`FTF_ENRICH=off` (also `0`, `false`, `no`, or any unknown value) makes no lookups.
+
+- DNS: the system resolver (dnspython), so domains are not sent to a third-party DNS service.
+- RDAP: the registry's server, found through IANA's bootstrap file
+  (<https://data.iana.org/rdap/dns.json>). Registration data is public and served under each
+  registry's RDAP terms of use; requests are spaced at least a second apart per server.
 
 ## Data handling
 

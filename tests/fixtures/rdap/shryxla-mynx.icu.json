@@ -1,0 +1,67 @@
+{
+ "objectClassName": "domain",
+ "ldhName": "shryxla-mynx.icu",
+ "events": [
+  {
+   "eventAction": "registration",
+   "eventDate": "2026-02-26T08:52:09.0Z"
+  },
+  {
+   "eventAction": "expiration",
+   "eventDate": "2027-02-26T23:59:59.0Z"
+  },
+  {
+   "eventAction": "last update of RDAP database",
+   "eventDate": "2026-11-21T22:37:48.0Z"
+  },
+  {
+   "eventAction": "last changed",
+   "eventDate": "2026-04-23T14:01:45.0Z"
+  }
+ ],
+ "nameservers": [
+  {
+   "objectClassName": "nameserver",
+   "ldhName": "coraline.ns.cloudflare.com"
+  },
+  {
+   "objectClassName": "nameserver",
+   "ldhName": "noah.ns.cloudflare.com"
+  }
+ ],
+ "status": [
+  "client transfer prohibited"
+ ],
+ "entities": [
+  {
+   "objectClassName": "entity",
+   "handle": "303",
+   "roles": [
+    "registrar"
+   ],
+   "publicIds": [
+    {
+     "type": "IANA Registrar ID",
+     "identifier": "303"
+    }
+   ],
+   "vcardArray": [
+    "vcard",
+    [
+     [
+      "version",
+      {},
+      "text",
+      "4.0"
+     ],
+     [
+      "fn",
+      {},
+      "text",
+      "PDR Ltd. d/b/a PublicDomainRegistry.com"
+     ]
+    ]
+   ]
+  }
+ ]
+}

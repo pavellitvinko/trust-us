@@ -73,11 +73,11 @@ the pair at *same family*. Everything else may rotate between deployments.
 | --- | --- | --- | --- |
 | `asset.exact` | `asset.sha256` | SHA-256 hex of content images; not logos, icons or libraries | E1 |
 | | `avatar.sha256` | SHA-256 hex of fake-commenter avatars | E12 |
-| `text.shingle` | `text.body` | cleaned article body as one string: comments, navigation, widgets removed | F1 |
+| `text.shingle` | `page.body_text` (else `text.body`, else `page.clean_text`) | article body as one string: comments, navigation, widgets removed | F1 |
 | `asset.perceptual` | `image.phash` | 64-bit grayscale pHash, 16 hex chars, one row per image | E2 |
 | `ad.creative` | `creative.phash`, `creative.ocr_text` | pHash of the ad image; OCR text | L2, L3, E11 |
 | `media.video` | `video.frame_phash` | pHash per sampled key frame | M1 |
-| `text.semantic` | `text.body` | (same input as text.shingle; embedded by the layer) | F2 |
+| `text.semantic` | `page.body_text` | (same input as text.shingle; embedded by the layer) | F2 |
 
 ## Kit tier (T3): supports *same family*
 
@@ -104,11 +104,28 @@ the pair at *same family*. Everything else may rotate between deployments.
 
 | Layer | Namespace | Value shape | Catalogue |
 | --- | --- | --- | --- |
-| `narrative.skeleton` | `text.body` | (masked and embedded by the layer) | F3 |
+| `narrative.skeleton` | `page.body_text` | (masked and embedded by the layer) | F3 |
 | `pattern.mo` | `pattern.score` | `{"pattern": "<library id>", "score": 0..1}` one row per pattern | H, §6 |
 | `kit.absence` | `expect.element` | value = element id, `state` = present / absent / not_observable | K, §6 |
 | `entity.cast` | `entity.cast` | `{"entity": "<name>", "role": "<role>"}` | G1, G3 |
 | `visual.layout` | `screenshot.embedding` | `{"model": …, "values": [...]}` | E4 |
+
+## Domain risk and enrichment (C1–C5, C13)
+
+Written by `domain.shape` (script) and the `dns` / `rdap` enrichers. Every enrichment row keeps
+its provenance in `raw` as JSON: `endpoint`, `lookup_at`, `cache_age_s`, `cached`, and for
+domain age `captured_at` and `basis`. A failed lookup is a `not_observable` row with `error`.
+
+| Namespace | Value shape | Purpose | Catalogue |
+| --- | --- | --- | --- |
+| `dns.ns_pair` | name servers, lower-case, no trailing dot, sorted, `|`-joined; RDAP delegation when the zone has none (`confidence` 0.8) | linkage (`infra.host`); risk when the servers are parking or sinkhole ones, or the RDAP stand-in for a dead domain | C3 |
+| `rdap.registrar` | registrar name without corporate suffixes (`namecheap`); original and IANA ID in `raw` | both (`infra.host`) | C2 |
+| `rdap.registered_at` | ISO date of the `registration` event | risk | C1 |
+| `rdap.domain_age_days` | whole days from registration to capture; `basis` = `har:…`, `incident_har:…`, `manifest:…` or `lookup` (`confidence` 0.5) | risk | C1 |
+| `dns.status` | `live`, `dead`, `parked`, `sinkholed`, judged on the page's own host (A and AAAA); the rule in `raw` | risk | C13 |
+| `dns.a`, `dns.mx` | one row per A or AAAA address of the page's host / per mail host of the domain | risk | C13 |
+| `domain.tld_risk` | `high` (`.live .pro .xyz .top .icu .life`), `low` (`.pl`), `other` | risk | C4 |
+| `domain.name_shape` | `hyphen_digits`, `generated_pronounceable`, `generated`, `plain`; metrics in `raw` | risk | C5 |
 
 ## Funnel evidence inside an incident (ad or screenshot view → page view)
 
