@@ -6,12 +6,16 @@ HackNation challenge "Kolekcjoner fejków", set by NASK.
 - Design: [docs/architecture.md](docs/architecture.md)
 - Signals: [docs/signal-catalogue.md](docs/signal-catalogue.md)
 
-**Status: Method track built** (architecture §8a, §9a, §10a, §13a). Twenty-three fingerprint
-layers, five comparator families with rarity weighting and a stoplist, typed fusion with the
-contradiction and demotion rules, three-level grouping, funnel edges, open-set assignment,
-candidate generation and the evaluation harness all run on `tests/fixtures/observations.json`
-with no model call. Extractors beyond the reference slice, live capture, enrichment and the
-interface are other tracks' work; `docs/method-namespaces.md` says what they must emit.
+**Status: Method track built; identifier, kit and perception extractors landing.** Twenty-three
+fingerprint layers, five comparator families with rarity weighting and a stoplist, typed fusion
+with the contradiction and demotion rules, three-level grouping, funnel edges, open-set assignment,
+candidate generation and the evaluation harness run on `tests/fixtures/observations.json` with no
+model call (architecture §8a, §9a, §10a, §13a). The Evidence track's identifier extractors
+(tracker config, pixels and tag IDs, ad parameters, conversion and outbound targets) and
+tracker-kit extractors (URL parameter schema, path conventions, API routes, config key paths,
+hidden fields, server headers) produce observations on the sample; the Perception track reads
+pages and screenshots with the model (`ftf perceive`). `docs/method-namespaces.md` lists the
+namespaces the layers consume. Live capture, enrichment and the interface are still to be built.
 
 ## Run locally
 

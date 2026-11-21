@@ -1,4 +1,5 @@
-"""Command line: ftf ingest | run | views | observations | compare | pairs | relations | explain | load-fixtures."""
+"""Command line: ftf ingest | run | perceive | views | observations | compare | pairs | relations |
+explain | groups | incidents | assign | eval | loio | ablate | load-fixtures."""
 
 from __future__ import annotations
 
@@ -57,6 +58,22 @@ def cmd_load_fixtures(args) -> None:
     print(f"views: {len(store.views())}")
     print(f"fingerprints: {pipeline.run_fingerprint(store)}")
     _compare_and_group(store, args)
+
+
+def cmd_perceive(args) -> None:
+    from .perception.image import run_perceive
+    from .perception.page import run_perceive_pages
+    from .registry import Context
+
+    ctx = Context(_store())
+    for label, run in (("image", run_perceive), ("page", run_perceive_pages)):
+        summary = run(ctx, args.view or None)
+        print(
+            f"{label} views: {summary['views']}, read: {summary['read']}, "
+            f"not observable: {summary['not_observable']}, "
+            f"failed but kept earlier reading: {summary['kept']}, "
+            f"observations: {summary['observations']}"
+        )
 
 
 def cmd_views(args) -> None:
@@ -243,6 +260,10 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("run", help="extract, fingerprint and compare everything stored")
     p.add_argument("--candidates", action="store_true", help="compare candidate pairs only")
     p.set_defaults(func=cmd_run)
+    p = sub.add_parser("perceive", help="read stored image and page views with the model")
+    p.add_argument("--view", action="append", help="only this view id; may be repeated")
+    p.set_defaults(func=cmd_perceive)
+
     sub.add_parser("views", help="list views").set_defaults(func=cmd_views)
 
     p = sub.add_parser("observations", help="show one view's observations")

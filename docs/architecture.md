@@ -142,7 +142,7 @@ A URL is captured by a headless browser into the **same bundle layout the organi
 | TLS and connection facts | Certificate issuer, validity, SANs; server IP; response headers |
 | **Cloaking differential** | The same URL fetched under two or three profiles: *ad click* (mobile, social referrer, original query string), *bare* (desktop, no referrer, no query), optionally *crawler* user agent. The views are compared with the pipeline's own text and DOM comparators; a large difference is recorded as a cloaking observation and each variant is kept as its own view. |
 
-Safeguards: an ephemeral browser context per capture; downloads blocked; no form is ever submitted and nothing is typed; tokens and cookies in the HAR are redacted before storage; capture runs inside the container only. A dead domain produces a view whose page layers are *not observable*, with DNS and registration layers still filled — which is the normal case for this material, not an error.
+Safeguards: an ephemeral browser context per capture; downloads blocked; no form is ever submitted and nothing is typed; capture runs inside the container only. Tokens and cookies in the HAR are stored as captured: secrets found in material are evidence like any other identifier (team decision 2026-11-21). A dead domain produces a view whose page layers are *not observable*, with DNS and registration layers still filled — which is the normal case for this material, not an error.
 
 Cloakers often filter by country. Captures are expected to run from a Polish network, so this should not hide the offer page; the capture record notes the egress used, and a proxy setting exists for running elsewhere.
 
@@ -285,6 +285,8 @@ Each layer declares: which observations it consumes, the fingerprint kind, the c
 | `entity.cast` | G1, G3 | set of (entity, role) | weighted Jaccard | T4 | names from text | plus face-reference layer |
 | `visual.layout` | E4, E9 | vector | calibrated cosine | T4 | screenshot embedding | layout-specific model |
 | `ad.creative` | L2, L3 | hash + vector | Hamming / cosine | T2–T4 | pHash + OCR text shingle | — |
+
+Kit-layer input namespaces (HAC-10): `url.param_name` (B1), `url.param_shape` (B2, `name:shape`, e.g. `utm_id:alnum20`), `url.path_shape` (B5, e.g. `/lander/<a-a-a>/`), `api.route` (B6, static prefix), `config.key_path` (B3, `visit.*`/`session.*` excluded), `form.hidden_name` (B4), `kit.cloaker` (B8), `http.server` / `http.via` / `http.powered_by` (C10, CDN fronts stoplisted). Values are names and shapes only, never a per-click value.
 
 Layers are added by registering a class; nothing else changes. The entity-masked narrative layer deserves a note: before embedding, every person, organisation, product, amount and date is replaced with a role placeholder (`[CELEBRITY]`, `[BANK]`, `[PLATFORM]`, `[AMOUNT]`). The Brzoska, Olejnik and Lis stories then land near each other because their skeleton is the same, while `text.semantic`, which keeps the names, still separates them. Together the two layers distinguish "same text" from "same story with a different cast".
 
