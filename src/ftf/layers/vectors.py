@@ -15,6 +15,7 @@ from ..contracts import Fingerprint, FingerprintKind, Observation, Tier, View
 from ..registry import layers
 from ._embedder import get_embedder
 from ._set_layer import linkage_items
+from ._text import TEXT_NAMESPACES, body_text
 
 MIN_WORDS = 20
 
@@ -128,11 +129,8 @@ def mask(text: str, observations: list[Observation] = ()) -> str:
     return " ".join(text.split())
 
 
-TEXT_NAMESPACES = ("text.body", "page.clean_text")
-
-
 def _body(observations: list[Observation]) -> str:
-    return "\n".join(v for _, v in linkage_items(observations, TEXT_NAMESPACES))
+    return body_text(observations)
 
 
 def _vector_fingerprint(view: View, layer_id: str, version: str, text: str) -> Fingerprint | None:
@@ -154,7 +152,7 @@ def _vector_fingerprint(view: View, layer_id: str, version: str, text: str) -> F
 @layers.register
 class TextSemantic:
     name = "text.semantic"
-    version = "1"
+    version = "2"
     kind = FingerprintKind.VECTOR
     tier = Tier.ARTIFACT
     group = "semantic"
@@ -168,7 +166,7 @@ class TextSemantic:
 @layers.register
 class NarrativeSkeleton:
     name = "narrative.skeleton"
-    version = "1"
+    version = "2"
     kind = FingerprintKind.VECTOR
     tier = Tier.PLAYBOOK
     group = "narrative"

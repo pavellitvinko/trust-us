@@ -63,6 +63,15 @@ def _any(observations: list[Observation], namespaces) -> set[str]:
     return out
 
 
+def _navigation_evidence(src: list[Observation], dst: list[Observation]) -> list[str]:
+    # The downstream capture remembers an upstream landing. Self-history adds no edge.
+    previous = _values(dst, "nav.landing_uuid") - _values(dst, "aio.landing_uuid")
+    nav = previous & _values(src, "aio.landing_uuid")
+    if nav:
+        return ["stored navigation names the landing: " + ", ".join(sorted(nav))]
+    return []
+
+
 def funnel_evidence(src: list[Observation], dst: list[Observation]) -> list[str]:
     """Why `src` (an ad or an upstream page) leads to `dst` (a page). Empty = no evidence."""
     from ..layers.playbook import cast_names
@@ -83,12 +92,7 @@ def funnel_evidence(src: list[Observation], dst: list[Observation]) -> list[str]
     people = _any(src, AD_PERSON) & page_people
     if people:
         out.append("shared named person: " + ", ".join(sorted(people)))
-    nav = _values(src, "nav.landing_uuid") & _values(dst, "aio.landing_uuid")
-    if nav:
-        out.append("stored navigation names the landing: " + ", ".join(sorted(nav)))
-    nav_back = _values(dst, "nav.landing_uuid") & _values(src, "aio.landing_uuid")
-    if nav_back:
-        out.append("stored navigation names the landing: " + ", ".join(sorted(nav_back)))
+    out.extend(_navigation_evidence(src, dst))
     return out
 
 
@@ -143,6 +147,13 @@ def funnel_edges(
             )
     for i, a in enumerate(pages):
         for b in pages[i + 1 :]:
+            forward = _navigation_evidence(obs[a.view_id], obs[b.view_id])
+            backward = _navigation_evidence(obs[b.view_id], obs[a.view_id])
+            if forward or backward:
+                for src, dst, why in ((a, b, forward), (b, a, backward)):
+                    if why:
+                        funnel.append(FunnelEdge(src.view_id, dst.view_id, "funnel", why))
+                continue
             why = funnel_evidence(obs[a.view_id], obs[b.view_id])
             if why:
                 funnel.append(FunnelEdge(a.view_id, b.view_id, "funnel", why))

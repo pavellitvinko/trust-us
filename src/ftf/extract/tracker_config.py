@@ -9,6 +9,7 @@ person saved. The few `visit.*` paths below are record IDs, not visitor data.
 from __future__ import annotations
 
 from typing import Any
+from uuid import UUID
 
 from ..contracts import Observation, Purpose, View
 from ..registry import Context, extractors
@@ -62,7 +63,7 @@ def _scalar(value: Any) -> str | None:
 @extractors.register
 class TrackerConfig:
     name = "tracker.config"
-    version = "1"
+    version = "2"
 
     def run(self, view: View, ctx: Context) -> list[Observation]:
         mat = m.load(view, ctx)
@@ -74,4 +75,20 @@ class TrackerConfig:
                 value = _scalar(raw)
                 source = m.at(mat.aio_source, f"aio:{concrete}")
                 emit(signal, namespace, value, source, purpose=purpose)
+        # Only visited landing IDs, never visit/session data or engagement measurements.
+        visited = mat.aio.get("landed_on_landings_uuids")
+        if isinstance(visited, dict):
+            for raw, landed in visited.items():
+                if landed is not True:
+                    continue
+                try:
+                    landing = str(UUID(raw))
+                except (ValueError, TypeError, AttributeError):
+                    continue
+                emit(
+                    "I4",
+                    "nav.landing_uuid",
+                    landing,
+                    m.at(mat.aio_source, f"aio:landed_on_landings_uuids[{raw!r}]"),
+                )
         return emit.out

@@ -42,6 +42,17 @@ uv run streamlit run app/streamlit_app.py
 uv run pytest
 ```
 
+With the organiser sample in `testing_sample/`, run the deterministic checkpoint with:
+
+```bash
+uv run pytest tests/test_checkpoint.py -q -s
+```
+
+The test ingests the real files into a temporary database through the CLI. It checks the
+1↔2 campaign, 2↔3 duplicate, 48↔61 family and 61 article→chat funnel. It blocks model
+imports and network access, uses local hashed text vectors, and checks an audit of zero
+attempts. It skips when the private sample is absent.
+
 ## Run in Docker
 
 ```bash

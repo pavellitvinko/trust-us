@@ -8,7 +8,7 @@ twice, while two measures of the same thing do not.
 from __future__ import annotations
 
 from ..compare.minhash import default_hasher
-from ..contracts import Fingerprint, FingerprintKind, Observation, Tier, View
+from ..contracts import Fingerprint, FingerprintKind, Observation, Purpose, State, Tier, View
 from ..registry import layers
 from ._set_layer import linkage_items, set_layer
 
@@ -51,6 +51,7 @@ set_layer(
 
 set_layer(
     name="kit.code",
+    version="2",
     tier=Tier.KIT,
     group="kit_code",
     comparator="set_overlap",
@@ -62,6 +63,8 @@ set_layer(
         "code.naming",
         "code.evasion_filter",
         "code.residue_lang",
+        "dom.comment_lang",
+        "dom.evasion_filter",
     ),
     doc="D3-D6, E5, E13: first-party file hashes, comment language, naming habits, evasion filter.",
 )
@@ -113,18 +116,25 @@ class KitDom:
     """D2: CSS class-name set as a MinHash signature, framework and translator classes removed."""
 
     name = "kit.dom"
-    version = "1"
+    version = "2"
     kind = FingerprintKind.HASH
     tier = Tier.KIT
     group = "kit_dom"
     comparator = "minhash"
-    namespaces = ("dom.class",)
+    namespaces = ("dom.class", "dom.class_set")
 
     def build(self, view: View, observations: list[Observation]) -> Fingerprint | None:
+        values = [value for _, value in linkage_items(observations, ("dom.class",))]
+        for o in observations:
+            if (
+                o.namespace == "dom.class_set"
+                and o.state is State.PRESENT
+                and o.purpose is not Purpose.RISK
+                and isinstance(o.value, list)
+            ):
+                values.extend(v.strip() for v in o.value if isinstance(v, str))
         classes = {
-            value
-            for _, value in linkage_items(observations, self.namespaces)
-            if not value.startswith(_FRAMEWORK_CLASS_PREFIXES)
+            value for value in values if value and not value.startswith(_FRAMEWORK_CLASS_PREFIXES)
         }
         if len(classes) < 3:
             return None
