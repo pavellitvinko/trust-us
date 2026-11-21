@@ -29,13 +29,17 @@ def _campaigns(ctx: Context) -> dict[str, str] | None:
 
 
 def run_discover(
-    ctx: Context, *, settings: Settings | None = None, client: Any = None
+    ctx: Context,
+    view_ids: list[str] | None = None,
+    *,
+    settings: Settings | None = None,
+    client: Any = None,
 ) -> dict[str, Any]:
     settings = settings or get_settings()
     campaign_of = _campaigns(ctx)
     if campaign_of is None:
         return {"reason": "no_groups: run `ftf run` first"}
-    cards = gather_technique_cards(ctx.store, campaign_of=campaign_of)
+    cards = gather_technique_cards(ctx.store, view_ids, campaign_of=campaign_of)
     if not cards:
         return {"reason": "no_cards: run `ftf perceive` first"}
     kept, vectors, failed = embed_cards(cards, settings=settings, client=client)
@@ -56,12 +60,18 @@ def run_discover(
         "patterns": len(induced.version.patterns),
         "composites": len(induced.version.composites),
     }
-    summary["matching"] = run_matching(ctx, induced.version, settings=settings, client=client)
+    summary["matching"] = run_matching(
+        ctx, induced.version, view_ids, settings=settings, client=client
+    )
     return summary
 
 
 def run_match(
-    ctx: Context, *, settings: Settings | None = None, client: Any = None
+    ctx: Context,
+    view_ids: list[str] | None = None,
+    *,
+    settings: Settings | None = None,
+    client: Any = None,
 ) -> dict[str, Any]:
     settings = settings or get_settings()
     library, _ = _dirs(settings)
@@ -70,7 +80,7 @@ def run_match(
         return {"reason": "no_library: run `ftf patterns discover` first"}
     return {
         "version": version.version_id,
-        "matching": run_matching(ctx, version, settings=settings, client=client),
+        "matching": run_matching(ctx, version, view_ids, settings=settings, client=client),
     }
 
 

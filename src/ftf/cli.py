@@ -126,7 +126,8 @@ def cmd_patterns(args) -> None:
     if args.action == "stability":
         print(run_stability(ctx))
         return
-    summary = run_discover(ctx) if args.action == "discover" else run_match(ctx)
+    run = run_discover if args.action == "discover" else run_match
+    summary = run(ctx, args.view or None)
     print(summary)
     if summary.get("reason"):
         raise SystemExit(1)
@@ -350,6 +351,7 @@ def main(argv: list[str] | None = None) -> None:
 
     p = sub.add_parser("patterns", help="induce, match and inspect the pattern library (model)")
     p.add_argument("action", choices=("discover", "match", "list", "stability"))
+    p.add_argument("--view", action="append", help="only this view id; may be repeated")
     p.set_defaults(func=cmd_patterns)
 
     p = sub.add_parser("explain", help="layer-by-layer evidence and the typed relation for a pair")
