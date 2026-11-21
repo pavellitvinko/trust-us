@@ -60,6 +60,7 @@ class Groups:
     playbooks_of: dict[str, list[str]] = field(default_factory=dict)  # view -> playbook ids
     playbooks: dict[str, list[str]] = field(default_factory=dict)  # playbook id -> views
     rejected_merges: list[tuple[str, str, str]] = field(default_factory=list)
+    funnel_edges: dict = field(default_factory=dict)  # incident -> (funnel, co_captured)
 
     def family_of_view(self, view_id: str) -> str | None:
         c = self.campaign_of.get(view_id)
@@ -82,9 +83,17 @@ def merge_guard(r: Relation, config: FusionConfig = DEFAULT) -> bool:
     )
 
 
-def build_campaigns(view_ids: list[str], relations: list[Relation], config: FusionConfig = DEFAULT):
+def build_campaigns(
+    view_ids: list[str],
+    relations: list[Relation],
+    config: FusionConfig = DEFAULT,
+    funnel: list[tuple[str, str]] = (),
+):
     uf = UnionFind(view_ids)
     rejected = []
+    for a, b in funnel:  # campaign membership propagates along funnel edges, never co-capture
+        if a in uf.parent and b in uf.parent:
+            uf.union(a, b)
     for r in relations:
         if r.type in (RelationType.DUPLICATE, RelationType.SAME_CAMPAIGN):
             if merge_guard(r, config):
@@ -149,10 +158,14 @@ def build_playbooks(
     return playbooks, dict(playbooks_of)
 
 
-def build_groups(store: Store, config: FusionConfig = DEFAULT) -> Groups:
+def build_groups(store: Store, config: FusionConfig = DEFAULT, funnel: bool = True) -> Groups:
+    from .funnel import run_funnel
+
     view_ids = [v.view_id for v in store.views()]
     relations = store.relations()
-    campaigns, campaign_of, rejected = build_campaigns(view_ids, relations, config)
+    edges = run_funnel(store) if funnel else {}
+    funnel_pairs = [(e.source, e.target) for f, _ in edges.values() for e in f]
+    campaigns, campaign_of, rejected = build_campaigns(view_ids, relations, config, funnel_pairs)
     families, family_of = build_families(campaigns, campaign_of, relations)
     playbooks, playbooks_of = build_playbooks(view_ids, relations, config)
     return Groups(
@@ -163,4 +176,5 @@ def build_groups(store: Store, config: FusionConfig = DEFAULT) -> Groups:
         playbooks_of=playbooks_of,
         playbooks=playbooks,
         rejected_merges=rejected,
+        funnel_edges=edges,
     )

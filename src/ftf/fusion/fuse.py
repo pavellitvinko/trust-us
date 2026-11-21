@@ -102,6 +102,12 @@ def summarise(
             anchors += [
                 (s["ns"], s["value"]) for s in shared if s["ns"] in config.duplicate_anchors
             ]
+            if e.layer_id in config.duplicate_anchor_layers:
+                anchors += [
+                    (e.layer_id, s["value"])
+                    for s in shared
+                    if s.get("distance", 99) <= config.duplicate_anchor_max_distance
+                ]
 
         comparable[tier][group] = max(comparable[tier].get(group, 0.0), score)
 
