@@ -16,8 +16,8 @@ conversion and outbound targets), tracker-kit extractors (URL parameter schema, 
 conventions, API routes, config key paths, hidden fields, server headers) and asset hashes
 (exact by role, grayscale perceptual) produce observations on the sample and the layers consume
 them; the Perception track reads pages and screenshots with the model (`ftf perceive`).
-`docs/method-namespaces.md` lists the namespaces the layers consume. Live capture, enrichment
-and the interface are still to be built.
+`docs/method-namespaces.md` lists the namespaces the layers consume. Warning-list enrichment
+and the basic interface are available below; live capture and broader enrichment remain to be built.
 
 ## Run locally
 
@@ -31,6 +31,8 @@ uv run ftf views
 uv run ftf pairs
 uv run ftf compare <view_id> <view_id>
 uv run ftf explain <view_id> <view_id>   # evidence per layer and the typed relation with reasons
+uv run ftf explain <view_a> <view_b> --format json --output comparison.json
+uv run ftf explain <view_a> <view_b> --output comparison.md
 uv run ftf relations --type same_campaign --reasons
 uv run ftf groups                         # campaigns, families, playbooks
 uv run ftf incidents                      # per-folder roll-up, funnel edges, mismatches
@@ -54,6 +56,24 @@ The test ingests the real files into a temporary database through the CLI. It ch
 imports and network access, uses local hashed text vectors, and checks an audit of zero
 attempts. It skips when the private sample is absent.
 
+`ftf explain` produces a complete pair report: object identities and files, confidence
+with its rule, coverage as a group count, scores and weights, shared and differing values
+linked to source observations, contradictions, demoted/ignored matches, and every missing
+or incompatible layer. Observation references include the file, locator, extractor and
+version. Derived text/DOM comparisons include exact input overlaps; Markdown shows labelled
+examples and JSON retains the complete sets. Long source text is a labelled excerpt.
+Reports use stored fingerprints and never call a model or modify the database.
+The same report is available under **Full comparison report** in Streamlit with JSON and
+Markdown downloads. Its separate acceptance check is:
+
+```bash
+uv run pytest tests/test_reporting.py -q
+```
+
+That check covers report completeness on the real sample with model/network access blocked,
+source resolution, missing/incompatible inputs, ignored matches, reversed object order,
+and the Streamlit report view. The real-sample check skips if the sample is absent.
+
 ## Run in Docker
 
 ```bash
@@ -68,6 +88,75 @@ The sample is not in git, so on a fresh clone either copy it to `./testing_sampl
 Without it `/sample` is empty and `ftf ingest` stops with "no views found" (exit code 1).
 State lives in `./data`. The image installs the exact versions in `uv.lock`;
 `docker compose ps` shows the interface as `healthy` once it answers.
+
+## Warning lists (HAC-17)
+
+`ftf ingest` / `ftf run` check domains and supported entity/offer names against local
+snapshots after extraction. `ftf perceive` repeats the checks after page and image reading.
+These paths make no warning-list network request. To download CERT Polska and KNF once
+at the start of an enrichment session, then check all stored views locally:
+
+```bash
+uv run ftf enrich                         # DNS/RDAP, then CERT/KNF refresh and local checks
+uv run ftf enrich --view <view_id>         # restrict the views, not the source coverage
+uv run ftf enrich --offline               # skip DNS/RDAP; warning snapshots only
+```
+
+Sources: [CERT Polska active domains](https://cert.pl/en/warning-list/) and
+[KNF public warnings](https://www.knf.gov.pl/dla_konsumenta/ostrzezenia_publiczne).
+CERT's published terms permit commercial use without guarantees of completeness,
+currency or maliciousness. This tool records list membership, not a legal conclusion.
+KNF entries describe warnings and proceedings; they are not a register of licensed entities.
+The package and Docker image include a KNF snapshot downloaded on **2026-11-21**
+(669 warning rows; some rows name multiple entities). CERT needs a successful initial
+refresh. The supplement register is omitted because no export has been verified.
+
+Snapshots under `data/warning_lists/` retain the source content, URL, retrieval timestamp
+and SHA-256 of the decoded UTF-8 content. Dated versions are kept in `archive/`, including
+when unchanged source content is downloaded again. A failed refresh keeps the last valid
+snapshot, its original date, and an explicit refresh error. A malformed or missing source
+falls back to the most recently archived valid file, then the bundled KNF snapshot.
+Without a valid fallback it produces `not_observable`. Interrupted HTTP responses are treated
+as source failures, never negative findings.
+
+The Ministry of Finance source has **no automated fetch path**. After a person downloads
+the register, convert its domain column to UTF-8 text with one domain per line and import it
+with its actual download date:
+
+```bash
+uv run ftf enrich --offline --import-gambling /path/to/domains.txt --snapshot-date 2026-11-21
+```
+
+The imported dated snapshot lives with the persistent application data. To ship it in a
+future image, include its generated `gambling.json` in `src/ftf/enrich/snapshots/`.
+Until supplied, N5 remains `not_observable`; the application never attempts the bot check.
+
+`warning.cert`, `warning.knf` and `warning.gambling` observations include the checked input
+and its provenance, snapshot metadata, original matched records and source locators, and
+the matching method. Domains match only at host-label boundaries, including listed
+subdomains. KNF names use case/accent/punctuation normalization and legal-suffix removal;
+fuzzy candidates use `SequenceMatcher` similarity at least 0.90 (not a probability).
+Fuzzy and ambiguous matches are labelled `possible_match` and require verification.
+Only the entity column is searched; prosecutor and case-note names are excluded.
+
+A miss is **"not listed as of <snapshot date>"** and says nothing about legitimacy.
+Warnings are risk-only observations and do not alter campaign grouping. Exact, unambiguous
+name references to the same KNF entity provide contextual links between views. Domain
+membership alone does not establish entity identity. Numbered and separately labelled
+entities in one KNF row are kept separate, and parenthetical/platform-list aliases are indexed.
+After upgrading from parser version 1, rerun enrichment to rebuild entity links; older
+observations remain visible but cannot create contextual links. Material shows
+these links and full provenance; comparison JSON/Markdown carries both views' warning
+observations and shared listed entities. The HAC-44 adapter is
+`warning_risk_reasons(warning_observations(store, view_id))`: it returns only hits and possible
+matches, preserving uncertainty and a stable reference to the full source observation.
+Misses and unavailable checks are excluded. Material and comparison JSON use this adapter;
+the complete HAC-44 summary is a separate issue. The Material **Check warning lists** button uses
+offline snapshots by default; clear its offline checkbox to refresh both online sources.
+
+```bash
+uv run pytest tests/test_warning_lists.py -q
+```
 
 ## Layout and ownership
 
