@@ -34,6 +34,7 @@ from .image import (
     sniff_media_type,
 )
 from .image import NAME as IMAGE_READER
+from .page import NAME as PAGE_READER
 
 log = logging.getLogger(__name__)
 
@@ -73,6 +74,8 @@ evidence. Report only what the material supports. Never identify a person from t
 appearance; use only names written in the material. Regions use x, y, width and height, each a
 fraction of the image from 0 to 1 with the origin at the top left."""
 
+# Model output is not a fact extracted by a script.
+_NOT_SCRIPT_FACTS = frozenset({NAME, PAGE_READER})
 _SKIPPED_TAGS = frozenset({"script", "style", "noscript", "template", "svg"})
 _STRUCK_TAGS = frozenset({"s", "strike", "del"})
 _VOID_TAGS = frozenset(
@@ -417,7 +420,9 @@ def _video_metadata(view: View, ctx: Context) -> list[tuple[str | None, str]]:
 def _stored_facts(observations: list[Observation]) -> list[str]:
     facts = set()
     for o in observations:
-        if o.state is not State.PRESENT or o.extractor == NAME or o.namespace == "image.text":
+        if o.state is not State.PRESENT or o.extractor in _NOT_SCRIPT_FACTS:
+            continue
+        if o.namespace == "image.text":
             continue
         value = o.value if isinstance(o.value, str) else json.dumps(o.value, sort_keys=True)
         facts.add(f"{o.namespace}: {value[:MAX_FACT_CHARS]}")

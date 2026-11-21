@@ -36,18 +36,20 @@ def cmd_run(args) -> None:
 
 def cmd_perceive(args) -> None:
     from .perception.image import run_perceive
+    from .perception.page import run_perceive_pages
     from .perception.techniques import run_techniques
     from .registry import Context
 
     ctx = Context(_store())
-    summary = run_perceive(ctx, args.view or None)
-    print(
-        f"image views: {summary['views']}, read: {summary['read']}, "
-        f"not observable: {summary['not_observable']}, "
-        f"failed but kept earlier reading: {summary['kept']}, "
-        f"observations: {summary['observations']}"
-    )
-    # After image reading, so a screenshot's text can be quoted as technique evidence.
+    for label, run in (("image", run_perceive), ("page", run_perceive_pages)):
+        summary = run(ctx, args.view or None)
+        print(
+            f"{label} views: {summary['views']}, read: {summary['read']}, "
+            f"not observable: {summary['not_observable']}, "
+            f"failed but kept earlier reading: {summary['kept']}, "
+            f"observations: {summary['observations']}"
+        )
+    # After image and page reading, so a screenshot's text can be quoted as technique evidence.
     cards = run_techniques(ctx, args.view or None)
     print(
         f"technique views: {cards['views']}, with cards: {cards['with_cards']}, "
@@ -101,7 +103,7 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("run", help="extract, fingerprint and compare everything stored").set_defaults(
         func=cmd_run
     )
-    p = sub.add_parser("perceive", help="read images and observe techniques with the model")
+    p = sub.add_parser("perceive", help="read images and pages, and observe techniques")
     p.add_argument("--view", action="append", help="only this view id; may be repeated")
     p.set_defaults(func=cmd_perceive)
 
