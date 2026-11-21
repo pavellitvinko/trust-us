@@ -1,8 +1,11 @@
 """Checks against the organiser sample. Skipped where testing_sample/ is absent."""
 
 import json
+import re
 from collections import defaultdict
 from pathlib import Path
+
+from ftf.contracts import Purpose
 
 
 def _views(store, incident, kind="page"):
@@ -165,6 +168,9 @@ _KIT_TIER = {
     "public_key",
     "push_public_key",
     "third_party.host",
+    "dom.evasion_filter",  # HAC-12: the same filter across the family
+    "page.title",  # 48 = 61 title (D7)
+    "page.headline",
     "asset.sha256.code",  # main.css is shared by the whole 1, 2, 61 family
 }
 # Never linked on, or too generic to link on alone: left to rarity weighting.
@@ -177,14 +183,14 @@ def test_no_false_links_across_incidents(sample_store):
     seen = defaultdict(set)
     for v in s.views():
         for o in s.observations(v.view_id):
+            if o.purpose is Purpose.RISK:  # risk signals never drive grouping
+                continue
             seen[(o.namespace, json.dumps(o.value, sort_keys=True))].add(v.incident_id)
     allowed = lambda ns, inc: any(inc <= g for g in _LINKED) or (ns in _KIT_TIER and inc <= _FAMILY)
     false_links = sorted(
         (ns, val, sorted(inc))
         for (ns, val), inc in seen.items()
-        if len(inc) > 1
-        and ns not in _NOT_LINKING | _KIT_SHAPES | _WEAK_KIT
-        and not allowed(ns, inc)
+        if len(inc) > 1 and ns not in _NOT_LINKING | _KIT_SHAPES | _WEAK and not allowed(ns, inc)
     )
     assert false_links == []
 
@@ -242,8 +248,10 @@ def test_hac11_screenshots_have_phash(sample_store):
 _KIT_SHAPES = {"url.param_name", "url.param_shape", "url.path_shape", "api.route"}
 _KIT_GROUPS = [_FAMILY, {"2", "3", "14"}, {"36", "47"}]
 # Weak kit signals: generic values (`lang`, `caddy`) are left to rarity weighting.
-_WEAK_KIT = {"config.key_path", "form.hidden_name", "kit.cloaker", "http.server", "http.via",
-             "http.powered_by"}  # fmt: skip
+_WEAK = {"config.key_path", "form.hidden_name", "kit.cloaker", "http.server", "http.via",
+         "http.powered_by",
+         # HAC-12 languages: generic values left to rarity weighting
+         "page.lang_attr", "page.lang_detected", "dom.comment_lang", "page.foreign_lang"}  # fmt: skip
 _STANDARD = {"utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term", "utm_id",
              "fbclid", "ad_id"}  # fmt: skip
 
@@ -304,3 +312,55 @@ def test_hac10_no_visitor_data_in_kit(sample_store):
                 assert not str(o.value).startswith(("visit", "session")), o.value
             if o.namespace in _KIT_SHAPES:
                 assert "01a1" not in str(o.value), o.value  # the utm_visit UUIDs
+
+
+# --- clean text and structure (HAC-12) ----------------------------------------------------
+
+
+def _one(store, view, namespace):
+    obs = [o.value for o in store.observations(view.view_id) if o.namespace == namespace]
+    assert len(obs) == 1, (view.view_id, namespace)
+    return obs[0]
+
+
+def _shingles(text, k=5):
+    words = re.findall(r"\w+", text.lower())
+    return {tuple(words[i : i + k]) for i in range(len(words) - k + 1)}
+
+
+def test_hac12_body_text_1_equals_2(sample_store):
+    s = sample_store
+    a = _one(s, _view(s, "1:page"), "page.body_text")
+    b = _one(s, _view(s, "2:page"), "page.body_text")
+    sa, sb = _shingles(a), _shingles(b)
+    assert len(sa & sb) / len(sa | sb) >= 0.95
+    for chrome in ("Sport.pl", "Poczta"):  # navigation stays out of the body
+        assert chrome not in a, chrome
+
+
+def test_hac12_translate_widget_gone(sample_store):
+    s = sample_store
+    v = _view(s, "10:page")
+    text = _one(s, v, "page.clean_text")
+    for widget in ("Tekst oryginalny", "Oceń to tłumaczenie", "Tłumacza Google", "kazachski"):
+        assert widget not in text, widget
+    classes = _one(s, v, "dom.class_set")
+    assert not [c for c in classes if c.startswith(("VIpgJd", "goog-")) or c == "skiptranslate"]
+    assert not {f for f in _values(s, v, "markup.form_field") if f.endswith(":gtrans")}
+
+
+def test_hac12_evasion_filter(sample_store):
+    assert _incidents_with(sample_store, "dom.evasion_filter", "hue-rotate") == {
+        "1",
+        "2",
+        "48",
+        "61",
+    }
+
+
+def test_hac12_languages(sample_store):
+    s = sample_store
+    assert _values(s, _view(s, "61:chat"), "page.lang_mismatch") == {"en→pl"}
+    for v in _views(s, "14"):
+        assert "ru" in _values(s, v, "dom.comment_lang"), v.view_id
+    assert not any(_values(s, v, "page.lang_mismatch") for v in s.views() if v.incident_id != "61")
