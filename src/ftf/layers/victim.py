@@ -17,6 +17,7 @@ from __future__ import annotations
 from ..contracts import Fingerprint, FingerprintKind, Observation, State, Tier, View
 from ..extract.victim_run import money_vector
 from ..registry import layers
+from ..victim.vocab import LEVERS
 
 GROUP = "victim.perception"
 
@@ -104,8 +105,6 @@ class VictimLevers:
     comparator = "victim.cosine"
 
     def build(self, view: View, observations: list[Observation]) -> Fingerprint | None:
-        from ..victim.perceive import LEVERS
-
         pressed = {str(o.value) for o in _present(observations, "victim.lever")}
         if not pressed:
             return None

@@ -97,8 +97,10 @@ def test_reingest_replaces_and_pipeline_links_same_domain(store, tmp_path):
     pipeline.run_extract(store)
     pipeline.run_fingerprint(store)
     pipeline.run_compare_all(store)
-    linked = [e for e in store.evidence(min_score=0.01)]
-    assert len(linked) == 1
+    linked = [e for e in store.evidence(min_score=0.01) if e.layer_id == "ids.domain"]
+    assert (
+        len(linked) == 1
+    )  # kit layers may also fire on these minimal pages; the domain link is the one
     assert linked[0].shared[0]["value"] == "same-site.org"
     assert {linked[0].view_a.split(":")[0], linked[0].view_b.split(":")[0]} == {"a", "b"}
 

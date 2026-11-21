@@ -49,9 +49,9 @@ def test_sample_domain_links(sample_store):
         _views(s, "1")[0],
         next(v for v in _views(s, "2") if v.meta["origin"] == "saved_page"),
     )
-    assert not _linked(
+    assert _linked(
         s, brzoska_1.view_id, brzoska_2.view_id
-    )  # different domains: needs campaign IDs, not built yet
+    )  # different domains, same campaign UUID and pixel: linked by ids.campaign and ids.tracking
 
     a, b = _views(s, "14")
     assert _linked(s, a.view_id, b.view_id)
@@ -84,6 +84,9 @@ def test_fixture_parity(sample_store):
     """Every value the Method track was promised in the fixture is produced on that view."""
     s = sample_store
     rows = json.loads(FIXTURE.read_text(encoding="utf-8"))["observations"]
+    # Rows from extractor "fixture.ext" are the Method track's stand-ins for extractors that
+    # do not exist yet (hashes, text, kit classes, model output); parity covers the promised rows.
+    rows = [r for r in rows if r.get("extractor") != "fixture.ext"]
     missing = [
         (r["view_id"], r["namespace"], r["value"])
         for r in rows
@@ -364,3 +367,47 @@ def test_hac12_languages(sample_store):
     for v in _views(s, "14"):
         assert "ru" in _values(s, v, "dom.comment_lang"), v.view_id
     assert not any(_values(s, v, "page.lang_mismatch") for v in s.views() if v.incident_id != "61")
+
+
+# --- text near-duplicate layer (HAC-25) --------------------------------------------------
+
+
+def _shingle_score(store, a, b):
+    """The stored `text.shingle` score of a pair; 0.0 when the layers share nothing."""
+    from ftf import pipeline
+
+    va, vb = _view(store, a).view_id, _view(store, b).view_id
+    found = [e for e in pipeline.compare_views(store, va, vb) if e.layer_id == "text.shingle"]
+    assert len(found) == 1 and found[0].comparable, (a, b)
+    return found[0].score
+
+
+def test_hac25_done_when(sample_store):
+    s = sample_store
+    assert _shingle_score(s, "1:page", "2:page") >= 0.97  # the same article on two domains
+    assert _shingle_score(s, "2:healthlinkq", "3:page") >= 0.97  # HAR capture of folder 3's page
+    for a, b in (  # unrelated articles and unrelated products
+        ("1:page", "3:page"),
+        ("2:page", "2:healthlinkq"),
+        ("1:page", "10:page"),
+        ("3:page", "36:page"),
+        ("10:page", "47:page"),
+    ):
+        assert _shingle_score(s, a, b) < 0.05, (a, b)
+
+
+def test_hac25_reads_the_article_body_only(sample_store):
+    """Comments, navigation and widgets stay out: the fingerprint is the one built from
+    `page.body_text` alone, and it differs from the one the whole-page text would give."""
+    from ftf.registry import layers
+
+    s = sample_store
+    layer = layers.get("text.shingle")
+    for key in ("1:page", "2:healthlinkq", "3:page", "48:page"):
+        v = _view(s, key)
+        obs = s.observations(v.view_id)
+        stored = s.fingerprints(layer_id="text.shingle", view_id=v.view_id)[0]
+        body = [o for o in obs if o.namespace == "page.body_text"]
+        whole = [o for o in obs if o.namespace == "page.clean_text"]
+        assert stored == layer.build(v, body), key
+        assert stored != layer.build(v, whole), key

@@ -20,9 +20,10 @@ from ftf.victim import rules
 from ftf.victim.contacts import classify_field, plan_form, run_email, safe_free_text
 from ftf.victim.decide import History, RuleDecider
 from ftf.victim.observe import build_state
-from ftf.victim.perceive import LEVERS, Perception, perceive_run, verify
+from ftf.victim.perceive import Perception, perceive_run, verify
 from ftf.victim.persona import answer_for, get_persona, load_personas, suggest_persona
 from ftf.victim.record import stage_key
+from ftf.victim.vocab import LEVERS
 
 PERSONA = get_persona("retiree-income")
 

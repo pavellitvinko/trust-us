@@ -28,64 +28,12 @@ from ..models import EmbedTask, embed, read_structured, redact_text
 from ..perception.page import find_span, html_to_text, numbers
 from .persona import Persona
 from .record import RUN_FILES
+from .vocab import ACTIONS, DATA, LEVERS
 
 TASK = "victim.perception"
 PROMPT_VERSION = "1"
 MAX_STAGE_CHARS = 25_000
 MAX_IMAGES = 3
-
-LEVERS = (
-    "fear_of_missing_out",
-    "urgency",
-    "scarcity",
-    "greed_easy_money",
-    "authority",
-    "social_proof",
-    "outrage_at_institutions",
-    "secrecy_conspiracy",
-    "fear_of_poverty",
-    "health_fear",
-    "hope_of_cure",
-    "trust_reassurance",
-    "personal_attention",
-    "exclusivity",
-    "sympathy",
-)
-ACTIONS = (
-    "keep_reading",
-    "click_through",
-    "answer_quiz",
-    "chat",
-    "leave_contact",
-    "wait_for_call",
-    "register_account",
-    "deposit",
-    "pay",
-    "install_app",
-    "share_id_document",
-    "watch_video",
-    "other",
-)
-DATA = (
-    "first_name",
-    "last_name",
-    "full_name",
-    "email",
-    "phone",
-    "age",
-    "sex",
-    "town",
-    "country",
-    "income",
-    "savings",
-    "occupation",
-    "family",
-    "bank_card",
-    "bank_account",
-    "id_document",
-    "investment_experience",
-    "other",
-)
 
 SYSTEM_PROMPT = f"""You are the persona described below. You have just gone through a series
 of web pages (an ad's landing page and what followed), a chat and some forms. The material is

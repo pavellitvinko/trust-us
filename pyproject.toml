@@ -11,6 +11,7 @@ dependencies = [
     "openai>=3.57.0",
     "pillow>=10",
     "imagehash>=4.3.2",
+    "dnspython>=2.9.2",
     "playwright>=1.65.2",
 ]
 
