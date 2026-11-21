@@ -6,9 +6,12 @@ HackNation challenge "Kolekcjoner fejków", set by NASK.
 - Design: [docs/architecture.md](docs/architecture.md)
 - Signals: [docs/signal-catalogue.md](docs/signal-catalogue.md)
 
-**Status: skeleton.** Ingestion, storage, the plugin interfaces and one reference slice
-(page domain → `ids.domain` layer → shared-value comparison) work end to end. Everything
-else in the design is still to be built.
+**Status: Method track built** (architecture §8a, §9a, §10a, §13a). Twenty-three fingerprint
+layers, five comparator families with rarity weighting and a stoplist, typed fusion with the
+contradiction and demotion rules, three-level grouping, funnel edges, open-set assignment,
+candidate generation and the evaluation harness all run on `tests/fixtures/observations.json`
+with no model call. Extractors beyond the reference slice, live capture, enrichment and the
+interface are other tracks' work; `docs/method-namespaces.md` says what they must emit.
 
 ## Run locally
 
@@ -20,6 +23,15 @@ uv run ftf ingest testing_sample      # a folder of incident folders, or one inc
 uv run ftf views
 uv run ftf pairs
 uv run ftf compare <view_id> <view_id>
+uv run ftf explain <view_id> <view_id>   # evidence per layer and the typed relation with reasons
+uv run ftf relations --type same_campaign --reasons
+uv run ftf groups                         # campaigns, families, playbooks
+uv run ftf incidents                      # per-folder roll-up, funnel edges, mismatches
+uv run ftf assign <view_id>               # open-set outcome for one view
+uv run ftf eval                           # agreement with docs/baseline-report.md
+uv run ftf load-fixtures && uv run ftf eval --fixtures   # the same on the hand-made fixtures
+uv run ftf loio                           # leave-one-incident-out on the fixtures
+uv run ftf ablate [--degrade]             # layer ablation / degradation tables
 uv run streamlit run app/streamlit_app.py
 uv run pytest
 ```

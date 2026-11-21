@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
+from collections.abc import Callable
 from pathlib import Path
 
 from ..contracts import Incident, Observation, View, ViewKind
@@ -39,8 +40,10 @@ def store_from_fixtures(
     exclude_incidents: set[str] = frozenset(),
     exclude_namespaces: set[str] = frozenset(),
     only_incidents: set[str] | None = None,
+    transform: Callable[[Observation], Observation | None] | None = None,
 ) -> Store:
-    """A store holding the fixture incidents, views and observations. Nothing is run."""
+    """A store holding the fixture incidents, views and observations. Nothing is run.
+    `transform` may rewrite or drop (return None) each observation: degradation tests."""
     store = store or Store(":memory:")
     data, observations = load_observations(path)
     declared = data.get("views", {})
@@ -53,6 +56,10 @@ def store_from_fixtures(
             continue
         if only_incidents is not None and incident_id not in only_incidents:
             continue
+        if transform is not None:
+            o = transform(o)
+            if o is None:
+                continue
         by_incident[incident_id][o.view_id].append(o)
     for view_id, spec in declared.items():  # views with no observations still exist
         incident_id = view_id.partition(":")[0]

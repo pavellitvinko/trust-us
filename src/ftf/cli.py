@@ -216,6 +216,15 @@ def cmd_loio(args) -> None:
     print(format_loio(loio_all(incidents=args.incident or None)))
 
 
+def cmd_ablate(args) -> None:
+    from .eval.ablation import ablate, degrade, format_runs
+
+    if args.degrade:
+        print(format_runs(degrade(), "Degradation runs on the fixtures"))
+    else:
+        print(format_runs(ablate(), "Layer ablation on the fixtures (one layer off at a time)"))
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="ftf", description="Follow the Fake")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -223,11 +232,12 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("ingest", help="ingest an incident folder, or a folder of incident folders")
     p.add_argument("path")
     p.add_argument("--no-run", action="store_true", help="only ingest; do not extract and compare")
+    p.add_argument("--candidates", action="store_true", help="compare candidate pairs only")
     p.set_defaults(func=cmd_ingest)
 
-    sub.add_parser("run", help="extract, fingerprint and compare everything stored").set_defaults(
-        func=cmd_run
-    )
+    p = sub.add_parser("run", help="extract, fingerprint and compare everything stored")
+    p.add_argument("--candidates", action="store_true", help="compare candidate pairs only")
+    p.set_defaults(func=cmd_run)
     sub.add_parser("views", help="list views").set_defaults(func=cmd_views)
 
     p = sub.add_parser("observations", help="show one view's observations")
@@ -258,6 +268,7 @@ def main(argv: list[str] | None = None) -> None:
         "load-fixtures", help="load tests/fixtures/observations.json and run everything"
     )
     p.add_argument("path", nargs="?", default=None)
+    p.add_argument("--candidates", action="store_true", help="compare candidate pairs only")
     p.set_defaults(func=cmd_load_fixtures)
 
     sub.add_parser(
@@ -277,6 +288,10 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("loio", help="leave-one-incident-out on the fixtures")
     p.add_argument("--incident", action="append", help="only these incidents; repeatable")
     p.set_defaults(func=cmd_loio)
+
+    p = sub.add_parser("ablate", help="layer ablation table on the fixtures")
+    p.add_argument("--degrade", action="store_true", help="degradation runs instead of ablation")
+    p.set_defaults(func=cmd_ablate)
 
     p = sub.add_parser("eval", help="agreement with the reference pairs (docs/baseline-report.md)")
     p.add_argument("--fixtures", action="store_true", help="evaluate the fixtures in memory")
