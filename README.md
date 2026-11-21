@@ -6,13 +6,18 @@ HackNation challenge "Kolekcjoner fejków", set by NASK.
 - Design: [docs/architecture.md](docs/architecture.md)
 - Signals: [docs/signal-catalogue.md](docs/signal-catalogue.md)
 
-**Status: skeleton + identifier and kit extractors.** Ingestion, storage, the plugin interfaces and
-one reference slice (page domain → `ids.domain` layer → shared-value comparison) work end
-to end. The Evidence track's identifier extractors (tracker config, pixels and tag IDs, ad
-parameters, conversion and outbound targets), tracker-kit extractors (URL parameter
-schema, path conventions, API routes, config key paths, hidden fields, server headers) and
-asset hashes (exact by role, grayscale perceptual) produce observations on the sample; no
-layer consumes them yet. Everything else in the design is still to be built.
+**Status: Method track built; identifier, kit, asset and perception extractors landing.**
+Twenty-three fingerprint layers, five comparator families with rarity weighting and a stoplist,
+typed fusion with the contradiction and demotion rules, three-level grouping, funnel edges,
+open-set assignment, candidate generation and the evaluation harness run on
+`tests/fixtures/observations.json` with no model call (architecture §8a, §9a, §10a, §13a). The
+Evidence track's identifier extractors (tracker config, pixels and tag IDs, ad parameters,
+conversion and outbound targets), tracker-kit extractors (URL parameter schema, path
+conventions, API routes, config key paths, hidden fields, server headers) and asset hashes
+(exact by role, grayscale perceptual) produce observations on the sample and the layers consume
+them; the Perception track reads pages and screenshots with the model (`ftf perceive`).
+`docs/method-namespaces.md` lists the namespaces the layers consume. Live capture, enrichment
+and the interface are still to be built.
 
 ## Run locally
 
@@ -24,6 +29,15 @@ uv run ftf ingest testing_sample      # a folder of incident folders, or one inc
 uv run ftf views
 uv run ftf pairs
 uv run ftf compare <view_id> <view_id>
+uv run ftf explain <view_id> <view_id>   # evidence per layer and the typed relation with reasons
+uv run ftf relations --type same_campaign --reasons
+uv run ftf groups                         # campaigns, families, playbooks
+uv run ftf incidents                      # per-folder roll-up, funnel edges, mismatches
+uv run ftf assign <view_id>               # open-set outcome for one view
+uv run ftf eval                           # agreement with docs/baseline-report.md
+uv run ftf load-fixtures && uv run ftf eval --fixtures   # the same on the hand-made fixtures
+uv run ftf loio                           # leave-one-incident-out on the fixtures
+uv run ftf ablate [--degrade]             # layer ablation / degradation tables
 uv run streamlit run app/streamlit_app.py
 uv run pytest
 ```
