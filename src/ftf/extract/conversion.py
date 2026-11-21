@@ -107,7 +107,9 @@ class ConversionTargets:
         own = m.own_domain(view)
         landing = m.landing_url(view)
         base = mat.base_href or (landing[0] if landing else "")
-        scripts = mat.script_texts()
+        # Vendor libraries saved next to the page (fbevents.js, gtag.js) carry the
+        # vendor's endpoints, not the operator's.
+        scripts = [t for t in mat.script_texts() if not m.is_library_script(t.source.file)]
 
         def absolute(url: str) -> str:
             try:
@@ -131,6 +133,8 @@ class ConversionTargets:
         def endpoint(url: str, source: Source) -> None:
             """A place form data is sent: its host when foreign, and its path."""
             host = m.host_of(url) if "//" in url else ""
+            if host and is_noise_host(host):  # e.g. the browser's translate widget form
+                return
             if foreign(host):
                 emit("A7", "form_endpoint_host", host, source, raw=url)
             try:
@@ -175,8 +179,10 @@ class ConversionTargets:
                 href = a.attrs.get("href", "").strip()
                 if href.startswith(("http://", "https://", "//")):
                     outbound(absolute(href), a.source)
-                for match in REDIRECT.finditer(a.attrs.get("onclick", "")):
-                    outbound(match.group(1), a.source)
+                onclick = a.attrs.get("onclick", "")
+                for pattern in (NETWORK_CALL, REDIRECT):
+                    for match in pattern.finditer(onclick):
+                        outbound(match.group(1), m.at(a.source, "onclick"))
 
         def script_calls() -> None:
             for t in scripts:

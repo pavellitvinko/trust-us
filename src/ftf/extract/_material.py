@@ -594,6 +594,21 @@ def query_params(url: str) -> list[tuple[str, str]]:
     return [(k.strip().lower(), v.strip()) for k, v in parse_qsl(query) if v.strip()]
 
 
+# Third-party libraries browsers save into `_files/`: their code names the vendor's
+# endpoints, never the operator's.
+_LIBRARY_STEMS = (
+    "fbevents", "gtag", "gtm", "analytics", "jquery", "events-s", "uwt", "bat.bing",
+    "insight.min", "pixel", "tfa", "tag.js", "recaptcha", "api.js",
+)  # fmt: skip
+
+
+def is_library_script(file: str | None) -> bool:
+    if not file:
+        return False
+    name = _strip_save_suffix(Path(file).name).lower()
+    return name.startswith(_LIBRARY_STEMS)
+
+
 def host_of(url: str) -> str:
     try:
         return (urlsplit(url).hostname or "").lower()

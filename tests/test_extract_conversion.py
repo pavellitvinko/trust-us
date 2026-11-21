@@ -201,9 +201,12 @@ def test_noise_and_own_domain_never_outbound(store, tmp_path):
         '<a href="https://shop.example.org/other">own, other sub-domain</a>'
         '<a href="https://www.google.com/">noise</a>'
         '<form action="https://connect.facebook.net/x"></form>'
+        '<form id="goog-gt-votingForm" action="https://translate.googleapis.com/translate_voting">'
+        "</form>"
     )
     obs = conv(store, page(tmp_path / "1", body=body))
     assert values(obs, "outbound.domain") == [] and values(obs, "form_endpoint_host") == []
+    assert values(obs, "form_endpoint_path") == []
 
 
 def test_never_raises(store, tmp_path):
@@ -218,3 +221,24 @@ def test_never_raises(store, tmp_path):
     _, views = ingest_folder(root, store)
     for view in views:
         assert isinstance(ConversionTargets().run(view, Context(store)), list)
+
+
+def test_onclick_beacon_is_outbound(store, tmp_path):
+    # Case 3: the CTA's href stays on the page; the click is reported by a beacon.
+    body = (
+        '<a href="#order" onclick="navigator.sendBeacon('
+        "'https://crimsonbase.pro/click?lp=1&amp;bcid=x')\">Zamów</a>"
+    )
+    obs = conv(store, page(tmp_path / "1", body=body))
+    assert values(obs, "outbound.domain") == ["crimsonbase.pro"]
+    assert obs[0].source.locator == "html:a[0].href>onclick"
+
+
+def test_vendor_library_in_files_is_not_the_operator(store, tmp_path):
+    files = {
+        "fbevents.js.pobrane": "var TRACKING_API_PATH='/tr'; fetch('https://www.fbapi.example/x');",
+        "app.js.pobrane": "const ORDER_API_URL='https://lead.example-crm.com/api/order';",
+    }
+    obs = conv(store, page(tmp_path / "1", files=files))
+    assert values(obs, "form_endpoint_path") == ["/api/order"]
+    assert values(obs, "form_endpoint_host") == ["lead.example-crm.com"]
