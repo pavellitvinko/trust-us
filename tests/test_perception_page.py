@@ -1,6 +1,7 @@
 """Page reading tests. Fake client only: nothing here touches the network."""
 
 import json
+import re
 from contextlib import contextmanager
 from dataclasses import replace
 from types import SimpleNamespace as NS
@@ -13,11 +14,13 @@ from ftf.perception.page import (
     CLEAN_TEXT_NAMESPACE,
     NAME,
     NAMESPACES,
+    READ_TEXT_NAMESPACE,
     STORY_PARTS,
     find_span,
     html_to_text,
     name_is_supported,
-    normalise_number,
+    numbers,
+    organisation_is_supported,
     run_perceive_pages,
 )
 from ftf.registry import Context, extractors, load_plugins
@@ -106,6 +109,11 @@ def stored(store, namespace):
     return [o for o in store.observations("v1") if o.namespace == namespace]
 
 
+def items(store):
+    """Everything read from the page, without the stored copy of its text."""
+    return [o for o in store.observations("v1") if o.namespace != READ_TEXT_NAMESPACE]
+
+
 def test_reading_becomes_observations_with_spans(ctx, settings):
     story = dict.fromkeys(STORY_PARTS)
     story["revealed_secret"] = spanned("A platform", "ujawnia sekret")
@@ -137,14 +145,18 @@ def test_reading_becomes_observations_with_spans(ctx, settings):
 
     person = stored(ctx.store, "page.entity.person")[0]
     assert person.signal_id == "G1"
-    assert person.value == {
+    assert person.value == {"name": "rafał brzoska", "role": "endorser"}
+    assert stored(ctx.store, "page.entity.prominence")[0].value == {
         "name": "rafał brzoska",
         "role": "endorser",
         "prominence": "protagonist",
     }
     assert person.raw == "Rafała Brzoskę"
     assert person.source.file == "page.html"
-    assert person.source.locator.startswith("text:span[")
+    start, end = map(
+        int, re.fullmatch(r"page\.read_text:span\[(\d+),(\d+)\]", person.source.locator).groups()
+    )
+    assert stored(ctx.store, READ_TEXT_NAMESPACE)[0].value[start:end] == person.raw
     assert stored(ctx.store, "page.entity.organisation")[0].signal_id == "G3"
     assert stored(ctx.store, "page.entity.persona")[0].signal_id == "G5"
     assert stored(ctx.store, "page.kind")[0].value == "fake news article"
@@ -160,8 +172,15 @@ def test_supporting_endorser_is_distinct_from_protagonist(ctx, settings):
         )
     )
     run_perceive_pages(ctx, settings=settings, client=client)
-    value = stored(ctx.store, "page.entity.person")[0].value
+    value = stored(ctx.store, "page.entity.prominence")[0].value
     assert value["role"] == "endorser" and value["prominence"] == "supporting"
+
+
+def test_same_person_and_role_match_across_prominence(store, ctx, settings):
+    client = FakeOpenAI(message(reading(entities=[entity("Rafał Brzoska", "Rafała Brzoskę")])))
+    run_perceive_pages(ctx, settings=settings, client=client)
+    cast = {"name": "rafał brzoska", "role": "endorser"}
+    assert store.views_with_value("page.entity.person", cast) == ["v1"]
 
 
 def test_item_whose_quote_is_not_in_the_text_is_dropped(ctx, settings):
@@ -174,7 +193,7 @@ def test_item_whose_quote_is_not_in_the_text_is_dropped(ctx, settings):
         )
     )
     run_perceive_pages(ctx, settings=settings, client=client)
-    assert ctx.store.observations("v1") == []
+    assert items(ctx.store) == []
 
 
 def test_person_name_unsupported_by_its_quote_is_dropped(ctx, settings):
@@ -188,6 +207,20 @@ def test_number_not_in_its_quote_is_dropped(ctx, settings):
     client = FakeOpenAI(message(reading(numeric_claims=[claim])))
     run_perceive_pages(ctx, settings=settings, client=client)
     assert stored(ctx.store, "page.claim.price") == []
+
+
+def test_part_of_a_larger_number_is_dropped(ctx, settings):
+    claim = {"kind": "price", "value": "150", "unit": "zł", "quote": "1 150 zł"}
+    client = FakeOpenAI(message(reading(numeric_claims=[claim])))
+    run_perceive_pages(ctx, settings=settings, client=client)
+    assert stored(ctx.store, "page.claim.price") == []
+
+
+def test_organisation_unsupported_by_its_quote_is_dropped(ctx, settings):
+    knf = entity("KNF", "Wpłać 1 150 zł", entity_type="organisation", role="regulator_invoked")
+    client = FakeOpenAI(message(reading(entities=[knf])))
+    run_perceive_pages(ctx, settings=settings, client=client)
+    assert stored(ctx.store, "page.entity.organisation") == []
 
 
 def test_clean_text_observation_is_preferred(ctx, settings):
@@ -220,7 +253,7 @@ def test_second_run_uses_the_cache(ctx, settings):
     run_perceive_pages(ctx, settings=settings, client=client)
     run_perceive_pages(ctx, settings=settings, client=client)
     assert len(client.requests) == 1
-    assert len(ctx.store.observations("v1")) == 1
+    assert len(items(ctx.store)) == 1
 
 
 def test_refusal_is_not_observable_for_every_namespace(ctx, settings):
@@ -242,7 +275,24 @@ def test_transient_failure_keeps_the_earlier_reading(ctx, settings):
     changed = replace(settings, openai_model="another-model")  # forces a cache miss, no key
     summary = run_perceive_pages(ctx, settings=changed)
     assert summary["kept"] == 1
-    assert [o.value for o in ctx.store.observations("v1")] == ["news"]
+    assert [o.value for o in items(ctx.store)] == ["news"]
+
+
+def test_transient_failure_keeps_a_valid_empty_reading(ctx, settings):
+    run_perceive_pages(ctx, settings=settings, client=FakeOpenAI(message(reading())))
+    changed = replace(settings, openai_model="another-model")  # forces a cache miss, no key
+    summary = run_perceive_pages(ctx, settings=changed)
+    assert summary["kept"] == 1
+    assert {o.state for o in ctx.store.observations("v1")} == {State.PRESENT}
+
+
+def test_unreadable_file_keeps_the_earlier_reading(ctx, settings, root):
+    client = FakeOpenAI(message(reading(kind=spanned("news", "ujawnia sekret"))))
+    run_perceive_pages(ctx, settings=settings, client=client)
+    (root / "page.html").unlink()
+    summary = run_perceive_pages(ctx, settings=settings, client=client)
+    assert summary["kept"] == 1
+    assert [o.value for o in items(ctx.store)] == ["news"]
 
 
 def test_page_without_text_makes_no_request(ctx, settings, root):
@@ -278,6 +328,21 @@ def test_html_to_text_survives_unclosed_head_and_hidden_paragraph():
 
 
 @pytest.mark.parametrize(
+    ("html", "expected"),
+    [
+        ("<ul><li hidden>a<ul><li>ukryty</li></ul></li><li>widoczny</li></ul>", "widoczny"),
+        ("<div hidden/>ukryty</div><p>widoczny</p>", "widoczny"),
+        ("<ul><li hidden>x</ul><p>Oferta</p>", "Oferta"),
+        ("<p hidden>x<div>Oferta</div>", "Oferta"),
+        ("<div><p hidden>x</div>Oferta", "Oferta"),
+        ("<svg/><p>widoczny</p>", "widoczny"),
+    ],
+)
+def test_html_to_text_follows_implied_closing(html, expected):
+    assert html_to_text(html) == expected
+
+
+@pytest.mark.parametrize(
     ("quote", "found"),
     [("RAFAŁ   brzoska", True), ("nie ma", False), ("...", False), ("", False)],
 )
@@ -292,11 +357,49 @@ def test_find_span(quote, found):
         ("Tomasz Lis", "Tomaszem Lisem", True),
         ("Rafał Brzoska", "Rafała", False),
         ("Jan Kowalski", "Rafała Brzoskę", False),
+        ("Ewa Kowalska", "Ewy Kowalskiej", True),
+        ("Marek Testowy", "Marka Testowego", True),
+        ("Paweł Nowak", "Pawła Nowaka", True),
+        ("Michał Lis", "Michale Lisie", True),
+        ("Rafał Brzoska", "Rafale Brzosce", True),
+        ("Jan Kowalski", "Janusz Kowalczyk", False),
+        ("Rafał Brzoska", "Brzoska Rafał", False),
     ],
 )
 def test_name_is_supported(name, quote, expected):
     assert name_is_supported(name, quote) is expected
 
 
-def test_normalise_number_joins_digit_groups():
-    assert normalise_number("1 150") == "1150"
+@pytest.mark.parametrize(
+    ("name", "quote", "expected"),
+    [
+        ("KNF", "Komisja KNF", True),
+        ("KNF", "Komisji Nadzoru Finansowego", True),
+        ("Komisja Nadzoru Finansowego", "ostrzega KNF", True),
+        ("Komisja Nadzoru Finansowego", "Komisji Nadzoru Finansowego", True),
+        ("KNF", "Wpłać 1 150 zł", False),
+        ("Bank Fikcyjny", "Komisja KNF", False),
+    ],
+)
+def test_organisation_is_supported(name, quote, expected):
+    assert organisation_is_supported(name, quote) is expected
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("1 150 zł", ["1150"]),
+        ("1.150 zł", ["1150"]),
+        ("1,150 zł", ["1150"]),
+        ("1 150,50 zł", ["1150.5"]),
+        ("1.150,00 zł", ["1150"]),
+        ("1,150.00 zł", ["1150"]),
+        ("2,5%", ["2.5"]),
+        ("0.125", ["0.125"]),
+        ("1 000 000", ["1000000"]),
+        ("w 7 dni 1 800 zł", ["7", "1800"]),
+        ("siedem", []),
+    ],
+)
+def test_numbers(text, expected):
+    assert numbers(text) == expected
