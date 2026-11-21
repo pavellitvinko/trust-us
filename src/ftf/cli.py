@@ -4,13 +4,14 @@ explain | groups | incidents | assign | eval | loio | ablate | load-fixtures."""
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
 from . import pipeline
 from .config import get_settings
 from .contracts import RelationType
-from .fusion import fuse_pair, prepare, run_method
+from .fusion import run_method
 from .ingest import ingest_path
 from .store import Store
 
@@ -64,17 +65,13 @@ def _print_enrich(counts) -> None:
         print(f"  {ns:22} present {present:4}  not observable {missing:4}")
 
 
-def cmd_enrich(args) -> None:
-    print("enrichment (DNS, RDAP):")
-    _print_enrich(pipeline.run_enrich(_store(), args.view or None))
-
-
 def cmd_run(args) -> None:
     store = _store()
     print(f"observations: {pipeline.run_extract(store)}")
     if not getattr(args, "no_enrich", False):
         print("enrichment (DNS, RDAP):")
         _print_enrich(pipeline.run_enrich(store))
+    _cached_warning_lists(store)
     print(f"fingerprints: {pipeline.run_fingerprint(store)}")
     _compare_and_group(store, args)
 
@@ -111,6 +108,53 @@ def cmd_perceive(args) -> None:
         f"not observable: {cards['not_observable']}, "
         f"failed but kept earlier cards: {cards['kept']}, cards: {cards['cards']}"
     )
+    _cached_warning_lists(ctx.store, args.view or None)
+
+
+def _cached_warning_lists(store, view_ids=None) -> None:
+    from .enrich.warning_lists import run_warning_lists
+
+    summary = run_warning_lists(
+        store,
+        get_settings().data_dir / "warning_lists",
+        view_ids=view_ids,
+    )
+    print(f"warning-list observations: {summary['observations']} (offline snapshots)")
+
+
+def cmd_enrich(args) -> None:
+    from .enrich.warning_lists import run_warning_lists
+    from .enrich.warning_sources import cache_snapshot, make_snapshot
+
+    cache = get_settings().data_dir / "warning_lists"
+    if args.import_gambling:
+        if not args.snapshot_date:
+            raise SystemExit("--snapshot-date YYYY-MM-DD is required for a manual snapshot")
+        try:
+            content = Path(args.import_gambling).read_text(encoding="utf-8-sig")
+            snapshot = make_snapshot(
+                "gambling",
+                content,
+                f"{args.snapshot_date}T00:00:00+00:00",
+                access="manual",
+            )
+            cache_snapshot(snapshot, cache)
+        except (OSError, ValueError) as exc:
+            raise SystemExit(f"cannot import manual gambling snapshot: {exc}") from exc
+    store = _store()
+    infrastructure = pipeline.run_enrich(store, args.view) if not args.offline else {}
+    summary = run_warning_lists(
+        store,
+        cache,
+        view_ids=args.view,
+        refresh=not args.offline,
+    )
+    summary["infrastructure"] = [
+        {"namespace": ns, "state": state, "count": count}
+        for (ns, state), count in sorted(infrastructure.items())
+    ]
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+    store.close()
 
 
 def cmd_views(args) -> None:
@@ -169,25 +213,23 @@ def cmd_relations(args) -> None:
 
 
 def cmd_explain(args) -> None:
-    """Compare two views layer by layer and show the typed relation with its reasons."""
+    """Explain the pair with linked source observations, without changing stored results."""
+    from .reporting import build_pair_report, render_pair_report
+
     store = _store()
-    prepare(store)
-    for e in pipeline.compare_views(store, args.view_a, args.view_b):
-        if not e.comparable:
-            print(f"{e.layer_id:18} not comparable")
-            continue
-        print(f"{e.layer_id:18} score {e.score:.3f}")
-        for s in e.shared:
-            extra = f" (w={s['weight']})" if "weight" in s else ""
-            print(f"    shared  {s['ns']}: {s['value']}{extra}")
-        for d in e.differing:
-            print(f"    differs {d['ns']}: {d['a']} vs {d['b']}")
-    r = fuse_pair(store, args.view_a, args.view_b, persist=False)
-    print()
-    print(f"relation: {r.type.value}  confidence={r.confidence or '-'}  coverage={r.coverage:.2f}")
-    print("tiers:    " + "  ".join(f"{t}={s:.3f}" for t, s in r.tier_scores.items()))
-    for reason in r.reasons:
-        print(f"  - {reason}")
+    try:
+        report = build_pair_report(store, args.view_a, args.view_b)
+        output = (
+            json.dumps(report, ensure_ascii=False, indent=2)
+            if args.format == "json"
+            else render_pair_report(report)
+        )
+        if args.output:
+            Path(args.output).write_text(output, encoding="utf-8")
+        else:
+            print(output)
+    finally:
+        store.close()
 
 
 def cmd_eval(args) -> None:
@@ -300,12 +342,16 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--no-enrich", action="store_true", help="skip DNS and RDAP lookups")
     p.set_defaults(func=cmd_run)
 
-    p = sub.add_parser("enrich", help="DNS and RDAP lookups for page views (cached)")
-    p.add_argument("--view", action="append", help="only this view id; may be repeated")
-    p.set_defaults(func=cmd_enrich)
     p = sub.add_parser("perceive", help="read images and pages, and observe techniques")
     p.add_argument("--view", action="append", help="only this view id; may be repeated")
     p.set_defaults(func=cmd_perceive)
+
+    p = sub.add_parser("enrich", help="DNS/RDAP enrichment plus CERT/KNF refresh and local checks")
+    p.add_argument("--view", action="append", help="only this view id; repeatable")
+    p.add_argument("--offline", action="store_true", help="use cached/bundled snapshots only")
+    p.add_argument("--import-gambling", metavar="FILE", help="manual domain-per-line export")
+    p.add_argument("--snapshot-date", metavar="YYYY-MM-DD", help="date of the manual export")
+    p.set_defaults(func=cmd_enrich)
 
     sub.add_parser("views", help="list views").set_defaults(func=cmd_views)
 
@@ -331,6 +377,8 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("explain", help="layer-by-layer evidence and the typed relation for a pair")
     p.add_argument("view_a")
     p.add_argument("view_b")
+    p.add_argument("--format", choices=("markdown", "json"), default="markdown")
+    p.add_argument("--output", help="write the report to a file instead of stdout")
     p.set_defaults(func=cmd_explain)
 
     p = sub.add_parser(
