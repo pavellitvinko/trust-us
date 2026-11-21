@@ -72,6 +72,7 @@ def cmd_load_fixtures(args) -> None:
 
 
 def cmd_perceive(args) -> None:
+    from .perception.expectations import run_expectations
     from .perception.image import run_perceive
     from .perception.page import run_perceive_pages
     from .perception.techniques import run_techniques
@@ -86,6 +87,13 @@ def cmd_perceive(args) -> None:
             f"failed but kept earlier reading: {summary['kept']}, "
             f"observations: {summary['observations']}"
         )
+    # After page reading, which names each page's kind.
+    checks = run_expectations(ctx, args.view or None)
+    print(
+        f"expectation views: {checks['views']}, checked: {checks['checked']}, "
+        f"not observable: {checks['not_observable']}, "
+        f"failed but kept earlier check: {checks['kept']}, profiles: {checks['profiles']}"
+    )
     # After image and page reading, so a screenshot's text can be quoted as technique evidence.
     cards = run_techniques(ctx, args.view or None)
     print(
