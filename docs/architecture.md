@@ -177,8 +177,8 @@ One module wraps every model call.
 - **Refusals and failures:** a refusal, timeout or schema failure yields `not_observable` for that perception, never a guessed value.
 - **Redaction before sending:** access tokens, cookies, session IDs and form secrets are replaced with their hash.
 - **Bulk backfill** uses the batch endpoint; the fixed taxonomy prompt is cached.
-- **Providers and keys.** Two keys, both read from `.env`: `ANTHROPIC_API_KEY` and `GEMINI_API_KEY`. Model IDs are settings, not code.
-  - *Claude* (`claude-opus-5-5` by default): reading pages and screenshots, technique observation, pattern induction and matching, narrative.
+- **Providers and keys.** Two keys, both read from `.env`: `OPENAI_API_KEY` and `GEMINI_API_KEY`. Model IDs are settings, not code.
+  - *OpenAI* (`gpt-6-luna` by default): reading pages and screenshots, technique observation, pattern induction and matching, narrative.
   - *Gemini embeddings* (`gemini-embedding-2`, as listed in Google's documentation on 2026-11-21): one multimodal model for text and images, 3,072 dimensions by default and reducible, 8,192 input tokens. Long articles are split into chunks; the article vector is the mean of its chunk vectors, and the chunk vectors are kept for finer matching later. The model takes a task prefix in the text rather than a task-type parameter.
   - *Gemini video and audio* (a current general model; the documentation's examples use `gemini-4-hydrogen`, and a dedicated `gemini-3.5-transcribe` is also listed): takes a video file directly, samples it at one frame per second by default and processes the audio track. Whole-video embedding is limited to 120 seconds, shorter than the sample videos, so videos are compared through their transcript, scene description and key-frame hashes instead.
   - To confirm at setup: use a paid-tier Gemini key and check its data-use terms, since organiser material will be sent. The pages consulted do not state those terms.
@@ -464,7 +464,7 @@ Keeping live capture in *Must* costs one developer roughly three of the middle f
 
 ## 15. Licences and external services
 
-The brief requires these to be listed. All libraries named in §12 are under permissive licences (MIT, BSD, Apache-2.0); ffmpeg's licence depends on the build and should be recorded from the image used. Cloud services are commercial APIs accessed with the operator's own keys: Anthropic's Claude API for reading and pattern discovery, and Google's Gemini API for embeddings, transcription and video; the README must state how to obtain each one. Public data sources (RDAP, certificate transparency, the CERT Polska list, DNS) must be cited with their terms. Should face-reference matching be added later, check the model licence first: several widely used open face models are released for non-commercial research only.
+The brief requires these to be listed. All libraries named in §12 are under permissive licences (MIT, BSD, Apache-2.0); ffmpeg's licence depends on the build and should be recorded from the image used. Cloud services are commercial APIs accessed with the operator's own keys: OpenAI's API for reading and pattern discovery, and Google's Gemini API for embeddings, transcription and video; the README must state how to obtain each one. Public data sources (RDAP, certificate transparency, the CERT Polska list, DNS) must be cited with their terms. Should face-reference matching be added later, check the model licence first: several widely used open face models are released for non-commercial research only.
 
 Organiser material may be used only for the challenge and must not be redistributed publicly. The shipped model cache contains descriptions derived from that material, so the repository must stay private to the organiser.
 
