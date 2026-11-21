@@ -1,5 +1,6 @@
-"""Command line: ftf ingest | run | enrich | perceive | views | observations | compare | pairs | relations |
-explain | groups | incidents | assign | eval | loio | ablate | validate | load-fixtures."""
+"""Command line: ftf ingest | run | enrich | perceive | views | suspicions | observations |
+compare | pairs | relations | explain | groups | incidents | assign | eval | loio | ablate |
+validate | load-fixtures."""
 
 from __future__ import annotations
 
@@ -189,6 +190,23 @@ def cmd_patterns(args) -> None:
 def cmd_views(args) -> None:
     for v in _store().views():
         print(f"{v.view_id}  {v.kind.value:5}  {v.label}")
+
+
+def cmd_suspicions(args) -> None:
+    """Show why a view, or every view, is suspicious."""
+    from .grouping.suspicion import reason_summary_for_view
+
+    store = _store()
+    views = [store.get_view(args.view_id)] if args.view_id else store.views()
+    for view in views:
+        summary = reason_summary_for_view(view.view_id, store.observations(view.view_id))
+        print(f"{view.view_id}  {view.label}: level {summary.level}")
+        for kind, reasons in summary.reasons_by_kind.items():
+            print(f"  {kind}:")
+            for r in reasons:
+                print(f"    [{r.signal_id}] {r.summary} ({r.source.file}:{r.source.locator})")
+        if summary.unchecked_kinds:
+            print(f"  not checked: {', '.join(summary.unchecked_kinds)}")
 
 
 def cmd_observations(args) -> None:
@@ -419,6 +437,10 @@ def main(argv: list[str] | None = None) -> None:
     p.set_defaults(func=cmd_enrich)
 
     sub.add_parser("views", help="list views").set_defaults(func=cmd_views)
+
+    p = sub.add_parser("suspicions", help="show why a view is suspicious")
+    p.add_argument("view_id", nargs="?", default=None, help="optional; show all if not given")
+    p.set_defaults(func=cmd_suspicions)
 
     p = sub.add_parser("observations", help="show one view's observations")
     p.add_argument("view_id")
