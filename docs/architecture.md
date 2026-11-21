@@ -544,17 +544,16 @@ Organiser material may be used only for the challenge and must not be redistribu
 **Assumed here, change if wrong**
 
 - The machine that runs the container has internet access and the evaluator puts their own API keys in `.env`.
-- Hidden test material arrives as folders shaped like the sample, and results are judged per folder. The design computes per view and rolls up, so either works.
+- Hidden test material arrives as folders shaped like the sample (confirmed by the mentors, 2026-11-21). There is no score per folder: the overall quality of the report is judged. The design computes per view and rolls up per folder, which is the unit the report presents.
 - Polish-language material, Polish targets.
 - Hundreds to low thousands of items at the demo; the scale path in §12 is design, not built.
 - Thresholds are set by hand on ten incidents and exposed in the interface. They are a starting point, not a calibrated model.
 
-**Still open, for the mentors**
+**Answered by the mentors (2026-11-21)**
 
-1. In what form does the hidden set arrive, and is assignment scored per folder or per artifact?
+1. *In what form does the hidden set arrive, and is assignment scored per folder or per artifact?* The hidden set arrives as folders shaped like the sample. There is no per-folder or per-artifact score: the overall quality of the report is what is assessed.
 
-
-**Method track status of the open question (2026-11-21):** not yet asked. Until answered, results are computed per view, carried along funnel edges and rolled up per incident (`ftf incidents`), so either scoring unit is served.
+**Consequences for the Method track.** Nothing in fingerprints, fusion or grouping changes. The folder roll-up (`ftf incidents`) is the unit the report presents, with the per-view relations and their reasons underneath it; a folder that spans two campaigns is reported as such, as folder 2 is. Since the report is judged as a whole, the explanation layer (reasons on every relation, the contradiction and demotion notes, mismatch observations, the evaluation and ablation tables of §13a) carries as much weight as the links themselves, and "novel pattern" and "insufficient evidence" are reported as findings, not as failures.
 
 ---
 
