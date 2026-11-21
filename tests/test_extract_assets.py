@@ -77,7 +77,6 @@ CODE = b"body { color: red; } " * 10
         ("jquery-3.6.0.min_ff1523fb.js", CODE, Role.NOISE),
         ("fbevents.js.pobrane", CODE, Role.NOISE),
         ("saved_resource(1).html", CODE, Role.NOISE),
-        ("2012165449475163", picture(), Role.NOISE),  # a pixel saved under its ID
         ("tiny.gif", b"GIF89a", Role.NOISE),
         ("main.css", CODE, Role.CODE),
         ("main.js.pobrane", CODE, Role.CODE),
@@ -99,6 +98,7 @@ def test_classify(name, data, role):
         ("1.jpg", picture(fmt="JPEG"), Role.CONTENT),  # case 47 numbers its photos
         ("4.webp", picture(fmt="WEBP"), Role.CONTENT),
         ("2012165449475163", CODE * 20, Role.NOISE),  # pixel config saved under the pixel ID
+        ("20261121215430.jpg", picture(fmt="JPEG"), Role.CONTENT),  # a timestamp name
         ("1.gif", PIXEL_GIF, Role.NOISE),  # a tracking pixel
         ("reaction-2020alphab.png", picture(), Role.CONTENT),  # not React
         ("react-dom.production.min.js", CODE, Role.NOISE),
@@ -106,6 +106,18 @@ def test_classify(name, data, role):
 )
 def test_numeric_names(name, data, role):
     assert classify(name, data) is role
+
+
+def test_long_numeric_image_name_from_first_party_host_is_content():
+    data = picture(fmt="JPEG")
+    role = classify("20261121215430.jpg", data, host="www.shop.example.org", mime="image/jpeg")
+    assert role is Role.CONTENT
+
+
+def test_pixel_config_from_the_platform_host_is_noise():
+    role = classify("2012165449475163", CODE * 20, host="connect.facebook.net",
+                    mime="application/javascript")  # fmt: skip
+    assert role is Role.NOISE
 
 
 def test_noise_host_is_noise():

@@ -32,7 +32,6 @@ MAX_PIXELS = 50_000_000
 MIN_BYTES = 64  # smaller files are pixels and placeholders
 ICON_SIDE = 64
 PIXEL_SIDE = 2  # tracking pixels are 1x1, sometimes 2x2
-PLATFORM_ID_DIGITS = 12  # a file named by an ad-platform ID (pixel config), not `1.jpg`
 
 _RASTER = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".avif")
 _VECTOR_ICON = (".svg", ".ico")
@@ -86,7 +85,6 @@ def classify(name: str, data: bytes, host: str = "", mime: str = "") -> Role:
         or (host and is_noise_host(host))
         or _STUB.match(clean)
         or ext in (".html", ".htm")
-        or (stem.isdigit() and len(stem) >= PLATFORM_ID_DIGITS)
         or _LIBRARY.search(clean)
     ):
         return Role.NOISE
@@ -96,7 +94,10 @@ def classify(name: str, data: bytes, host: str = "", mime: str = "") -> Role:
         return Role.ICON
     img = _image(data) if ext in _RASTER or mime.startswith("image/") or not ext else None
     if img is None:
-        return Role.NOISE  # neither code nor a readable image: fonts, data, junk
+        # Neither code nor a readable image: fonts, data, junk, and pixel configs saved
+        # under the pixel ID with no extension. The name alone never decides: a numeric
+        # or timestamp name is an ordinary photo when the bytes are one.
+        return Role.NOISE
     if img.width <= PIXEL_SIDE and img.height <= PIXEL_SIDE:
         return Role.NOISE
     if img.width <= ICON_SIDE and img.height <= ICON_SIDE:
