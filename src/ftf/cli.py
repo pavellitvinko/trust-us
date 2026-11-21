@@ -1,4 +1,4 @@
-"""Command line: ftf ingest | run | perceive | views | observations | compare | pairs."""
+"""Command line: ftf ingest | run | perceive | views | observations | compare | pairs | discover."""
 
 from __future__ import annotations
 
@@ -117,6 +117,10 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("view_a")
     p.add_argument("view_b")
     p.set_defaults(func=cmd_compare)
+
+    from .discovery.cli import register as register_discovery
+
+    register_discovery(sub)
 
     p = sub.add_parser("pairs", help="list stored evidence, strongest first")
     p.add_argument("--min-score", type=float, default=0.01)

@@ -251,11 +251,29 @@ A warning-list hit is strong risk evidence. The reverse does not hold: not being
 | Supplement notification register (sanitary inspectorate) | Product notified / not found | Yes if an export exists; the address redirects to a portal whose search was not tested. Otherwise a dated manual snapshot or left out |
 | Publisher check | Is the claimed outlet's real domain different from the host; does the headline exist on the outlet's site | Domain comparison yes; headline lookup if time allows |
 | Regulator registers of *authorised* entities (licensed brokers, licensed gambling operators) | Whether a claimed licence exists | Later; needed to disprove a licence claim rather than only to find a warning |
-| Ad libraries | Is the ad running, since when, what else the page runs; **keyword-driven discovery of new suspect ads** (the brief's bonus) | Later; interface defined now |
+| Ad libraries | Is the ad running, since when, what else the page runs; **keyword-driven discovery of new suspect ads** (the brief's bonus) | Built for the Meta Ad Library: see *Discovery* below |
 | Scan archives and web archive | Other sightings of the same pixel, hash, title; earlier content on the domain | Later |
-| **Pivot loop** | Take each identity-tier identifier of a known campaign and query the sources above for new sightings; feed hits back as new inputs | Later; this is what turns the tool from analysis into monitoring |
+| **Pivot loop** | Take each identity-tier identifier of a known campaign and query the sources above for new sightings; feed hits back as new inputs | Built for the Meta Ad Library (advertiser pages, landing domains, offer and advertiser names); other sources later |
 
 ---
+
+### Discovery in the Meta Ad Library
+
+`src/ftf/discovery/`, run with `ftf discover run` or the interface's *Discovery* page. On demand; there is no scheduler.
+
+**Access decision (2026-11-21).** No team member has an Ad Library API token, so discovery uses the public Ad Library page in a headless browser. Meta's `robots.txt` disallows all paths for generic crawlers and its Terms forbid automated collection without permission; the team accepted this for the hackathon. Guardrails fixed in code: the code never logs in, types credentials or solves a CAPTCHA; no imported cookies and a fresh browser context per run; default browser settings (no stealth, fingerprint changes or proxies); one page at a time with pauses; per-run caps.
+
+**A person stays in control (2026-11-21).** The browser runs in a visible window by default. When the library asks for a CAPTCHA, a login or a security check, the run pauses, brings the window to the front and says what is needed; a person handles it there, and the run continues on its own once the page shows results again (or the form is gone). If nobody acts within the wait limit (10 minutes by default), or there is no window — `--headless`, or inside Docker, which has no screen — the run stops as before. A login uses that person's own Facebook account, so the run's browsing is tied to it and Meta may restrict it; the login is not kept after the run. The official API has no landing-URL or media field; the public page's own data has both. An API adapter can replace the browser behind the same `AdLibrarySource` interface.
+
+| Step | What happens |
+| --- | --- |
+| Queries | Analyst watchlist; pivots from the store (advertiser page IDs, landing domains, offer names, advertiser names on ads); optional model-proposed phrases. A keyword query re-run asks only for ads delivered since its last good run |
+| Collect | Reads the JSON the page loads (`ad_archive_id` objects): page, dates, platforms, texts, link URL, display domain, creatives, copy group, and Meta's enforcement state (`ELIGIBLE`, `TAKEN_DOWN`, `AD_ACCOUNT_DISABLED`). Raw responses are kept for replay |
+| Record | Own tables in the shared SQLite file: runs, queries, every ad seen (first / last seen, active, end date), hits. A re-seen ad that stopped running is counted |
+| Triage | Known-campaign match first (the ad's page, domain or ID already in the store), then model screening with quoted reasons (a quote not in the ad is dropped), then Meta's enforcement. Triage never creates a link |
+| Ingest | Selected ads become incidents `meta-<ad_id>/` (`ad.json`, `ad.png` from the library's own rendering, creatives in `ad_files/`), go through normal ingestion and the pipeline, and are reported with their evidence and identifier matches |
+
+The `ids.ad_library` extractor reads both `ad.json` and the yt-dlp metadata of sample case 5, so case 5's advertiser page becomes a pivot. On 2026-11-21 that page held 64 ads, many taken down by Meta, pointing to `pl.healthoone.online` — the destination case 5 itself lacks.
 
 ## 8. Fingerprint layers
 
@@ -399,7 +417,7 @@ Screens (Streamlit): *Add material* (upload or URL, with per-stage progress) →
 | Graph | Edge table + in-memory graph library | Graph database export |
 | Execution | In-process stages, process pool | Queue and workers; stages are already idempotent and keyed by hash |
 | Model calls | Synchronous with cache | Batch endpoint for backfill |
-| Monitoring new ads | Manual input | Scheduled discovery and pivot loop (§7) |
+| Monitoring new ads | On-demand discovery and pivot loop in the Meta Ad Library (§7) | Scheduled runs; more libraries |
 
 Stack: Python 3.12, Pydantic, SQLite, NumPy, scikit-learn, datasketch, Pillow + imagehash, an HTML parser, tldextract, dnspython, NetworkX, Streamlit with a graph component, Playwright, ffmpeg.
 
@@ -456,7 +474,7 @@ Three tracks. Contracts (§3) are frozen in hour one.
 - *Must:* everything up to the hour-4 checkpoint; three-level grouping and open-set outcomes; funnel edges inside an incident; model-driven pattern discovery — observation, induction, matching — and model-generated expectation profiles with the absence check; screenshot reading by the vision model (text, names, brand, claimed publisher) and perceptual image matching, because a hidden-set item may be a screenshot and nothing else; two dense-vector layers with calibration — `text.semantic`, and `narrative.skeleton` in its scripted-masking form; live capture with redirect trace and the cloaking differential; the DNS and registration enrichers; the regulator and warning lists; the evidence table, suspicion summary and corpus report; the interface; Docker.
 - *Should:* the remaining model perception layers (model-written narrative skeleton, layout embedding); video transcript and scene description, now a single Gemini call per video; grounding expectation profiles on captured genuine pages; the certificate enricher.
 - *Could:* model-written narrative; publisher headline check; face-reference matching against a small set of public figures.
-- *Not in 12 hours:* ad-library discovery, the pivot loop, registers of authorised entities. Their interfaces exist so they can be added.
+- *Not in 12 hours:* registers of authorised entities. Its interface exists so it can be added. (Ad-library discovery and the pivot loop were added later for the Meta Ad Library, §7.)
 
 Keeping live capture in *Must* costs one developer roughly three of the middle four hours; what moves down to pay for it is the model-written narrative and the lower-tier perception layers. The *Must* list is over-full. **Agreed cut order (2026-11-21)** if the hour-8 checkpoint is missed: first the cloaking differential, which adds risk evidence rather than links and has few live domains to run on; second the supplement register, whose access is unconfirmed. Capture with redirect trace stays.
 
@@ -511,7 +529,7 @@ Nothing is built yet. Every status below says whether the design covers the poin
 | Run the analysis through a simple interface | Streamlit, six screens (§11) | Must | — |
 | Document the methodology | This document, the signal catalogue, the *Method* screen | Must | A README with install steps is still to be written |
 | Cope with incomplete data, dead sites, missing sources | Three-state observations, coverage, *insufficient evidence* outcome (§2, §9) | Must | — |
-| *Bonus:* find suspect ads in public sources, refresh periodically, spot new material tied to known campaigns | Ad-library enricher and pivot loop (§7) | Not in 12 hours | Interface only. This bonus is not earned by the MVP. |
+| *Bonus:* find suspect ads in public sources, refresh periodically, spot new material tied to known campaigns | Discovery in the Meta Ad Library with pivot loop (§7) | Built | Meta only; refresh is on demand, not scheduled; automated access is against Meta's Terms (accepted by the team) |
 
 ### 17.2 Validation points (brief §6)
 
