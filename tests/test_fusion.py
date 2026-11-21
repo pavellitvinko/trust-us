@@ -189,3 +189,104 @@ def test_config_roundtrip(tmp_path):
     cfg.save(tmp_path / "f.json")
     loaded = FusionConfig.load(tmp_path / "f.json")
     assert loaded == cfg and loaded != DEFAULT
+
+
+# -- HAC-54: a shared domain alone, and confidence against what was actually seen -------------
+
+DOMAIN = [{"ns": "domain.registrable", "value": "glowpixel.org", "weight": 0.9}]
+
+
+def test_shared_domain_alone_is_not_a_campaign():
+    r = fuse("a", "b", [ev("ids.domain", 0.9, DOMAIN), ev("text.shingle", 0.0)], demoted=set())
+    assert r.type is RelationType.SAME_FAMILY and r.confidence == "low"
+    assert any("shared domain only" in x for x in r.reasons)
+    assert r.tier_scores["T1"] == pytest.approx(0.9)  # the score is kept; the rule decides
+
+
+def test_shared_domain_with_a_second_independent_group_is_a_campaign():
+    pixel = ev("ids.tracking", 0.9, [{"ns": "fb_pixel", "value": "P", "weight": 0.9}])
+    text = ev("text.shingle", 0.95)
+    for second in (pixel, text):
+        r = fuse("a", "b", [ev("ids.domain", 0.9, DOMAIN), second], demoted=set())
+        assert r.type is RelationType.SAME_CAMPAIGN, second.layer_id
+    kit = [
+        ev("kit.url", 1.0, [{"ns": "url.param_name", "value": "clickid", "weight": 0.5}]),
+        ev("kit.form", 1.0, [{"ns": "form.field", "value": "fbtoken", "weight": 0.3}]),
+    ]
+    r = fuse("a", "b", [ev("ids.domain", 0.9, DOMAIN), *kit], demoted=set())
+    assert r.type is RelationType.SAME_CAMPAIGN
+
+
+def test_same_landing_url_still_anchors_a_duplicate():
+    anchor = [{"ns": "url.host_path", "value": "healthlinkq.pro/L4", "weight": 0.95}]
+    r = fuse("a", "b", [ev("ids.domain", 0.95, anchor), ev("text.shingle", 0.99)], demoted=set())
+    assert r.type is RelationType.DUPLICATE
+
+
+def test_solo_identity_groups_are_configurable():
+    cfg = FusionConfig(identity_solo_groups=())
+    r = fuse("a", "b", [ev("ids.domain", 0.9, DOMAIN)], cfg, demoted=set())
+    assert r.type is RelationType.SAME_CAMPAIGN
+
+
+def test_separation_needs_the_evidence_that_could_have_linked():
+    """Missing evidence is unavailable: it never becomes a separation, let alone a confident one."""
+    from ftf.fusion.fuse import set_active_groups
+
+    try:
+        set_active_groups({"domain", "text", "kit_url"})
+        seen = [ev("ids.domain", 0.0), ev("text.shingle", 0.0), ev("kit.url", 0.0)]
+        r = fuse("a", "b", seen, demoted=set())
+        assert (r.type, r.confidence, r.coverage) == (RelationType.UNRELATED, "high", 1.0)
+        assert any("3 of 3 groups comparable" in x for x in r.reasons)
+
+        set_active_groups({"domain", "kit_url", "kit_form", "kit_dom"})
+        no_artifact = [ev("ids.domain", 0.0), ev("kit.url", 0.0), ev("kit.form", 0.0)]
+        r = fuse("a", "b", no_artifact, demoted=set())
+        assert (r.type, r.confidence) == (RelationType.UNRELATED, "low")
+        assert r.coverage >= DEFAULT.unrelated_high_coverage
+        assert any("not comparable: artifact tier" in x for x in r.reasons)
+
+        # two screenshots, both hashes seen and different: full coverage, still not "unrelated"
+        set_active_groups({"asset", "creative"})
+        r = fuse("a", "b", [ev("asset.exact", 0.0), ev("ad.creative", 0.0)], demoted=set())
+        assert (r.type, r.confidence, r.coverage) == (RelationType.INSUFFICIENT, "", 1.0)
+        assert any("identity tier not comparable" in x for x in r.reasons)
+    finally:
+        set_active_groups(None)
+
+
+def test_weak_similarity_below_threshold_is_reported_not_used():
+    from ftf.fusion.fuse import set_active_groups
+
+    try:
+        set_active_groups({"domain", "text", "kit_url"})
+        weak = ev("kit.url", 0.33, [{"ns": "url.path_shape", "value": "/lander/", "weight": 0.33}])
+        r = fuse("a", "b", [ev("ids.domain", 0.0), ev("text.shingle", 0.0), weak], demoted=set())
+        assert r.type is RelationType.UNRELATED
+        assert any(x.startswith("below threshold, not used: kit") for x in r.reasons)
+    finally:
+        set_active_groups(None)
+
+
+def test_host_equal_to_its_registrable_domain_is_one_fact():
+    from ftf.contracts import Observation, View, ViewKind
+    from ftf.registry import layers, load_plugins
+
+    load_plugins()
+    view = View(view_id="v", incident_id="i", kind=ViewKind.PAGE, label="v")
+
+    def obs(ns, value):
+        return Observation(
+            view_id="v", signal_id="A14", namespace=ns, value=value, extractor="t", version="t"
+        )
+
+    build = layers.get("ids.domain").build
+    same = build(
+        view, [obs("domain.registrable", "glowpixel.org"), obs("url.host", "glowpixel.org")]
+    )
+    assert same.payload == [{"ns": "domain.registrable", "value": "glowpixel.org"}]
+    www = build(view, [obs("domain.registrable", "x.org"), obs("url.host", "www.x.org")])
+    assert www.payload == [{"ns": "domain.registrable", "value": "x.org"}]
+    sub = build(view, [obs("domain.registrable", "x.org"), obs("url.host", "shop.x.org")])
+    assert {"ns": "url.host", "value": "shop.x.org"} in sub.payload  # a subdomain is its own fact
