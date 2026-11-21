@@ -3,8 +3,8 @@
 Each shared value contributes on its own: score = 1 - prod(1 - w(v)). Unshared values do
 not dilute the score, because operators rotate domains and ad IDs between deployments.
 
-This is the plain version. The Method track adds rarity weighting, the stoplist and the
-demotion rule by supplying `weight`.
+Weights come from `weights.py`: namespace base weight x rarity, with the stoplist at 0.
+Unfitted, the table returns base weights, so the reference slice works on its own.
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ from collections.abc import Callable
 
 from ..contracts import Evidence, Fingerprint
 from ..registry import comparators
+from .weights import weights
 
 Weight = Callable[[str, str], float]
 
@@ -55,10 +56,7 @@ def shared_value_evidence(
 @comparators.register
 class SharedValue:
     name = "shared_value"
-    version = "1"
-    default_weight = 0.9
+    version = "2"
 
     def compare(self, a: Fingerprint, b: Fingerprint) -> Evidence:
-        return shared_value_evidence(
-            a, b, lambda ns, value: self.default_weight, self.name, self.version
-        )
+        return shared_value_evidence(a, b, weights.weight, self.name, self.version)

@@ -7,6 +7,18 @@ HackNation challenge "Kolekcjoner fejków", set by NASK.
 - Signals: [docs/signal-catalogue.md](docs/signal-catalogue.md)
 - **NEW**: [Pattern Library](PATTERN_LIBRARY.md) — Pattern discovery, library versioning, novelty tracking
 
+**Status: Method track built; identifier, kit, asset and perception extractors landing.**
+Twenty-three fingerprint layers, five comparator families with rarity weighting and a stoplist,
+typed fusion with the contradiction and demotion rules, three-level grouping, funnel edges,
+open-set assignment, candidate generation and the evaluation harness run on
+`tests/fixtures/observations.json` with no model call (architecture §8a, §9a, §10a, §13a). The
+Evidence track's identifier extractors (tracker config, pixels and tag IDs, ad parameters,
+conversion and outbound targets), tracker-kit extractors (URL parameter schema, path
+conventions, API routes, config key paths, hidden fields, server headers) and asset hashes
+(exact by role, grayscale perceptual) produce observations on the sample and the layers consume
+them; the Perception track reads pages and screenshots with the model (`ftf perceive`).
+`docs/method-namespaces.md` lists the namespaces the layers consume. Live capture, enrichment
+and the interface are still to be built.
 **Status: skeleton + identifier and kit extractors. NEW: Pattern discovery (architecture §6).**
 
 Ingestion, storage, the plugin interfaces and one reference slice (page domain → `ids.domain` layer → shared-value comparison) work end to end. 
@@ -38,6 +50,15 @@ uv run ftf ingest testing_sample      # a folder of incident folders, or one inc
 uv run ftf views
 uv run ftf pairs
 uv run ftf compare <view_id> <view_id>
+uv run ftf explain <view_id> <view_id>   # evidence per layer and the typed relation with reasons
+uv run ftf relations --type same_campaign --reasons
+uv run ftf groups                         # campaigns, families, playbooks
+uv run ftf incidents                      # per-folder roll-up, funnel edges, mismatches
+uv run ftf assign <view_id>               # open-set outcome for one view
+uv run ftf eval                           # agreement with docs/baseline-report.md
+uv run ftf load-fixtures && uv run ftf eval --fixtures   # the same on the hand-made fixtures
+uv run ftf loio                           # leave-one-incident-out on the fixtures
+uv run ftf ablate [--degrade]             # layer ablation / degradation tables
 uv run streamlit run app/streamlit_app.py
 uv run pytest
 ```
@@ -51,7 +72,11 @@ docker compose run --rm app ftf ingest /sample
 ```
 
 `FTF_SAMPLE_DIR` chooses which host folder is mounted at `/sample` (default `./testing_sample`).
-State lives in `./data`.
+The sample is not in git, so on a fresh clone either copy it to `./testing_sample` or run
+`FTF_SAMPLE_DIR=/path/to/sample docker compose run --rm app ftf ingest /sample`.
+Without it `/sample` is empty and `ftf ingest` stops with "no views found" (exit code 1).
+State lives in `./data`. The image installs the exact versions in `uv.lock`;
+`docker compose ps` shows the interface as `healthy` once it answers.
 
 ## Layout and ownership
 
