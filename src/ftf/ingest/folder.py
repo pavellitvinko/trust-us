@@ -200,10 +200,15 @@ def ingest_folder(
             kind, attachments = ViewKind.IMAGE, []
         elif ext in VIDEO_EXT:
             kind = ViewKind.VIDEO
+            stems = {
+                q.stem for q in files if q.parent == p.parent and q.suffix.lower() in VIDEO_EXT
+            }
             attachments = [
                 q
                 for q in files
-                if q.parent == p.parent and q.name.startswith(p.stem) and q.suffix == ".json"
+                if q.parent == p.parent
+                and q.suffix == ".json"
+                and _sidecar_stem(q.name, stems) == p.stem
             ]
         else:
             continue
@@ -237,6 +242,14 @@ def ingest_folder(
     views.sort(key=lambda v: (v.kind.value, v.primary or v.har or ""))
     store.put_incident(incident, artifacts, views)
     return incident, views
+
+
+def _sidecar_stem(name: str, stems: set[str]) -> str | None:
+    """The video a JSON file belongs to: the longest stem followed by `.`, `_` or `-`."""
+    matches = [
+        s for s in stems if name.startswith(s) and name[len(s) : len(s) + 1] in {".", "_", "-"}
+    ]
+    return max(matches, key=len, default=None)
 
 
 def ingest_path(path: Path, store: Store) -> list[tuple[Incident, list[View]]]:
