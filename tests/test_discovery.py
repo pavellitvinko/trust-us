@@ -277,3 +277,111 @@ def test_a_block_stops_the_run_and_nothing_is_ingested(tmp_path):
     assert state.runs()[0]["status"] == "blocked"
     # ads seen before the block are kept and screened, ready for a later run
     assert report.counts["new"] == 3 and state.ads()
+
+
+# -- a person clears a CAPTCHA or login in the visible browser -----------------------------
+
+
+class _Loc:
+    def __init__(self, visible):
+        self._visible = visible
+
+    @property
+    def first(self):
+        return self
+
+    def is_visible(self):
+        return self._visible
+
+
+class _FakePage:
+    """Shows `states[i]` on the i-th poll: 'login', 'captcha', 'checkpoint' or None."""
+
+    def __init__(self, states, url="https://www.facebook.com/ads/library/?q=x"):
+        self.states, self.polls, self.url, self.visits = list(states), 0, url, []
+
+    @property
+    def _now(self):
+        return self.states[min(self.polls, len(self.states) - 1)]
+
+    def locator(self, selector):
+        if "input[name='email']" in selector:
+            return _Loc(self._now == "login")
+        if "captcha" in selector:
+            return _Loc(self._now == "captcha")
+        return _Loc(False)
+
+    def goto(self, url, **_):
+        self.visits.append(url)
+
+    def bring_to_front(self):
+        return None
+
+
+def _web(monkeypatch, tmp_path, human=True, wait_s=60):
+    import ftf.discovery.meta_web as mw
+
+    monkeypatch.setattr(mw, "PAUSE_BETWEEN_PAGES_S", 0)
+    notes: list[str] = []
+    source = mw.MetaWebSource(tmp_path, headed=True, human=human, human_wait_s=wait_s,
+                              notify=notes.append)  # fmt: skip
+    return mw, source, notes
+
+
+def _clock_and_sleep(page):
+    t = [0.0]
+
+    def sleep(seconds):
+        t[0] += seconds
+        page.polls += 1
+
+    return (lambda: t[0]), sleep
+
+
+def test_login_cleared_by_a_person_reopens_the_search(monkeypatch, tmp_path):
+    mw, source, notes = _web(monkeypatch, tmp_path)
+    page = _FakePage(["login", "login", None])
+    clock, sleep = _clock_and_sleep(page)
+    url = "https://www.facebook.com/ads/library/?q=zysk"
+    assert source.wait_for_human(page, mw.LOGIN, url, [], sleep=sleep, clock=clock)
+    assert page.visits == [url] and source.human_waits == 1
+    assert notes[0].startswith("Action needed") and "log in" in notes[0]
+
+
+def test_captcha_resolved_when_the_page_loads_ads(monkeypatch, tmp_path):
+    mw, source, _ = _web(monkeypatch, tmp_path)
+    page = _FakePage([None])
+    clock, sleep = _clock_and_sleep(page)
+    bodies: list[str] = []
+
+    def sleep_then_ads(seconds):
+        sleep(seconds)
+        if page.polls == 2:
+            bodies.append(_text("search_inwestycja.txt"))
+
+    assert source.wait_for_human(page, mw.CAPTCHA, "u", bodies, sleep=sleep_then_ads, clock=clock)
+    assert page.visits == []  # nothing reopened: the page loaded results by itself
+
+
+def test_visible_captcha_widget_gone_counts_as_solved(monkeypatch, tmp_path):
+    mw, source, _ = _web(monkeypatch, tmp_path)
+    page = _FakePage(["captcha", "captcha", None])
+    clock, sleep = _clock_and_sleep(page)
+    assert source.wait_for_human(page, mw.CAPTCHA, "u", [], sleep=sleep, clock=clock)
+    assert page.visits == ["u"]
+
+
+def test_no_person_in_time_or_no_window_means_stop(monkeypatch, tmp_path):
+    mw, source, notes = _web(monkeypatch, tmp_path, wait_s=30)
+    page = _FakePage(["checkpoint"], url="https://www.facebook.com/checkpoint/123")
+    assert mw.visible_obstacle(page) == mw.CHECKPOINT
+    clock, sleep = _clock_and_sleep(page)
+    assert not source.wait_for_human(page, mw.CHECKPOINT, "u", [], sleep=sleep, clock=clock)
+    assert notes[-1].startswith("No change") and source.human_waits == 0
+
+    _, hidden, hidden_notes = _web(monkeypatch, tmp_path, human=True)
+    hidden.human = False  # headless: nobody can act, so stop at once
+    assert not hidden.wait_for_human(_FakePage(["login"]), mw.LOGIN, "u", [])
+    assert hidden_notes == []
+    _, no_human, _ = _web(monkeypatch, tmp_path, human=False)
+    assert no_human.human is False

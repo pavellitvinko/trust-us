@@ -9,7 +9,7 @@ from pathlib import Path
 
 from ..config import Settings, get_settings
 from ..store import Store
-from .meta_web import MetaWebSource
+from .meta_web import DEFAULT_HUMAN_WAIT_S, MetaWebSource
 from .models import LibraryQuery, QueryOrigin
 from .queries import load_watchlist, model_queries, pivot_queries
 from .replay import ReplaySource
@@ -43,12 +43,22 @@ def open_state(settings: Settings | None = None) -> DiscoveryState:
 
 
 def make_source(
-    replay_dir: Path | None = None, headed: bool = False, settings: Settings | None = None
+    replay_dir: Path | None = None,
+    headed: bool = True,
+    settings: Settings | None = None,
+    *,
+    human: bool = True,
+    human_wait_s: float = DEFAULT_HUMAN_WAIT_S,
+    notify: Callable[[str], None] | None = None,
 ) -> AdLibrarySource:
+    """The live library in a visible browser a person can step into, or saved responses."""
     if replay_dir is not None:
         return ReplaySource(replay_dir)
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
-    return MetaWebSource(paths(settings).raw / stamp, headed=headed)
+    return MetaWebSource(
+        paths(settings).raw / stamp, headed=headed, human=human, human_wait_s=human_wait_s,
+        notify=notify,
+    )  # fmt: skip
 
 
 def plan_queries(

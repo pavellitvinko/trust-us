@@ -26,6 +26,25 @@ def _one_off(args) -> list[LibraryQuery]:
     return out
 
 
+def _source(args):
+    return make_source(
+        Path(args.replay) if args.replay else None,
+        headed=not args.headless,
+        human=not args.no_human,
+        human_wait_s=args.wait_human * 60,
+        notify=lambda msg: print(f"!! {msg}", flush=True),
+    )
+
+
+def _browser_options(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--headless", action="store_true",
+                   help="no browser window; a CAPTCHA or login request then stops the run")  # fmt: skip
+    p.add_argument("--no-human", action="store_true",
+                   help="keep the window but stop on a CAPTCHA or login request instead of waiting")  # fmt: skip
+    p.add_argument("--wait-human", type=float, default=10, metavar="MIN",
+                   help="how long to wait for you to handle a CAPTCHA or login (default 10)")  # fmt: skip
+
+
 def print_report(report: RunReport) -> None:
     c = report.counts
     print(f"run {report.run_id}: {report.status}")
@@ -38,6 +57,8 @@ def print_report(report: RunReport) -> None:
         f"{c.get('seen', 0)}, new {c.get('new', 0)}, stopped since last seen {c.get('stopped', 0)}, "
         f"selected {c.get('selected', 0)}, ingested {c.get('ingested', 0)}"
     )
+    if c.get("human_waits"):
+        print(f"  you cleared {c['human_waits']} CAPTCHA or login request(s) in the browser")
     if report.skipped_queries:
         print(f"  over the per-run limit, not searched: {len(report.skipped_queries)} queries")
     for item in report.ingested:
@@ -104,7 +125,7 @@ def cmd_run(args) -> None:
     if not queries:
         print("no queries: add some with `ftf discover add`, or give --query / --page / --ad")
         return
-    source = make_source(Path(args.replay) if args.replay else None, headed=args.headed)
+    source = _source(args)
     try:
         report = run_discovery(
             store, state, source, queries, paths(settings).incidents,
@@ -120,7 +141,7 @@ def cmd_run(args) -> None:
 def cmd_ingest(args) -> None:
     settings = get_settings()
     store, state = Store(settings.db_path), open_state(settings)
-    source = make_source(Path(args.replay) if args.replay else None, headed=args.headed)
+    source = _source(args)
     try:
         done = ingest_ads(store, state, source, args.ad_id, paths(settings).incidents,
                           download_media=not args.no_media)  # fmt: skip
@@ -188,7 +209,7 @@ def register(sub: argparse._SubParsersAction) -> None:
         help="no model screening; pick by known links and Meta enforcement only",
     )
     p.add_argument("--no-media", action="store_true", help="do not download the ads' creatives")
-    p.add_argument("--headed", action="store_true", help="show the browser window")
+    _browser_options(p)
     p.add_argument(
         "--replay", help="read saved responses from this directory instead of the live library"
     )
@@ -197,7 +218,7 @@ def register(sub: argparse._SubParsersAction) -> None:
     p = dsub.add_parser("ingest", help="ingest ads already seen, by Ad Library ID")
     p.add_argument("ad_id", nargs="+")
     p.add_argument("--no-media", action="store_true")
-    p.add_argument("--headed", action="store_true")
+    _browser_options(p)
     p.add_argument(
         "--replay", help="take ad images from saved responses instead of the live library"
     )

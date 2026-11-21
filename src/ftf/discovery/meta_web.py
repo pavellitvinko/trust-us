@@ -1,14 +1,21 @@
-"""Search the public Meta Ad Library with a headless browser, logged out.
+"""Search the public Meta Ad Library in a browser a person can watch and step into.
 
 Reads the JSON the page itself loads (its HTML and its own GraphQL responses) rather than
 the rendered DOM. Meta's robots.txt and Terms do not permit automated collection; the team
 accepted that for the hackathon, and these guardrails are fixed in code, not settings:
 
-- no login and no imported cookies; a fresh browser context per run;
+- the code never logs in, never types credentials and never solves a CAPTCHA;
+- with a visible window (the default) a person may do those things: when the library asks
+  for a CAPTCHA, a login or a security check, the run pauses, brings the window to the
+  front, waits for the person (up to a limit), then continues where it stopped;
+- without a visible window, or when the person does not act in time, the fetch reports
+  BLOCKED and the run stops, as before;
+- no imported cookies; a fresh browser context per run, so a login is not kept afterwards;
 - default browser settings: no stealth plugins, fingerprint changes or proxy rotation;
-- one page at a time, with pauses between page loads and scrolls;
-- on a CAPTCHA, a login wall or a failed bot check the fetch reports BLOCKED, the run
-  stops, and nothing is retried or solved.
+- one page at a time, with pauses between page loads and scrolls.
+
+A person who logs in does so with their own account, and the run's browsing is then tied to
+that account; Meta may restrict accounts that browse automatically.
 """
 
 from __future__ import annotations
@@ -16,6 +23,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
@@ -32,6 +40,45 @@ PAUSE_BETWEEN_SCROLLS_S = 3.5
 PAUSE_BETWEEN_PAGES_S = 5.0
 MAX_IDLE_SCROLLS = 2  # stop scrolling after this many scrolls bring nothing new
 NAV_TIMEOUT_MS = 45_000
+DEFAULT_HUMAN_WAIT_S = 600  # how long a run waits for a person to clear an obstacle
+HUMAN_POLL_S = 3.0
+CAPTCHA_RELOAD_S = 45.0  # with no CAPTCHA widget in sight, reload the search this often
+MAX_HUMAN_WAITS_PER_PAGE = 3
+
+LOGIN, CHECKPOINT, CAPTCHA = "login", "checkpoint", "captcha"
+OBSTACLE_TEXT = {
+    LOGIN: "the library asks you to log in",
+    CHECKPOINT: "Facebook shows a security check",
+    CAPTCHA: "the library asks for a CAPTCHA",
+}
+_LOGIN_INPUTS = "input[name='email'], input[name='pass']"
+_CAPTCHA_WIDGET = (
+    "iframe[src*='captcha' i], iframe[title*='captcha' i], "
+    "[id*='captcha' i] iframe, form[action*='captcha' i]"
+)
+
+
+def _visible(page: Any, selector: str) -> bool:
+    try:
+        return bool(page.locator(selector).first.is_visible())
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def visible_obstacle(page: Any) -> str | None:
+    """What the page currently shows in the way, judged from the page alone."""
+    url = page.url or ""
+    if "/checkpoint" in url:
+        return CHECKPOINT
+    if "/login" in url or _visible(page, _LOGIN_INPUTS):
+        return LOGIN
+    if _visible(page, _CAPTCHA_WIDGET):
+        return CAPTCHA
+    return None
+
+
+def _has_ads_without_captcha(bodies: list[str]) -> bool:
+    return any("ad_archive_id" in b and not captcha_required(b) for b in bodies)
 
 
 def library_url(query: LibraryQuery) -> str:
@@ -61,9 +108,20 @@ def library_url(query: LibraryQuery) -> str:
 class MetaWebSource:
     name = "meta_web"
 
-    def __init__(self, raw_dir: Path, headed: bool = False):
+    def __init__(
+        self,
+        raw_dir: Path,
+        headed: bool = True,
+        human: bool = True,
+        human_wait_s: float = DEFAULT_HUMAN_WAIT_S,
+        notify: Callable[[str], None] | None = None,
+    ):
         self.raw_dir = Path(raw_dir)
         self.headed = headed
+        self.human = human and headed  # a person can only help with a window to work in
+        self.human_wait_s = human_wait_s
+        self.notify = notify or (lambda msg: log.warning("%s", msg))
+        self.human_waits = 0  # obstacles a person cleared during this run
         self._pw: Any = None
         self._browser: Any = None
         self._context: Any = None
@@ -77,7 +135,17 @@ class MetaWebSource:
             from playwright.sync_api import sync_playwright
 
             self._pw = sync_playwright().start()
-            self._browser = self._pw.chromium.launch(headless=not self.headed)
+            try:
+                self._browser = self._pw.chromium.launch(headless=not self.headed)
+            except Exception as exc:
+                if not self.headed:
+                    raise
+                self.notify(
+                    f"No window can be shown here ({type(exc).__name__}); running without one. "
+                    "A CAPTCHA or login request will stop the run."
+                )
+                self.headed = self.human = False
+                self._browser = self._pw.chromium.launch(headless=True)
             self._context = self._browser.new_context(locale="pl-PL")
             self._context.set_default_navigation_timeout(NAV_TIMEOUT_MS)
         return self._context
@@ -105,15 +173,51 @@ class MetaWebSource:
         path.write_text(text, encoding="utf-8")
         return path
 
-    @staticmethod
-    def _login_wall(page: Any) -> bool:
-        url = page.url
-        if "/login" in url or "/checkpoint" in url:
-            return True
-        try:
-            return page.locator("input[name='email'], input[name='pass']").first.is_visible()
-        except Exception:  # noqa: BLE001
+    def wait_for_human(
+        self, page: Any, obstacle: str, url: str, bodies: list[str],
+        sleep: Callable[[float], None] | None = None, clock: Callable[[], float] = time.monotonic,
+    ) -> bool:  # fmt: skip
+        """Let a person clear `obstacle` in the window. True when the page can be read again.
+
+        Resolved when the page loads ads without a CAPTCHA flag, or, for a login or security
+        check, when the form is gone (the search is then reopened). A CAPTCHA with no widget
+        in sight is retried by reopening the search now and then. Never types or clicks.
+        """
+        if not self.human:
             return False
+        pause = sleep or (lambda s: page.wait_for_timeout(int(s * 1000)))  # keeps events flowing
+        self.notify(
+            f"Action needed in the browser window: {OBSTACLE_TEXT[obstacle]}. Please handle it "
+            f"there; the run waits up to {int(self.human_wait_s // 60)} min and then continues."
+        )
+        with contextlib.suppress(Exception):
+            page.bring_to_front()
+        start = last_reload = clock()
+        saw_widget = False  # a CAPTCHA the page shows, not only one its data asks for
+        while clock() - start < self.human_wait_s:
+            pause(HUMAN_POLL_S)
+            if _has_ads_without_captcha(bodies):
+                break
+            now_showing = visible_obstacle(page)
+            saw_widget = saw_widget or now_showing == CAPTCHA
+            gone = now_showing is None
+            if gone and (obstacle in (LOGIN, CHECKPOINT) or (obstacle == CAPTCHA and saw_widget)):
+                self._reopen(page, url, pause)
+                break
+            if gone and obstacle == CAPTCHA and clock() - last_reload >= CAPTCHA_RELOAD_S:
+                self._reopen(page, url, pause)
+                last_reload = clock()
+        else:
+            self.notify(f"No change after {int(self.human_wait_s // 60)} min; stopping the run.")
+            return False
+        self.human_waits += 1
+        self.notify("Thanks; continuing.")
+        return True
+
+    def _reopen(self, page: Any, url: str, pause: Callable[[float], None]) -> None:
+        self._pace()
+        page.goto(url, wait_until="domcontentloaded")
+        pause(PAUSE_AFTER_LOAD_S)
 
     # -- fetch -------------------------------------------------------------------------
 
@@ -135,21 +239,33 @@ class MetaWebSource:
                 bodies.append(text)
 
         page.on("response", on_response)
+        url = library_url(query)
+        helped = 0
         try:
             self._pace()
-            page.goto(library_url(query), wait_until="domcontentloaded")
+            page.goto(url, wait_until="domcontentloaded")
             page.wait_for_timeout(int(PAUSE_AFTER_LOAD_S * 1000))
             idle = 0
             while True:
                 new_bodies, bodies[:] = list(bodies), []
+                obstacle = None
                 for text in new_bodies:
                     result.raw_files.append(self._save(query.query_id, text))
                     if captcha_required(text):
-                        return self._blocked(page, result, "the library asked for a CAPTCHA")
+                        obstacle = CAPTCHA
+                        continue
                     for ad, raw in ads_from_text(text):
                         found.setdefault(ad.ad_id, (ad, raw))
-                if not found and self._login_wall(page):
-                    return self._blocked(page, result, "the library showed a login wall")
+                if obstacle is None and not found:
+                    obstacle = visible_obstacle(page)
+                if obstacle is not None:
+                    if helped < MAX_HUMAN_WAITS_PER_PAGE and self.wait_for_human(
+                        page, obstacle, url, bodies
+                    ):
+                        helped += 1
+                        idle = 0
+                        continue
+                    return self._blocked(page, result, OBSTACLE_TEXT[obstacle])
                 if len(found) >= max_ads or query.kind is QueryKind.AD:
                     break
                 before = len(found)
@@ -185,9 +301,11 @@ class MetaWebSource:
         page = context.new_page()
         try:
             self._pace()
-            page.goto(f"{BASE}?{urlencode({'id': ad_id})}", wait_until="domcontentloaded")
+            url = f"{BASE}?{urlencode({'id': ad_id})}"
+            page.goto(url, wait_until="domcontentloaded")
             page.wait_for_timeout(int(PAUSE_AFTER_LOAD_S * 1000))
-            if self._login_wall(page):
+            obstacle = visible_obstacle(page)
+            if obstacle is not None and not self.wait_for_human(page, obstacle, url, []):
                 return False
             path.parent.mkdir(parents=True, exist_ok=True)
             # The ad opens in a dialog that shows its Library ID; other dialogs may exist hidden.

@@ -24,7 +24,8 @@ uv run ftf views
 uv run ftf pairs
 uv run ftf compare <view_id> <view_id>
 uv run ftf discover queries          # what a discovery run would search
-uv run ftf discover run              # search the Meta Ad Library, screen, ingest relevant ads
+uv run ftf discover run              # search the Meta Ad Library in a visible browser; if it asks
+                                     # for a CAPTCHA or login, handle it in that window and the run goes on
 uv run ftf discover run --page 1183383648198728 --select 3   # one advertiser page only
 uv run ftf discover run --replay tests/fixtures/discovery    # offline, from saved responses
 uv run ftf discover status

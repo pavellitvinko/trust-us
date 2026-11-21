@@ -182,6 +182,7 @@ def run_discovery(
         log.exception("discovery run failed")
         report.status, report.error = "failed", f"{type(exc).__name__}: {exc}"[:300]
     finally:
+        counts["human_waits"] = int(getattr(source, "human_waits", 0))
         report.counts = counts
         state.finish_run(run_id, report.status, counts, report.error, report.screenshot)
     return report

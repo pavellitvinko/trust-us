@@ -16,9 +16,11 @@ from ftf.store import Store
 st.set_page_config(page_title="Discovery · Follow the Fake", layout="wide")
 st.title("Discovery")
 st.caption(
-    "Searches the public Meta Ad Library (country PL) with a headless browser, logged out, one "
-    "page at a time. Meta's robots.txt and Terms do not permit automated collection; the team "
-    "accepted this for the hackathon. A run stops on any CAPTCHA, login wall or bot check."
+    "Searches the public Meta Ad Library (country PL) in a browser window you can watch, one page "
+    "at a time. If the library asks for a CAPTCHA or a login, the run pauses: handle it in that "
+    "window and the run continues. The tool itself never logs in or solves a CAPTCHA. Meta's "
+    "robots.txt and Terms do not permit automated collection; the team accepted this for the "
+    "hackathon. A login uses your own Facebook account, which Meta may restrict."
 )
 
 settings = get_settings()
@@ -79,14 +81,34 @@ max_ads = c1.number_input("Ads per query", 5, 200, 50, step=5)
 max_ingest = c2.number_input("Ads to ingest", 0, 100, 20)
 screen = c3.checkbox("Screen with the model", value=bool(settings.openai_api_key))
 media = c4.checkbox("Download creatives", value=True)
+b1, b2 = st.columns([3, 1])
+show_browser = b1.checkbox(
+    "Show the browser, and let me handle a CAPTCHA or login when the library asks",
+    value=True,
+    help="Needs a screen: run the app on your own computer. Inside Docker there is none, so the "
+    "browser runs hidden and a CAPTCHA or login request stops the run.",
+)
+wait_min = b2.number_input("Wait for me (min)", 1, 60, 10, disabled=not show_browser)
 replay = st.text_input(
     "Replay saved responses from a folder instead of the live library (optional)"
 )
 
+
+def _source():
+    return make_source(
+        Path(replay) if replay.strip() else None,
+        headed=show_browser,
+        settings=settings,
+        human=show_browser,
+        human_wait_s=float(wait_min) * 60,
+        notify=lambda msg: st.warning(msg, icon="🖐") if msg.startswith("Action") else st.write(msg),
+    )
+
+
 if st.button(
     f"Run discovery ({len(run_queries)} queries)", type="primary", disabled=not run_queries
 ):
-    source = make_source(Path(replay) if replay.strip() else None, settings=settings)
+    source = _source()
     with st.status("Running discovery", expanded=True) as status:
         try:
             report = run_discovery(
@@ -108,6 +130,11 @@ if st.button(
         f"Searched {c.get('queries', 0)} queries; saw {c.get('seen', 0)} ads, {c.get('new', 0)} new, "
         f"{c.get('stopped', 0)} stopped since last seen; selected {c.get('selected', 0)}, "
         f"ingested {c.get('ingested', 0)}."
+        + (
+            f" You cleared {c['human_waits']} CAPTCHA or login request(s)."
+            if c.get("human_waits")
+            else ""
+        )
     )
     if report.error:
         st.error(report.error)
@@ -160,7 +187,7 @@ if ad_table:
     )  # fmt: skip
     chosen = [r["id"] for r in picked if r["ingest"]]
     if st.button(f"Ingest selected ({len(chosen)})", disabled=not chosen):
-        source = make_source(Path(replay) if replay.strip() else None, settings=settings)
+        source = _source()
         try:
             with st.spinner("Ingesting"):
                 done = ingest_ads(
