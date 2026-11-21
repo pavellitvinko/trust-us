@@ -1,4 +1,4 @@
-"""Command line: ftf ingest | run | perceive | views | observations | compare | pairs | relations |
+"""Command line: ftf ingest | run | perceive | views | suspicions | observations | compare | pairs | relations |
 explain | groups | incidents | assign | eval | loio | ablate | load-fixtures."""
 
 from __future__ import annotations
@@ -98,6 +98,28 @@ def cmd_perceive(args) -> None:
 def cmd_views(args) -> None:
     for v in _store().views():
         print(f"{v.view_id}  {v.kind.value:5}  {v.label}")
+
+
+def cmd_suspicions(args) -> None:
+    """Show why a view or all views are suspicious."""
+    store = _store()
+    if args.view_id:
+        summary = store.suspicion_summary(args.view_id)
+        print(f"View {summary.view_id}: level {summary.level} ({len(summary.reasons_by_kind)} kinds)")
+        for kind in sorted(summary.reasons_by_kind.keys()):
+            print(f"  {kind.upper()}:")
+            for reason in summary.reasons_by_kind[kind]:
+                print(
+                    f"    [{reason.signal_id}] {reason.summary} "
+                    f"(ns={reason.namespace}, src={reason.source.file}:{reason.source.locator})"
+                )
+    else:
+        for v in store.views():
+            summary = store.suspicion_summary(v.view_id)
+            print(f"{v.view_id:30} level {summary.level} ({len(summary.reasons_by_kind)} kinds)")
+            for kind in sorted(summary.reasons_by_kind.keys()):
+                reasons = summary.reasons_by_kind[kind]
+                print(f"  {kind:15} {len(reasons):2} reason(s): {reasons[0].summary}")
 
 
 def cmd_observations(args) -> None:
@@ -284,6 +306,10 @@ def main(argv: list[str] | None = None) -> None:
     p.set_defaults(func=cmd_perceive)
 
     sub.add_parser("views", help="list views").set_defaults(func=cmd_views)
+
+    p = sub.add_parser("suspicions", help="show why a view is suspicious")
+    p.add_argument("view_id", nargs="?", default=None, help="optional; show all if not given")
+    p.set_defaults(func=cmd_suspicions)
 
     p = sub.add_parser("observations", help="show one view's observations")
     p.add_argument("view_id")

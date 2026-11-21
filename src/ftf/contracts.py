@@ -149,3 +149,26 @@ class Relation(_Model):
     coverage: float = 0.0  # share of comparable layer groups
     tier_scores: dict[str, float] = Field(default_factory=dict)
     reasons: list[str] = Field(default_factory=list)
+
+
+class SuspicionReason(_Model):
+    """One reason why a view is suspicious: a risk-tagged observation and its source."""
+
+    kind: str  # category: domain | impersonation | absent_elements | evasion | persuasion
+    signal_id: str  # row in signal-catalogue.md, e.g. "C1", "G2", "J1"
+    namespace: str  # observation namespace, e.g. "domain.age", "entity.impersonation"
+    summary: str  # human-readable reason, e.g. "domain registered 7 days ago"
+    value: Any = None  # the observation value
+    quote: str | None = None  # for text observations, the exact span from the page
+    observation_id: str | None = None  # foreign key to Observation
+    source: Source = Field(default_factory=Source)
+
+
+class SuspicionSummary(_Model):
+    """Why one view is suspicious: reasons grouped by kind, with the number of independent kinds as the level."""
+
+    view_id: str
+    level: int  # count of independent kinds that have reasons (1–5)
+    reasons_by_kind: dict[str, list[SuspicionReason]] = Field(
+        default_factory=dict
+    )  # grouping key is the kind

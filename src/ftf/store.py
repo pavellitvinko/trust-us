@@ -12,7 +12,7 @@ import sqlite3
 from collections.abc import Iterable
 from pathlib import Path
 
-from .contracts import Artifact, Evidence, Fingerprint, Incident, Observation, Relation, View
+from .contracts import Artifact, Evidence, Fingerprint, Incident, Observation, Relation, View, SuspicionSummary
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS incidents (incident_id TEXT PRIMARY KEY, body TEXT NOT NULL);
@@ -212,3 +212,10 @@ class Store:
     def relations(self) -> list[Relation]:
         rows = self.db.execute("SELECT body FROM relations ORDER BY view_a, view_b")
         return [Relation.model_validate_json(r[0]) for r in rows]
+
+    def suspicion_summary(self, view_id: str) -> SuspicionSummary:
+        """Generate a suspicion summary for one view based on its RISK observations."""
+        from .grouping.suspicion import reason_summary_for_view
+
+        observations = self.observations(view_id)
+        return reason_summary_for_view(view_id, observations)
