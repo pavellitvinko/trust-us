@@ -3,6 +3,7 @@
 import json
 import shutil
 import subprocess
+import time
 from contextlib import contextmanager
 from types import SimpleNamespace as NS
 
@@ -476,3 +477,118 @@ def test_polish_quote_from_escaped_json_names_its_own_file(ctx, settings):
     run(ctx, settings, FakeOpenAI(message(card("Profit claim", quote("Zarobiłem 5000 zł dziś")))))
     [stored] = cards_of(ctx)
     assert stored.state is State.PRESENT and stored.source.file == "b.json"
+
+
+def test_sidecar_secrets_are_redacted_before_flattening(ctx):
+    root = ctx.store.get_incident("i1").root
+    with open(f"{root}/clip.json", "w", encoding="utf-8") as fh:
+        json.dump(
+            {"access_token": "SIDECARSECRET1", "cookies": "datr=SIDECARSECRET2; Path=/", "t": "ok"},
+            fh,
+        )
+    view = View(
+        view_id="v1",
+        incident_id="i1",
+        kind=ViewKind.VIDEO,
+        label="clip",
+        primary="missing.mp4",
+        attachments=["clip.json"],
+    )
+    blocks = techniques._video_metadata(view, ctx)
+    assert "SIDECARSECRET" not in json.dumps(blocks)
+    assert any(text == "ok" for _, text in blocks)
+
+
+def test_long_fact_is_redacted_before_it_is_cut(ctx):
+    view = page_view(ctx)
+    secret = "TOPSECRETVALUE" * 8
+    fact = Observation(
+        view_id=view.view_id,
+        signal_id="A1",
+        namespace="config.blob",
+        value={"a": "x" * 120, "csrf_token": secret},
+        extractor="test",
+        version="1",
+    )
+    ctx.store.put_observations(view.view_id, "test", [fact])
+    assert "TOPSECRET" not in json.dumps(build_input(view, ctx).facts)
+
+
+def test_cookie_label_does_not_erase_text_in_the_request(ctx, settings):
+    html = "<label>Ustawienia cookie:</label><h1>Zarobisz 5000 zl dziennie</h1>"
+    page_view(ctx, html)
+    client = FakeOpenAI(message(card("Income promise", quote("Zarobisz 5000 zl"))))
+    run(ctx, settings, client)
+    assert "Zarobisz 5000 zl dziennie" in client.requests[0]["input"][0]["content"][0]["text"]
+    assert cards_of(ctx)[0].state is State.PRESENT
+
+
+@pytest.mark.parametrize(
+    ("html", "visible"),
+    [
+        ("<ul><li style='display:none'>x<li>Zarobisz 5000</ul><p>Dolacz</p>", "Zarobisz 5000"),
+        ("<p hidden>ukryte<p>Dolacz teraz", "Dolacz teraz"),
+        ("<table><tr><td hidden>x<td>Cena 99</table>", "Cena 99"),
+        ("<body style='visibility:hidden'><h1>Zarobisz 5000</h1></body>", "Zarobisz 5000"),
+    ],
+)
+def test_implied_end_tags_end_hidden_elements(html, visible):
+    assert visible in page_text(html)
+
+
+def test_deep_markup_stays_fast():
+    started = time.perf_counter()
+    page_text("<p><button>" + "<span>" * 30_000 + "<div>" * 30_000 + "</x>" * 30_000)
+    assert time.perf_counter() - started < 2.0
+
+
+def test_partial_read_failure_keeps_good_cards(ctx, settings, monkeypatch):
+    page_view(ctx)
+    run(ctx, settings, FakeOpenAI(message(card())))
+    real = techniques._page_images
+    monkeypatch.setattr(techniques, "_page_images", lambda *a: (real(*a)[0], True))
+    client = FakeOpenAI()
+    summary = run(ctx, settings, client)
+    assert summary["kept"] == 1 and client.requests == []
+    assert cards_of(ctx)[0].state is State.PRESENT
+
+
+def test_paraphrased_answer_keeps_verified_cards(ctx, settings):
+    page_view(ctx)
+    run(ctx, settings, FakeOpenAI(message(card())))
+    moved = Settings(settings.data_dir / "other", "", "", "openai-test", "e", "v")
+    summary = run(ctx, moved, FakeOpenAI(message(card("Scarcity", quote("pozostalo tylko 17")))))
+    assert summary["kept"] == 1 and cards_of(ctx)[0].value["name"] == "Stated scarcity"
+
+
+def test_video_sidecars_use_the_longest_stem_and_common_separators(store, tmp_path):
+    root = tmp_path / "videos"
+    root.mkdir()
+    names = ("clip.mp4", "clip.v2.mp4", "clip.json", "clip_meta.json", "clip-info.json")
+    for name in (*names, "clip.v2.json", "clip2.json"):
+        (root / name).write_bytes(b"{}")
+    _, views = ingest_folder(root, store)
+    attached = {v.primary: sorted(v.attachments) for v in views}
+    assert attached["clip.mp4"] == ["clip-info.json", "clip.json", "clip_meta.json"]
+    assert attached["clip.v2.mp4"] == ["clip.v2.json"]
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
+def test_video_without_duration_still_gets_frames(ctx, monkeypatch):
+    view = video_view(ctx)
+    monkeypatch.setattr(techniques, "_video_duration", lambda path: None)
+    images = techniques._video_images(view, ctx)
+    assert images and images[0].locator_prefix.startswith("video:frame[0]@0.00s")
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
+def test_quote_offset_is_within_its_own_file(ctx, settings):
+    root = ctx.store.get_incident("i1").root
+    with open(f"{root}/a.json", "w", encoding="utf-8") as fh:
+        json.dump({"t": "pierwszy opis filmu"}, fh)
+    with open(f"{root}/b.json", "w", encoding="utf-8") as fh:
+        json.dump({"t": "zarobilem 5000 zl"}, fh)
+    video_view(ctx, ["a.json", "b.json"])
+    run(ctx, settings, FakeOpenAI(message(card("Profit claim", quote("zarobilem 5000")))))
+    evidence = cards_of(ctx)[0].value["evidence"][0]
+    assert evidence["file"] == "b.json" and evidence["locator"] == "text:normalised_offset[0]"
