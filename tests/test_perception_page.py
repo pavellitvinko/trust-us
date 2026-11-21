@@ -9,7 +9,7 @@ from types import SimpleNamespace as NS
 import pytest
 
 from ftf.config import Settings
-from ftf.contracts import Incident, Observation, Source, State, View, ViewKind
+from ftf.contracts import Incident, Observation, Purpose, Source, State, View, ViewKind
 from ftf.perception.page import (
     CLEAN_TEXT_NAMESPACE,
     NAME,
@@ -237,6 +237,37 @@ def test_clean_text_observation_is_preferred(ctx, settings):
     client = FakeOpenAI(message(reading()))
     run_perceive_pages(ctx, settings=settings, client=client)
     assert client.requests[0]["input"][0]["content"] == "Czysty tekst artykułu"
+
+
+def test_markup_facts_are_sent_before_the_text(ctx, settings):
+    def fact(namespace, value, purpose=Purpose.RISK):
+        return Observation(
+            view_id="v1",
+            signal_id="F7",
+            namespace=namespace,
+            value=value,
+            purpose=purpose,
+            source=Source(file="page.html", locator="html"),
+            extractor="page.structure",
+            version="1",
+        )
+
+    facts = [fact("markup.countdown", "timer"), fact("markup.form_field", "tel:phone")]
+    facts.append(fact("dom.class_set", ["a", "b"], Purpose.LINKAGE))  # not a fact
+    ctx.store.put_observations("v1", "page.structure", facts)
+    client = FakeOpenAI(message(reading(kind=spanned("news", "ujawnia sekret"))))
+    run_perceive_pages(ctx, settings=settings, client=client)
+    sent = client.requests[0]["input"][0]["content"]
+    assert sent.startswith(
+        "Facts found in the page markup (not page text):\n"
+        "- markup.countdown: timer\n- markup.form_field: tel:phone\n\nPage text:\n"
+    )
+    assert "dom.class_set" not in sent
+    read = stored(ctx.store, READ_TEXT_NAMESPACE)[0].value
+    assert not read.startswith("Facts")  # spans index the page text, not the message
+    kind = stored(ctx.store, "page.kind")[0]
+    start, end = map(int, kind.source.locator.split("[")[1].rstrip("]").split(","))
+    assert read[start:end] == "ujawnia sekret"
 
 
 def test_fallback_sends_only_visible_text(ctx, settings):
