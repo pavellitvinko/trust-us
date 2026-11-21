@@ -16,12 +16,14 @@ from ftf.enrich.warning_lists import (
 from ftf.enrich.warning_sources import (
     CERT_URL,
     KNF_URL,
+    MF_REGISTER_URL,
     Sources,
     domain,
     download,
     load_sources,
     make_snapshot,
     parse_domains,
+    parse_gambling_xml,
     parse_knf,
     read_snapshot,
     save_snapshot,
@@ -538,3 +540,114 @@ def test_domain_and_offer_cli_acceptance_with_network_and_models_blocked(tmp_pat
             assert hits[0]["value"]["matches"][0]["record"]["locator"]
     finally:
         store.close()
+
+
+MF_XML = """<?xml version="1.0" encoding="utf-8"?>
+<Rejestr xmlns="http://www.hazard.mf.gov.pl/2017/03/21/">
+ <PozycjaRejestru Lp="60244">
+  <AdresDomeny>www.casinolabcz.com</AdresDomeny>
+  <DataWpisu>2026-11-20T13:56:55</DataWpisu>
+ </PozycjaRejestru>
+</Rejestr>"""
+
+
+def test_mf_xml_retains_record_identity_and_rejects_wrong_responses():
+    record = parse_gambling_xml(MF_XML)[0]
+    assert record["id"] == "mf:60244"
+    assert record["domain"] == "www.casinolabcz.com"
+    assert record["listed_at"] == "2026-11-20T13:56:55"
+    assert record["locator"] == "xml:Rejestr/PozycjaRejestru[@Lp='60244']/AdresDomeny"
+    for invalid in (
+        "<html>bot check</html>",
+        MF_XML[:-10],
+        MF_XML.replace(
+            "</PozycjaRejestru>", "<DataWykreslenia>2026-11-21</DataWykreslenia></PozycjaRejestru>"
+        ),
+        MF_XML.replace("<PozycjaRejestru Lp", "<OtherRecord Lp"),
+        MF_XML.replace("<Rejestr xmlns", "<!DOCTYPE Rejestr><Rejestr xmlns"),
+    ):
+        with pytest.raises(ValueError):
+            parse_gambling_xml(invalid)
+    with pytest.raises(ValueError, match="not allowed"):
+        download(MF_REGISTER_URL)
+
+
+def test_xml_unsupported_addresses_are_retained_without_entering_match_index():
+    snapshot = make_snapshot(
+        "gambling",
+        MF_XML.replace("www.casinolabcz.com", "bad/host.example"),
+        STAMP,
+        access="manual",
+    )
+    assert len(snapshot.records) == 1 and snapshot.records[0]["domain"] is None
+    assert snapshot.records[0]["raw"]["AdresDomeny"] == "bad/host.example"
+    assert snapshot.provenance()["unmatchable_record_count"] == 1
+    matcher = WarningLists(Sources({"gambling": snapshot}))
+    assert not matcher.domain_indexes["gambling"]
+
+
+def test_xml_manual_import_preserves_original_bytes(warning_store, tmp_path, monkeypatch, capsys):
+    from hashlib import sha256
+
+    from ftf.cli import main
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FTF_DATA_DIR", str(tmp_path / "data"))
+    original = MF_XML.replace("\n", "\r\n").encode("utf-8")
+    file = tmp_path / "Register.xml"
+    file.write_bytes(original)
+    main(["enrich", "--offline", "--import-gambling", str(file), "--snapshot-date", "2026-11-22"])
+    summary = json.loads(capsys.readouterr().out)
+    assert summary["snapshots"]["gambling"]["sha256"] == sha256(original).hexdigest()
+    snapshot = read_snapshot(tmp_path / "data/warning_lists/gambling.json", "gambling")
+    assert snapshot.content.encode("utf-8") == original
+    assert snapshot.source_url == MF_REGISTER_URL
+
+
+def test_bundled_gambling_snapshot_checks_offline_with_provenance(warning_store, tmp_path):
+    from ftf.enrich.warning_lists import warning_risk_reasons
+    from ftf.reporting import build_pair_report, render_pair_report
+
+    sources = load_sources(tmp_path)
+    snapshot = sources.snapshots["gambling"]
+    assert snapshot.fetched_at.startswith("2026-11-22T")
+    assert snapshot.sha256 == "854b94c7a3591882c756b904ec3af51a6465cc9eead91063c969bf5a6db4395f"
+    assert len(snapshot.records) == 60231
+    assert snapshot.provenance()["unmatchable_record_count"] == 0
+    assert snapshot.source_url == MF_REGISTER_URL and snapshot.access == "manual"
+    for vid, host in (("a", "www.casinolabcz.com"), ("b", "unlisted.example")):
+        warning_store.put_observations(
+            vid, "test.input", [input_observation(vid, "url.host", host)]
+        )
+    run_warning_lists(warning_store, tmp_path, sources=sources)
+    hit = results(warning_store, "a", "gambling")[0]
+    assert hit["state"] == "present" and hit["value"]["result"] == "listed"
+    assert hit["value"]["matches"][0]["record"]["id"] == "mf:60244"
+    assert hit["value"]["matches"][0]["record"]["raw"]["DataWpisu"] == "2026-11-20T13:56:55"
+    miss = results(warning_store, "b", "gambling")[0]
+    assert miss["state"] == "absent" and miss["value"]["message"] == "not listed as of 2026-11-22"
+    assert not miss["value"]["legitimacy_inference"]
+    assert any(
+        r["source"] == "gambling"
+        for r in warning_risk_reasons(warning_observations(warning_store, "a"))
+    )
+    report = build_pair_report(warning_store, "a", "b")
+    assert any(
+        o["value"]["source"] == "gambling" for o in report["warning_lists"]["observations"]["a"]
+    )
+    assert "mf:60244" in render_pair_report(report)
+    warning_store.put_observations(
+        "a",
+        "test.input",
+        [
+            input_observation(
+                "a",
+                "url.host",
+                "nomini02_but_w.lpmediastorage.com",
+            )
+        ],
+    )
+    run_warning_lists(warning_store, tmp_path, sources=sources, view_ids=["a"])
+    underscore_hit = results(warning_store, "a", "gambling")[0]
+    assert underscore_hit["value"]["result"] == "listed"
+    assert underscore_hit["value"]["matches"][0]["record"]["id"] == "mf:20578"
