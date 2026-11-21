@@ -56,6 +56,8 @@ set_layer(
     comparator="set_overlap",
     namespaces=(
         "firstparty.sha256",
+        "asset.sha256.code",
+        "asset.name_shape",
         "code.comment_lang",
         "code.naming",
         "code.evasion_filter",

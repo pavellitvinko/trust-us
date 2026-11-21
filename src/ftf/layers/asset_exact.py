@@ -10,6 +10,6 @@ set_layer(
     tier=Tier.ARTIFACT,
     group="asset",
     comparator="shared_value",
-    namespaces=("asset.sha256", "avatar.sha256"),
+    namespaces=("asset.sha256", "asset.sha256.content", "avatar.sha256", "asset.sha256.avatar"),
     doc="SHA-256 of content images and avatars; logos, icons and library files belong to kit.code.",
 )

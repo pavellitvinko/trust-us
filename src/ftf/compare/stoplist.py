@@ -27,7 +27,16 @@ HOST_NAMESPACES = frozenset(
         "url.host",
     }
 )
-HASH_NAMESPACES = frozenset({"asset.sha256", "firstparty.sha256", "avatar.sha256"})
+HASH_NAMESPACES = frozenset(
+    {
+        "asset.sha256",
+        "asset.sha256.content",
+        "asset.sha256.avatar",
+        "asset.sha256.code",
+        "firstparty.sha256",
+        "avatar.sha256",
+    }
+)
 PARAM_NAMESPACES = frozenset({"url.param_name", "url.param_shape"})
 
 SEED_HOSTS = frozenset(

@@ -12,10 +12,10 @@ from ..registry import layers
 from ._set_layer import linkage_items
 
 
-def _hash_layer(name: str, group: str, namespace: str, doc: str, min_values: int = 1):
+def _hash_layer(name: str, group: str, namespace, doc: str, min_values: int = 1):
     class HashLayer:
         def build(self, view: View, observations: list[Observation]) -> Fingerprint | None:
-            values = sorted({v.lower() for _, v in linkage_items(observations, (namespace,))})
+            values = sorted({v.lower() for _, v in linkage_items(observations, self.namespaces)})
             if len(values) < min_values:
                 return None
             return Fingerprint(
@@ -32,7 +32,7 @@ def _hash_layer(name: str, group: str, namespace: str, doc: str, min_values: int
     HashLayer.tier = Tier.ARTIFACT
     HashLayer.group = group
     HashLayer.comparator = "phash"
-    HashLayer.namespaces = (namespace,)
+    HashLayer.namespaces = (namespace,) if isinstance(namespace, str) else tuple(namespace)
     HashLayer.__name__ = HashLayer.__qualname__ = "".join(p.title() for p in name.split("."))
     HashLayer.__doc__ = doc
     layers.register(HashLayer)
@@ -40,7 +40,10 @@ def _hash_layer(name: str, group: str, namespace: str, doc: str, min_values: int
 
 
 _hash_layer(
-    "asset.perceptual", "perceptual", "image.phash", "E2: pHash of a page's content images."
+    "asset.perceptual",
+    "perceptual",
+    ("image.phash", "asset.phash"),
+    "E2: pHash of a page's content images.",
 )
 _hash_layer(
     "ad.creative", "creative", "creative.phash", "L2: pHash of an ad creative or screenshot."

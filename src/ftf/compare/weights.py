@@ -97,7 +97,11 @@ BASE_WEIGHTS: dict[str, float] = {
     "url.host": 0.9,
     # artifact
     "asset.sha256": 0.7,
+    "asset.sha256.content": 0.7,
     "avatar.sha256": 0.6,
+    "asset.sha256.avatar": 0.6,
+    "asset.sha256.code": 0.6,
+    "asset.name_shape": 0.3,
     "image.phash": 0.7,
     # kit
     "aio.template_uuid": 0.7,
