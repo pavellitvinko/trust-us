@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import logging
+from collections import Counter
 from itertools import combinations
 
 from .contracts import Evidence
-from .registry import Context, comparators, extractors, layers, load_plugins
+from .registry import Context, comparators, enrichers, extractors, layers, load_plugins
 from .store import Store
 
 
@@ -21,6 +23,32 @@ def run_extract(store: Store, view_ids: list[str] | None = None) -> int:
             store.put_observations(view.view_id, extractor.name, observations)
             count += len(observations)
     return count
+
+
+def run_enrich(store: Store, view_ids: list[str] | None = None) -> Counter:
+    """Run the enrichers over stored views, after extraction.
+
+    Returns counts keyed by (namespace, state). One enricher failing for one view is logged
+    and leaves that enricher's earlier output in place; it never stops the run.
+    """
+    load_plugins()
+    ctx = Context(store)
+    counts: Counter = Counter()
+    for view in store.views():
+        if view_ids is not None and view.view_id not in view_ids:
+            continue
+        observations = store.observations(view.view_id)
+        for enricher in enrichers.all():
+            try:
+                found = enricher.run(view, observations, ctx)
+            except Exception:  # enrichment is optional by design
+                logging.getLogger(__name__).exception(
+                    "enricher %s failed on %s", enricher.name, view.view_id
+                )
+                continue
+            store.put_observations(view.view_id, enricher.name, found)
+            counts.update((o.namespace, o.state.value) for o in found)
+    return counts
 
 
 def run_fingerprint(store: Store, view_ids: list[str] | None = None) -> int:

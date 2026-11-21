@@ -1,0 +1,67 @@
+{
+ "objectClassName": "domain",
+ "ldhName": "civicdaybook.live",
+ "events": [
+  {
+   "eventAction": "expiration",
+   "eventDate": "2027-10-08T18:18:20.349Z"
+  },
+  {
+   "eventAction": "registration",
+   "eventDate": "2026-10-08T18:18:20.349Z"
+  },
+  {
+   "eventAction": "last changed",
+   "eventDate": "2026-10-19T13:08:21.877Z"
+  },
+  {
+   "eventAction": "last update of RDAP database",
+   "eventDate": "2026-11-21T22:37:47.985Z"
+  }
+ ],
+ "nameservers": [
+  {
+   "objectClassName": "nameserver",
+   "ldhName": "ns1.dyna-ns.net"
+  },
+  {
+   "objectClassName": "nameserver",
+   "ldhName": "ns2.dyna-ns.net"
+  }
+ ],
+ "status": [
+  "client transfer prohibited"
+ ],
+ "entities": [
+  {
+   "objectClassName": "entity",
+   "handle": "472",
+   "roles": [
+    "registrar"
+   ],
+   "publicIds": [
+    {
+     "type": "IANA Registrar ID",
+     "identifier": "472"
+    }
+   ],
+   "vcardArray": [
+    "vcard",
+    [
+     [
+      "version",
+      {},
+      "text",
+      "4.0"
+     ],
+     [
+      "fn",
+      {},
+      "text",
+      "Dynadot Inc"
+     ]
+    ]
+   ]
+  }
+ ]
+}
