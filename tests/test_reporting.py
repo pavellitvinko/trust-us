@@ -202,7 +202,7 @@ def test_interface_uses_the_complete_report(report_store, monkeypatch):
     )
     app = AppTest.from_file(str(ROOT / "app/streamlit_app.py")).run()
     assert not app.exception
-    app.button[0].click().run()
+    next(b for b in app.button if b.label == "Explain comparison").click().run()
     assert not app.exception
     assert_complete(app.session_state["comparison_report"])
 

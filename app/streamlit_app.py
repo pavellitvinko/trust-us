@@ -1,8 +1,9 @@
-"""Interface stub: lists what is stored. The Perception track builds the real screens here."""
+"""Follow the Fake interface: match, material and add-material screens."""
 
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import streamlit as st
 
@@ -13,26 +14,151 @@ from ftf.enrich.warning_lists import (
     warning_observations,
     warning_risk_reasons,
 )
+from ftf.grouping import assign
+from ftf.intake import STAGES, IntakeError, add_zip, run_stages
+from ftf.material import material_summary
 from ftf.reporting import build_pair_report, render_pair_report
 from ftf.store import Store
+
+UNAVAILABLE = {
+    "not_run": "Not run for this view. Run `ftf perceive` or `ftf patterns discover`.",
+    "unavailable": "Unavailable: the model stage produced no verified result for this view.",
+}
 
 st.set_page_config(page_title="Follow the Fake", layout="wide")
 st.title("Follow the Fake")
 
-store = Store(get_settings().db_path)
+settings = get_settings()
+store = Store(settings.db_path)
+
+
+def add_material() -> None:
+    st.subheader("Add material")
+    upload = st.file_uploader("Incident folder as a zip", type=["zip"])
+    folder = st.text_input("Or a folder on this machine")
+    st.text_input(
+        "URL", disabled=True, help="Available once the live capture service (HAC-14) is connected."
+    )
+    st.caption("URL capture is not connected yet.")
+    if not st.button("Analyse material"):
+        return
+    if not upload and not folder.strip():
+        st.warning("Choose a zip or enter a folder.")
+        return
+    progress = st.progress(0.0, text="Starting")
+
+    def on_stage(name: str, index: int, total: int) -> None:
+        progress.progress(index / total, text=f"Stage {index + 1} of {len(STAGES)}: {name}")
+
+    try:
+        path = (
+            add_zip(upload, upload.name, settings.data_dir / "uploads")
+            if upload
+            else Path(folder.strip()).expanduser()
+        )
+        result = run_stages(store, path, on_stage)
+    except IntakeError as exc:
+        progress.empty()
+        st.error(str(exc))
+        return
+    progress.progress(1.0, text="Done")
+    st.session_state.pop("comparison_report", None)
+    st.success(
+        f"Added {result['views']} views in {len(result['incidents'])} incident(s). "
+        f"Campaigns: {result['campaigns']}, families: {result['families']}."
+    )
+
+
+def show_status_table(title: str, section: dict) -> None:
+    st.subheader(title)
+    if section["status"] != "available":
+        st.info(UNAVAILABLE[section["status"]])
+    if section["rows"]:
+        st.dataframe(section["rows"], width="stretch")
+
+
+tab_match, tab_material, tab_add = st.tabs(["Match", "Material", "Add material"])
+with tab_add:
+    add_material()
+
 incidents = store.incidents()
 if not incidents:
-    st.info("Nothing ingested yet. Run: ftf ingest <folder>")
+    with tab_match:
+        st.info("Nothing ingested yet. Use Add material.")
+    with tab_material:
+        st.info("Nothing ingested yet. Use Add material.")
     st.stop()
 
 labels = {v.view_id: v.label for v in store.views()}
-left, right = st.columns([1, 2])
-with left:
-    st.subheader("Material")
+with st.sidebar:
+    st.subheader("Selected material")
     incident_id = st.selectbox("Incident", [i.incident_id for i in incidents])
     views = store.views(incident_id)
     view = st.radio("View", views, format_func=lambda v: f"{v.kind.value}: {v.label}")
-with right:
+
+with tab_match:
+    st.subheader("Closest known material")
+    outcome = assign(store, view.view_id)
+    st.write(f"Outcome: **{outcome.headline()}**")
+    for reason in outcome.reasons:
+        st.caption(reason)
+    related = [
+        {
+            "relation": relation,
+            "view": item.view_id,
+            "label": labels.get(item.view_id, ""),
+            "strength": round(item.strength, 3),
+            "coverage": round(item.relation.coverage, 3),
+        }
+        for relation, items in outcome.related.items()
+        for item in items[:5]
+    ]
+    if related:
+        st.dataframe(related, width="stretch")
+    st.subheader("Full comparison report")
+    candidates = [v for v in store.views() if v.view_id != view.view_id]
+    if candidates:
+        other = st.selectbox(
+            "Compare with", candidates, format_func=lambda v: f"{v.view_id} — {v.label}"
+        )
+        if st.button("Explain comparison"):
+            st.session_state["comparison_report"] = build_pair_report(
+                store, view.view_id, other.view_id
+            )
+        report = st.session_state.get("comparison_report")
+        if (
+            report
+            and report["objects"]["a"]["view_id"] == view.view_id
+            and report["objects"]["b"]["view_id"] == other.view_id
+        ):
+            markdown = render_pair_report(report)
+            st.download_button(
+                "Download JSON",
+                json.dumps(report, ensure_ascii=False, indent=2),
+                file_name="comparison.json",
+                mime="application/json",
+            )
+            st.download_button(
+                "Download Markdown", markdown, file_name="comparison.md", mime="text/markdown"
+            )
+            st.markdown(markdown)
+
+with tab_material:
+    summary = material_summary(store, view.view_id)
+    st.subheader("Why this item is suspicious")
+    st.write(f"Kind of page: {summary['page_kind'] or 'not read yet'}")
+    suspicion = summary["suspicion"]
+    st.write(f"Level: **{suspicion['level']}** independent kinds of reason (not a probability).")
+    for kind, reasons in suspicion["reasons_by_kind"].items():
+        st.markdown(f"**{kind.replace('_', ' ')}**")
+        for reason in reasons:
+            source = reason["source"]
+            st.write(f"- {reason['summary']} ({source['file']}:{source['locator']})")
+    if suspicion["unchecked_kinds"]:
+        st.caption("Not checked: " + ", ".join(suspicion["unchecked_kinds"]))
+    show_status_table("Expected elements", summary["expectations"])
+    show_status_table("Persuasion patterns", summary["patterns"])
+
     st.subheader("Observations")
     rows = [
         {
@@ -62,33 +188,6 @@ with right:
         st.dataframe(evidence, width="stretch")
     else:
         st.caption("No links found yet.")
-    st.subheader("Full comparison report")
-    candidates = [v for v in store.views() if v.view_id != view.view_id]
-    if candidates:
-        other = st.selectbox(
-            "Compare with", candidates, format_func=lambda v: f"{v.view_id} — {v.label}"
-        )
-        if st.button("Explain comparison"):
-            st.session_state["comparison_report"] = build_pair_report(
-                store, view.view_id, other.view_id
-            )
-        report = st.session_state.get("comparison_report")
-        if (
-            report
-            and report["objects"]["a"]["view_id"] == view.view_id
-            and report["objects"]["b"]["view_id"] == other.view_id
-        ):
-            markdown = render_pair_report(report)
-            st.download_button(
-                "Download JSON",
-                json.dumps(report, ensure_ascii=False, indent=2),
-                file_name="comparison.json",
-                mime="application/json",
-            )
-            st.download_button(
-                "Download Markdown", markdown, file_name="comparison.md", mime="text/markdown"
-            )
-            st.markdown(markdown)
 
     st.subheader("Warning lists")
     offline = st.checkbox("Use offline warning snapshots", value=True)
