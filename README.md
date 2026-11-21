@@ -51,7 +51,11 @@ docker compose run --rm app ftf ingest /sample
 ```
 
 `FTF_SAMPLE_DIR` chooses which host folder is mounted at `/sample` (default `./testing_sample`).
-State lives in `./data`.
+The sample is not in git, so on a fresh clone either copy it to `./testing_sample` or run
+`FTF_SAMPLE_DIR=/path/to/sample docker compose run --rm app ftf ingest /sample`.
+Without it `/sample` is empty and `ftf ingest` stops with "no views found" (exit code 1).
+State lives in `./data`. The image installs the exact versions in `uv.lock`;
+`docker compose ps` shows the interface as `healthy` once it answers.
 
 ## Layout and ownership
 

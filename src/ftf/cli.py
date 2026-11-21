@@ -4,6 +4,7 @@ explain | groups | incidents | assign | eval | loio | ablate | load-fixtures."""
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 from . import pipeline
@@ -20,12 +21,22 @@ def _store() -> Store:
 
 def cmd_ingest(args) -> None:
     store = _store()
+    total = 0
     for incident, views in ingest_path(Path(args.path), store):
+        total += len(views)
         kinds = {}
         for v in views:
             kinds[v.kind.value] = kinds.get(v.kind.value, 0) + 1
         summary = ", ".join(f"{n} {k}" for k, n in sorted(kinds.items())) or "no views"
         print(f"incident {incident.incident_id}: {summary}")
+    if total == 0:
+        # A silent success here hides a wrong mount (Docker creates an empty /sample).
+        print(
+            f"error: no views found in {args.path}. In Docker, set FTF_SAMPLE_DIR "
+            "to the folder with the material.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
     if not args.no_run:
         cmd_run(args)
 
