@@ -102,6 +102,23 @@ SEED_URL_PARAMS = frozenset(
     }
 )
 
+# The platforms' own value shapes for their standard parameters (catalogue B2). A *different*
+# shape under a standard name (`utm_id:token20mixed`) is a kit signal and stays.
+SEED_PARAM_SHAPES = frozenset(
+    {
+        "utm_id:digits18",
+        "utm_campaign:digits18",
+        "utm_source:word",
+        "utm_medium:word",
+        "utm_content:digits18",
+        "fbclid:token",
+        "gclid:token",
+        "ad_id:digits18",
+        "adset_id:digits18",
+        "campaign_id:digits18",
+    }
+)
+
 _MACRO = re.compile(
     r"^\s*(\{\{.*\}\}|\{[A-Za-z_][\w.]*\}|\[\[.*\]\]|%[A-Z_]{2,}%|\$\{.*\}|__[A-Z_]+__)\s*$"
 )
@@ -129,4 +146,6 @@ def is_seed_stoplisted(namespace: str, value: object) -> bool:
         return True
     if namespace in HASH_NAMESPACES and value.lower().startswith(SEED_HASH_PREFIXES):
         return True
+    if namespace == "url.param_shape":
+        return value.lower() in SEED_PARAM_SHAPES
     return namespace in PARAM_NAMESPACES and value.lower() in SEED_URL_PARAMS
