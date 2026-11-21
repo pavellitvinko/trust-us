@@ -1,0 +1,45 @@
+{
+  "id": "young-gambler",
+  "version": "1",
+  "summary": "24, man, phone only, follows football stars",
+  "matches": "Casino and app-store imitations like sample case 10",
+  "identity": {
+    "first_name": "Kacper",
+    "surname": "Dudek",
+    "age": 24,
+    "sex": "male",
+    "town": "Radom",
+    "voivodeship": "mazowieckie"
+  },
+  "situation": {
+    "occupation": "warehouse worker",
+    "monthly_income_pln": "4300",
+    "savings_band": "under 2000 zł",
+    "family": "single, lives with parents",
+    "health_worries": "none"
+  },
+  "interests": ["football", "Robert Lewandowski", "mobile games", "quick wins", "betting tips"],
+  "fears": ["missing out on what friends are doing", "being stuck in a low-paid job"],
+  "goal": "find out how to get the bonus and start playing",
+  "digital": {
+    "device": "phone",
+    "browser": "chrome",
+    "phone_model": "Xiaomi Redmi Note 13",
+    "viewport": {"width": 393, "height": 873},
+    "platform": "facebook",
+    "reading": "skims",
+    "reading_wpm": 300,
+    "typing_cps": 6.0
+  },
+  "disposition": {"trust": "impulsive", "urgency": "very quick to act on countdowns and bonuses"},
+  "locale": {"locale": "pl-PL", "timezone": "Europe/Warsaw"},
+  "answers": [
+    {"topic": "sex", "patterns": ["płeć", "plec", "gender"], "prefer": ["mężczyzna", "male"]},
+    {"topic": "age", "patterns": ["ile masz lat", "wiek", "how old", "age", "18"], "prefer": ["18–24", "18-24", "18+", "tak"]},
+    {"topic": "experience", "patterns": ["doświadczenie", "grałeś", "experience"], "prefer": ["trochę", "pewne", "some"]},
+    {"topic": "residence", "patterns": ["gdzie.*mieszka", "kraj"], "prefer": ["w polsce", "polska"]},
+    {"topic": "consent", "patterns": ["zgod", "akceptuj", "agree"], "prefer": ["tak", "zgadzam", "yes"]},
+    {"topic": "continue", "patterns": ["chcesz", "ready", "gotow", "graj"], "prefer": ["tak", "chcę", "graj", "yes"]}
+  ],
+  "suggest_keywords": ["kasyno", "casino", "bonus", "spin", "wygran", "zakład", "bet", "gra", "aplikacj", "lewandowski", "mecz", "jackpot"]
+}

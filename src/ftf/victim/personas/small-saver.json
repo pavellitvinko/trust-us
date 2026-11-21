@@ -1,0 +1,48 @@
+{
+  "id": "small-saver",
+  "version": "1",
+  "summary": "39, employed, some savings, curious about crypto",
+  "matches": "Investment and chat funnels",
+  "identity": {
+    "first_name": "Tomasz",
+    "surname": "Krawczyk",
+    "age": 39,
+    "sex": "male",
+    "town": "Łódź",
+    "voivodeship": "łódzkie"
+  },
+  "situation": {
+    "occupation": "employed, logistics planner",
+    "monthly_income_pln": "7800",
+    "savings_band": "20000-50000 zł",
+    "family": "married, two children",
+    "health_worries": "none"
+  },
+  "interests": ["crypto", "ETFs", "YouTube finance channels", "Elon Musk", "side income"],
+  "fears": ["savings losing value to inflation", "missing the next crypto rise"],
+  "goal": "find out how this investment works and how to start",
+  "digital": {
+    "device": "desktop",
+    "browser": "chrome",
+    "viewport": {"width": 1440, "height": 900},
+    "platform": "facebook",
+    "reading": "normal",
+    "reading_wpm": 220,
+    "typing_cps": 5.0
+  },
+  "disposition": {"trust": "somewhat sceptical", "urgency": "resists pressure at first, gives in to proof of profits"},
+  "locale": {"locale": "pl-PL", "timezone": "Europe/Warsaw"},
+  "answers": [
+    {"topic": "sex", "patterns": ["płeć", "plec", "gender"], "prefer": ["mężczyzna", "male"]},
+    {"topic": "residence", "patterns": ["gdzie.*mieszka", "kraj"], "prefer": ["w polsce", "polska"]},
+    {"topic": "age", "patterns": ["ile masz lat", "wiek", "how old", "age"], "prefer": ["25–40", "25-40", "35-44", "30-40"]},
+    {"topic": "children", "patterns": ["dzieci", "children"], "prefer": ["dwoje", "two"]},
+    {"topic": "occupation", "patterns": ["status zawodowy", "pracujesz", "zawód", "occupation"], "prefer": ["zatrudniony", "employed"]},
+    {"topic": "experience", "patterns": ["doświadczenie", "doswiadczenie", "experience"], "prefer": ["pewne doświadczenie", "trochę", "some"]},
+    {"topic": "goal", "patterns": ["cel", "goal"], "prefer": ["długoterminowe oszczędności", "oszczędności", "savings"]},
+    {"topic": "bank_card", "patterns": ["kart", "card"], "prefer": ["polska karta", "polish card"]},
+    {"topic": "amount", "patterns": ["ile.*(zainwestować|wpłacić|przeznaczyć)", "kwot", "how much"], "prefer": ["5000", "do 5000", "2000-5000"]},
+    {"topic": "consent", "patterns": ["zgod", "akceptuj", "agree"], "prefer": ["tak", "zgadzam", "yes"]}
+  ],
+  "suggest_keywords": ["krypto", "bitcoin", "btc", "inwest", "platform", "algorytm", "giełd", "etf", "akcje", "musk", "oszczędno"]
+}

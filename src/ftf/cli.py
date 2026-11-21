@@ -1,4 +1,4 @@
-"""Command line: ftf ingest | run | perceive | views | observations | compare | pairs."""
+"""Command line: ftf ingest | run | perceive | views | observations | compare | pairs | victim."""
 
 from __future__ import annotations
 
@@ -121,6 +121,10 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("pairs", help="list stored evidence, strongest first")
     p.add_argument("--min-score", type=float, default=0.01)
     p.set_defaults(func=cmd_pairs)
+
+    from .victim.cli import add_parser as add_victim_parser
+
+    add_victim_parser(sub)
 
     args = parser.parse_args(argv)
     args.func(args)

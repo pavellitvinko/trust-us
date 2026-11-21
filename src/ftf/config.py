@@ -26,6 +26,8 @@ class Settings:
     openai_model: str
     embedding_model: str
     video_model: str
+    victim_email_domain: str = ""  # team catch-all domain for victim runs (VV-30); empty = none
+    victim_out_dir: Path | None = None  # where victim runs are written; default data_dir/victim
 
     @property
     def db_path(self) -> Path:
@@ -34,6 +36,10 @@ class Settings:
     @property
     def model_cache_dir(self) -> Path:
         return self.data_dir / "model_cache"
+
+    @property
+    def victim_dir(self) -> Path:
+        return self.victim_out_dir or self.data_dir / "victim"
 
 
 def get_settings() -> Settings:
@@ -46,4 +52,6 @@ def get_settings() -> Settings:
         openai_model=env("FTF_OPENAI_MODEL", "gpt-6-luna"),
         embedding_model=env("FTF_EMBEDDING_MODEL", "gemini-embedding-2"),
         video_model=env("FTF_VIDEO_MODEL", "gemini-4-hydrogen"),
+        victim_email_domain=env("FTF_VICTIM_EMAIL_DOMAIN", ""),
+        victim_out_dir=Path(env("FTF_VICTIM_DIR")) if env("FTF_VICTIM_DIR") else None,
     )

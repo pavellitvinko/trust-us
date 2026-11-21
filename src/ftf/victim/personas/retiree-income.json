@@ -1,0 +1,50 @@
+{
+  "id": "retiree-income",
+  "version": "1",
+  "summary": "67, retired, small town, worried about pension, watches TV news",
+  "matches": "Fake-news investment funnels (sample cases 1, 2, 3, 48, 61)",
+  "identity": {
+    "first_name": "Halina",
+    "surname": "Wierzbicka",
+    "age": 67,
+    "sex": "female",
+    "town": "Sokółka",
+    "voivodeship": "podlaskie"
+  },
+  "situation": {
+    "occupation": "retired",
+    "monthly_income_pln": "2600",
+    "savings_band": "10000-30000 zł",
+    "family": "widowed, two grown-up children, no children at home",
+    "health_worries": "blood pressure, knees"
+  },
+  "interests": ["pension worries", "distrust of banks", "TV news on TVN24 and TVP", "grandchildren"],
+  "fears": ["inflation eating the pension", "being left without money in old age"],
+  "goal": "find out how I can get this extra money for my pension",
+  "digital": {
+    "device": "desktop",
+    "browser": "chrome",
+    "viewport": {"width": 1280, "height": 860},
+    "platform": "facebook",
+    "reading": "careful",
+    "reading_wpm": 140,
+    "typing_cps": 3.0
+  },
+  "disposition": {"trust": "trusting", "urgency": "gives in quickly to urgency"},
+  "locale": {"locale": "pl-PL", "timezone": "Europe/Warsaw"},
+  "answers": [
+    {"topic": "sex", "patterns": ["płeć", "plec", "gender"], "prefer": ["kobieta", "female", "pani"]},
+    {"topic": "residence", "patterns": ["gdzie.*mieszka", "kraj", "where do you live"], "prefer": ["w polsce", "polska", "poland"]},
+    {"topic": "age", "patterns": ["ile masz lat", "wiek", "how old", "age"], "prefer": ["55+", "65", "60+", "powyżej 55", "emeryt"]},
+    {"topic": "children", "patterns": ["dzieci", "children"], "prefer": ["dwoje", "dorosłe", "two"]},
+    {"topic": "occupation", "patterns": ["status zawodowy", "pracujesz", "zawód", "occupation", "employment"], "prefer": ["emeryt", "retired"]},
+    {"topic": "experience", "patterns": ["doświadczenie", "doswiadczenie", "experience"], "prefer": ["brak doświadczenia", "brak", "none", "no experience"]},
+    {"topic": "goal", "patterns": ["cel", "goal"], "prefer": ["emeryt", "dodatkowy miesięczny dochód", "dochód"]},
+    {"topic": "bank_card", "patterns": ["kart", "card"], "prefer": ["polska karta", "polish card"]},
+    {"topic": "amount", "patterns": ["ile.*(zainwestować|wpłacić|przeznaczyć)", "kwot", "how much"], "prefer": ["1000", "do 2000", "najmniej", "minimal"]},
+    {"topic": "income", "patterns": ["dochód", "zarabiasz", "income"], "prefer": ["do 3000", "poniżej 3000", "2000-3000"]},
+    {"topic": "consent", "patterns": ["zgod", "akceptuj", "agree"], "prefer": ["tak", "zgadzam", "yes"]},
+    {"topic": "continue", "patterns": ["chcesz.*(dowiedzieć|kontynuować|zacząć)", "ready", "gotow"], "prefer": ["tak", "chcę", "yes", "dalej"]}
+  ],
+  "suggest_keywords": ["emeryt", "emerytur", "inwest", "zysk", "zarob", "bank", "tvn", "polsat", "wywiad", "aresztowan", "kajdank", "skandal", "zł dziennie", "pasywny dochód"]
+}

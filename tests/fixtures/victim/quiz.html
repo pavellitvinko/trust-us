@@ -1,0 +1,36 @@
+<!doctype html><html lang="pl"><head><meta charset="utf-8"><title>Asystentka Ola</title>
+<style>.hidden{display:none}</style></head><body>
+<div class="chat"><div id="log"></div><div class="chat__options" id="opts"></div></div>
+<form id="lead" class="hidden" action="/submit" method="post">
+ <input name="first_name" placeholder="Imię" required>
+ <input name="last_name" placeholder="Nazwisko" required>
+ <input name="email" type="email" placeholder="E-mail" required>
+ <input name="phone" type="tel" placeholder="Telefon (opcjonalnie)">
+ <button type="submit">Wyślij zgłoszenie</button>
+</form>
+<script>
+const steps = [
+ ["Cześć! Jestem Ola. Wpłać tylko 1 150 zł, a w ciągu kilku dni zarobisz nawet 1 800 zł. Jaka jest Twoja płeć?", ["Mężczyzna", "Kobieta"]],
+ ["Ile masz lat?", ["18-24", "25-40", "40-55", "55+"]],
+ ["Czy masz ulubiony kolor?", ["Niebieski", "Zielony"]],
+];
+let i = 0;
+function show() {
+  const log = document.getElementById('log'), opts = document.getElementById('opts');
+  opts.innerHTML = '';
+  if (i >= steps.length) {
+    log.insertAdjacentHTML('beforeend', '<div class="msg msg--bot">Świetnie! Zostaw dane, a doradca się odezwie.</div>');
+    document.getElementById('lead').classList.remove('hidden');
+    return;
+  }
+  setTimeout(() => {
+    log.insertAdjacentHTML('beforeend', '<div class="msg msg--bot">' + steps[i][0] + '</div>');
+    for (const o of steps[i][1]) {
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'chat__option'; b.textContent = o;
+      b.onclick = () => { log.insertAdjacentHTML('beforeend', '<div class="msg msg--user">' + o + '</div>'); i++; show(); };
+      opts.appendChild(b);
+    }
+  }, 300);
+}
+show();
+</script></body></html>
