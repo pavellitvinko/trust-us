@@ -477,3 +477,46 @@ def test_standalone_image_and_its_reencode_are_duplicates(tmp_path):
     assert a.outcome is Outcome.DUPLICATE_OF and a.target == ids[0], a.reasons
     weights.reset()
     s.close()
+
+
+# [P2] uncertainty preserved in open-set assignment ---------------------------------------------
+
+
+def test_differing_screenshots_are_insufficient_not_novel(tmp_path):
+    """Two standalone screenshots with different perceptual hashes: fusion calls the pair
+    insufficient (the identity tier is not comparable), and `assign` must say the same
+    rather than promote adequate coverage into "novel pattern"."""
+    from ftf.fusion import fuse_pair
+    from ftf.ingest import ingest_folder
+
+    from .test_extract_assets import picture
+
+    for name, seed in (("one", 1), ("two", 2)):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "reklama.png").write_bytes(picture(seed))
+    s = Store(":memory:")
+    ids = []
+    for name in ("one", "two"):
+        _, views = ingest_folder(tmp_path / name, s)
+        ids += [v.view_id for v in views if v.kind is ViewKind.IMAGE]
+    pipeline.run_extract(s)
+    pipeline.run_fingerprint(s)
+    g = run_method(s)
+    r = fuse_pair(s, ids[0], ids[1], persist=False)
+    assert r.type is RelationType.INSUFFICIENT and r.coverage >= 0.3, r  # seen, but not separable
+    a = assign(s, ids[1], g, prepared=True)
+    assert a.outcome is Outcome.INSUFFICIENT, a.reasons
+    assert any("identity tier was not comparable" in x for x in a.reasons)
+    weights.reset()
+    s.close()
+
+
+def test_novel_still_needs_only_one_separable_comparison():
+    """The disjoint-set-layer scenario keeps its outcome: those pages carry identity layers,
+    so fusion can call them unrelated and the view is novel."""
+    s = _disjoint_store()
+    prepare(s)
+    a = assign(s, "x:page", prepared=True)
+    assert a.outcome is Outcome.NOVEL and any("identity tier included" in r for r in a.reasons)
+    weights.reset()
+    s.close()

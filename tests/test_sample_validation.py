@@ -3,6 +3,7 @@
 Runs on the organiser sample, model off, and is skipped where the sample is absent. The
 fixture versions of these tables are in test_ablation_candidates.py and stay separate."""
 
+import io
 from pathlib import Path
 
 import pytest
@@ -116,6 +117,10 @@ def test_unresolved_reference_pairs_are_not_evaluated():
         ("61:business", "61:chat"),
     }
     assert len(report.evaluated) == 52 and report.agreement == 1.0 and not report.false_merges
+    # per-type rates follow the headline: the two unresolved family pairs are not recall misses
+    family = report.by_type[RelationType.SAME_FAMILY]
+    assert family.reference == family.exact and family.recall == 1.0
+    assert sum(t.reference for t in report.by_type.values()) == len(report.evaluated)
 
 
 def test_degradation_on_real_files(base, tmp_path):
@@ -242,3 +247,79 @@ def test_derive_tree_never_touches_the_originals(tmp_path):
         "shot.png",
     ]
     assert {p: p.read_bytes() for p in src.rglob("*") if p.is_file()} == before
+
+
+def test_reencode_rewrites_the_image_bodies_inside_a_har(tmp_path):
+    """The asset extractor hashes HAR response bodies too, so the re-encoding scenario must
+    reach them: an original image kept inside the HAR would keep its exact hash alive."""
+    import base64
+    import json
+
+    import imagehash
+    from PIL import Image
+
+    from .test_extract_assets import picture
+
+    png = picture(7)
+    har = {
+        "log": {
+            "entries": [
+                {
+                    "request": {"url": "https://x.example/hero.png"},
+                    "response": {
+                        "content": {
+                            "mimeType": "image/png",
+                            "encoding": "base64",
+                            "text": base64.b64encode(png).decode(),
+                        }
+                    },
+                },
+                {
+                    "request": {"url": "https://x.example/logo.svg"},
+                    "response": {"content": {"mimeType": "image/svg+xml", "text": "<svg></svg>"}},
+                },
+                {
+                    "request": {"url": "https://x.example/"},
+                    "response": {"content": {"mimeType": "text/html", "text": "<html>same</html>"}},
+                },
+            ]
+        }
+    }
+    src, dst = tmp_path / "x.har", tmp_path / "out" / "x.har"
+    src.write_text(json.dumps(har))
+    assert sample.reencode_image(src, dst)
+    out = json.loads(dst.read_text())["log"]["entries"]
+    body = base64.b64decode(out[0]["response"]["content"]["text"])
+    assert body != png  # the exact hash is gone
+    assert body == sample.reencode_bytes(png, "PNG")  # the same damage an image file gets
+    original, damaged = Image.open(io.BytesIO(png)), Image.open(io.BytesIO(body))
+    assert imagehash.phash(original) - imagehash.phash(damaged) <= 10  # the picture is not
+    assert "text" not in out[1]["response"]["content"]  # undecodable image body dropped
+    assert out[2]["response"]["content"]["text"] == "<html>same</html>"  # non-image untouched
+    assert json.loads(src.read_text()) == har  # the original is never changed
+    # a HAR without any image body is left to the plain copy
+    (tmp_path / "plain.har").write_text(json.dumps({"log": {"entries": [out[2]]}}))
+    assert not sample.reencode_image(tmp_path / "plain.har", tmp_path / "out" / "plain.har")
+
+
+def test_reencoded_folders_keep_no_original_content_hash(base, tmp_path):
+    """On the real sample: after the image scenario, no exact content hash of folders 2 and
+    61 survives through any source, file or HAR body."""
+    scenario = next(s for s in sample.scenarios(base) if s.name.startswith("images re-encoded"))
+    damaged = tmp_path / "sample"
+    scenario.build(SAMPLE, damaged)
+    store = sample.extracted(damaged)
+
+    def content_hashes(s, incidents):
+        return {
+            o.value
+            for v in s.views()
+            if v.incident_id in incidents
+            for o in s.observations(v.view_id)
+            if o.namespace == "asset.sha256.content"
+        }
+
+    before, after = content_hashes(base, {"2", "61"}), content_hashes(store, {"2", "61"})
+    store.close()
+    assert before and after
+    assert before & after == set(), sorted(before & after)[:5]
