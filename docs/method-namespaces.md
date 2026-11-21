@@ -69,11 +69,11 @@ the pair at *same family*. Everything else may rotate between deployments.
 | --- | --- | --- | --- |
 | `asset.exact` | `asset.sha256` | SHA-256 hex of content images; not logos, icons or libraries | E1 |
 | | `avatar.sha256` | SHA-256 hex of fake-commenter avatars | E12 |
-| `text.shingle` | `text.body` | cleaned article body as one string: comments, navigation, widgets removed | F1 |
+| `text.shingle` | `page.body_text` (else `text.body`, else `page.clean_text`) | article body as one string: comments, navigation, widgets removed | F1 |
 | `asset.perceptual` | `image.phash` | 64-bit grayscale pHash, 16 hex chars, one row per image | E2 |
 | `ad.creative` | `creative.phash`, `creative.ocr_text` | pHash of the ad image; OCR text | L2, L3, E11 |
 | `media.video` | `video.frame_phash` | pHash per sampled key frame | M1 |
-| `text.semantic` | `text.body` | (same input as text.shingle; embedded by the layer) | F2 |
+| `text.semantic` | `page.body_text` | (same input as text.shingle; embedded by the layer) | F2 |
 
 ## Kit tier (T3): supports *same family*
 
@@ -100,7 +100,7 @@ the pair at *same family*. Everything else may rotate between deployments.
 
 | Layer | Namespace | Value shape | Catalogue |
 | --- | --- | --- | --- |
-| `narrative.skeleton` | `text.body` | (masked and embedded by the layer) | F3 |
+| `narrative.skeleton` | `page.body_text` | (masked and embedded by the layer) | F3 |
 | `pattern.mo` | `pattern.score` | `{"pattern": "<library id>", "score": 0..1}` one row per pattern | H, §6 |
 | `kit.absence` | `expect.element` | value = element id, `state` = present / absent / not_observable | K, §6 |
 | `entity.cast` | `entity.cast` | `{"entity": "<name>", "role": "<role>"}` | G1, G3 |
