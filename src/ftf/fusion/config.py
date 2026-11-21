@@ -55,6 +55,12 @@ class FusionConfig:
     kit: float = 0.7
     playbook: float = 0.7
     min_coverage: float = 0.3
+    # identity groups that cannot make a campaign alone: a shared domain shows shared
+    # infrastructure (a white page, a shared host), not the same campaign. It needs one more
+    # independent group: another identity group, an artifact group, or the kit tier.
+    identity_solo_groups: tuple[str, ...] = ("domain",)
+    # "unrelated, high" needs this coverage and both the identity and artifact tiers seen
+    unrelated_high_coverage: float = 0.6
     # namespaces where two different values are a contradiction (one record per page)
     exclusive_namespaces: tuple[str, ...] = ("aio.campaign_uuid", "aio.owner_uuid")
     # a shared value here anchors a duplicate: same landing, or the same primary file
@@ -76,7 +82,12 @@ class FusionConfig:
     @classmethod
     def load(cls, path: Path) -> FusionConfig:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
-        for key in ("exclusive_namespaces", "duplicate_anchors", "duplicate_anchor_layers"):
+        for key in (
+            "exclusive_namespaces",
+            "duplicate_anchors",
+            "duplicate_anchor_layers",
+            "identity_solo_groups",
+        ):
             if key in data:
                 data[key] = tuple(data[key])
         return cls(**data)

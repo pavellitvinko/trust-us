@@ -1,118 +1,150 @@
-"""Suspicion summary: reasons why one view is suspicious, grouped by risk kind.
+"""Suspicion summary: why one view is suspicious, as reasons grouped by kind (architecture §11).
 
-Each reason links to its observation and source. The level is the count of independent
-kinds that produced reasons.
-
-Design: docs/architecture.md §11, signal-catalogue.md groups C, G, J, H.
+The level is the number of independent kinds with a reason. It is not a classifier score.
+Every reason names its observation and source. A kind whose inputs are missing is reported as
+unchecked, so a missing stage never reads as a clean result.
 """
 
 from __future__ import annotations
 
-from ftf.contracts import Observation, SuspicionReason, SuspicionSummary, Source, Purpose
+from typing import Any
 
+from pydantic import BaseModel, ConfigDict, Field
 
-# Mapping of observation namespaces to suspicion kinds and readable summaries.
-# Key: (namespace_prefix, purpose_requirement)
-# Value: (kind, signal_id, reason_template)
-_REASON_KINDS = {
-    # Domain risk (C1, C4, C6, C9, C13)
-    "domain.age": ("domain", "C1", "domain registered {value} days ago"),
-    "domain.tld_risk": ("domain", "C4", "risky TLD: {value}"),
-    "domain.lookalike": ("domain", "C6", "domain looks like {value}"),
-    "domain.prior_life": ("domain", "C9", "domain re-registered; prior life {value}"),
-    "domain.dead": ("domain", "C13", "domain currently dead or sinkholed"),
-    # Impersonation risk (G2, G3)
-    "entity.impersonation": ("impersonation", "G2", "impersonates {value}"),
-    "entity.institution": ("impersonation", "G3", "invokes authority: {value}"),
-    "entity.mismatch": ("impersonation", "G2", "claimed publisher {claimed} ≠ host {host}"),
-    # Absent mandatory elements (K, from expectations library)
-    "element.absent": ("absent_elements", "K", "expected element missing: {value}"),
-    # Evasion risk (E13, J1, J5, J6, J7)
-    "evasion.visual_filter": ("evasion", "E13", "visual-hash evasion filter detected"),
-    "evasion.cloaking": ("evasion", "J1", "content differs across captures ({value})"),
-    "evasion.gating": ("evasion", "J5", "page requires {value} to show offer"),
-    "evasion.text_obfuscation": ("evasion", "J6", "text obfuscated: {value}"),
-    "evasion.stale_content": ("evasion", "J7", "decoy content dated {value}"),
-    # Persuasion patterns (H1–H19)
-    "pattern.celebrity": ("persuasion", "H1", "celebrity presented as endorser"),
-    "pattern.fake_news": ("persuasion", "H2", "fake news-article framing"),
-    "pattern.suppression": ("persuasion", "H3", "suppression story: {value}"),
-    "pattern.violence": ("persuasion", "H4", "violence/arrest as hook"),
-    "pattern.distrust": ("persuasion", "H5", "distrust narrative: {value}"),
-    "pattern.proof_image": ("persuasion", "H6", "profit proof image shown"),
-    "pattern.regulator": ("persuasion", "H7", "regulator/state backing claimed"),
-    "pattern.authority": ("persuasion", "H8", "authority figure in uniform"),
-    "pattern.scarcity": ("persuasion", "H9", "scarcity pressure: {value}"),
-    "pattern.countdown": ("persuasion", "H10", "countdown timer detected"),
-    "pattern.discount": ("persuasion", "H11", "deep discount with crossed-out price"),
-    "pattern.fake_comments": ("persuasion", "H12", "embedded fake social comments"),
-    "pattern.gamification": ("persuasion", "H13", "gamified discount (wheel/boxes)"),
-    "pattern.chatbot": ("persuasion", "H14", "chatbot/quiz qualification gate"),
-    "pattern.callback": ("persuasion", "H15", "callback promise: {value}"),
-    "pattern.health_claim": ("persuasion", "H16", "miracle health claim"),
-    "pattern.marketplace": ("persuasion", "H17", "app-store/marketplace imitation"),
-    "pattern.video_sales": ("persuasion", "H18", "video sales letter with sound prompt"),
-    "pattern.low_entry": ("persuasion", "H19", "low entry threshold: {value}"),
+from ..contracts import Observation, Source, State
+
+KINDS = ("domain", "impersonation", "absent_elements", "evasion", "persuasion")
+YOUNG_DOMAIN_DAYS = 365
+
+# A kind counts as checked when one of these inputs was observed.
+_INPUTS = {
+    "domain": ("url.host", "domain.registrable"),
+    "impersonation": ("page.read_text", "image.text"),
+    "absent_elements": ("expect.element",),
+    "evasion": ("page.clean_text", "page.body_text"),
+    "persuasion": ("pattern.score", "markup."),
+}
+_MARKUP = {
+    "markup.countdown": "countdown timer",
+    "markup.crossed_price": "crossed-out price",
+    "markup.stock_counter": "low-stock counter",
 }
 
 
-def reason_summary_for_view(
-    view_id: str, observations: list[Observation]
-) -> SuspicionSummary:
-    """Generate a suspicion summary for one view.
+class SuspicionReason(BaseModel):
+    model_config = ConfigDict(extra="forbid")
 
-    Groups RISK observations by kind and builds readable reasons with links to sources.
+    kind: str
+    signal_id: str
+    namespace: str
+    summary: str
+    value: Any = None
+    quote: str | None = None
+    observation_ref: str  # extractor/namespace#position among this view's observations
+    source: Source = Field(default_factory=Source)
 
-    Args:
-        view_id: the view identifier
-        observations: all observations for this view
 
-    Returns:
-        SuspicionSummary with reasons grouped by kind and level = count of kinds
-    """
-    reasons_by_kind: dict[str, list[SuspicionReason]] = {}
+class SuspicionSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
 
-    for obs in observations:
-        # Only consider RISK-tagged observations
-        if obs.purpose not in (Purpose.RISK, Purpose.BOTH):
+    view_id: str
+    level: int
+    reasons_by_kind: dict[str, list[SuspicionReason]] = Field(default_factory=dict)
+    unchecked_kinds: list[str] = Field(default_factory=list)
+
+
+def _compact(text: str) -> str:
+    return "".join(ch for ch in text.casefold() if ch.isalnum())
+
+
+def _hosts(observations: list[Observation]) -> list[str]:
+    return [
+        _compact(str(o.value))
+        for o in observations
+        if o.namespace in ("url.host", "domain.registrable")
+        and o.state is State.PRESENT
+        and o.value
+    ]
+
+
+def _claim_differs(claimed: str, hosts: list[str]) -> bool:
+    """True only when a host is known and does not carry the claimed name."""
+    name = _compact(claimed)
+    return bool(name and hosts) and not any(name in host for host in hosts)
+
+
+def _describe(o: Observation, hosts: list[str]) -> tuple[str, str, str] | None:
+    """(kind, signal, summary) when this observation is a reason, otherwise None."""
+    ns, value = o.namespace, o.value
+    if ns == "expect.element":
+        if o.state is State.ABSENT:
+            return "absent_elements", "K", o.raw or f"expected element not found: {value}"
+        return None
+    if o.state is not State.PRESENT:
+        return None
+    if ns == "domain.tld_risk" and value == "high":
+        return "domain", "C4", f"high-risk TLD class: {o.raw or value}"
+    is_age = ns == "rdap.domain_age_days" and isinstance(value, int | float)
+    if is_age and 0 <= value < YOUNG_DOMAIN_DAYS:
+        return "domain", "C1", f"domain registered {int(value)} days before capture"
+    if ns.startswith("warning.") and isinstance(value, dict):
+        result = value.get("result")
+        source = ns.removeprefix("warning.")
+        if result == "listed":
+            return "domain", o.signal_id, f"listed in warning source: {source}"
+        if result == "possible_match":
+            return "domain", o.signal_id, f"possible warning-list match, verify: {source}"
+    if ns == "image.claimed_publisher" and _claim_differs(str(value), hosts):
+        return "impersonation", "G2", f"claimed publisher {value} is not the host"
+    if ns == "image.imitated_interface":
+        return "impersonation", "G2", f"imitates interface: {value}"
+    is_org = ns == "page.entity.organisation" and isinstance(value, dict)
+    if is_org and value.get("role") == "regulator_invoked":
+        return "impersonation", "G3", f"invokes institution: {value.get('name')}"
+    if ns == "dom.evasion_filter":
+        return "evasion", "E13", f"visual-evasion filter: {value}"
+    if ns == "kit.cloaker":
+        return "evasion", "J1", f"cloaking kit marker: {value}"
+    if ns in _MARKUP:
+        return "persuasion", o.signal_id, f"{_MARKUP[ns]}: {value}"
+    if ns == "pattern.score" and isinstance(value, dict) and value.get("score", 0) >= 0.5:
+        return "persuasion", "H", f"technique pattern: {value.get('pattern')}"
+    return None
+
+
+def _checked(kind: str, observations: list[Observation]) -> bool:
+    return any(
+        o.namespace.startswith(_INPUTS[kind]) and o.state is not State.NOT_OBSERVABLE
+        for o in observations
+    )
+
+
+def reason_summary_for_view(view_id: str, observations: list[Observation]) -> SuspicionSummary:
+    hosts = _hosts(observations)
+    grouped: dict[str, list[SuspicionReason]] = {}
+    seen: set[tuple[str, str]] = set()
+    for position, o in enumerate(observations):
+        found = _describe(o, hosts)
+        if found is None or (o.namespace, found[2]) in seen:
             continue
-        if obs.state.value == "not_observable":
-            continue
-
-        # Find the mapping for this namespace
-        kind, signal_id, template = None, None, None
-        for ns_prefix, (k, sig, tmpl) in _REASON_KINDS.items():
-            if obs.namespace.startswith(ns_prefix):
-                kind, signal_id, template = k, sig, tmpl
-                break
-
-        if kind is None:
-            continue  # Unmapped namespace; skip
-
-        # Build the reason summary from the template
-        try:
-            summary = template.format(value=obs.value or "")
-        except (KeyError, ValueError):
-            summary = template  # Fallback if formatting fails
-
-        reason = SuspicionReason(
-            kind=kind,
-            signal_id=signal_id,
-            namespace=obs.namespace,
-            summary=summary,
-            value=obs.value,
-            quote=None,  # Will be populated if extracted by verification layer
-            observation_id=obs.signal_id,
-            source=obs.source,
+        seen.add((o.namespace, found[2]))
+        kind, signal, summary = found
+        grouped.setdefault(kind, []).append(
+            SuspicionReason(
+                kind=kind,
+                signal_id=signal,
+                namespace=o.namespace,
+                summary=summary,
+                value=o.value,
+                quote=o.raw if o.state is State.PRESENT else None,
+                observation_ref=f"{o.extractor}/{o.namespace}#{position}",
+                source=o.source,
+            )
         )
-
-        if kind not in reasons_by_kind:
-            reasons_by_kind[kind] = []
-        reasons_by_kind[kind].append(reason)
-
-    # Level = number of independent kinds with reasons
-    level = len(reasons_by_kind)
-
+    ordered = {kind: grouped[kind] for kind in KINDS if kind in grouped}
     return SuspicionSummary(
-        view_id=view_id, level=level, reasons_by_kind=reasons_by_kind
+        view_id=view_id,
+        level=len(ordered),
+        reasons_by_kind=ordered,
+        unchecked_kinds=[k for k in KINDS if k not in ordered and not _checked(k, observations)],
     )

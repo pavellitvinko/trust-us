@@ -82,23 +82,26 @@ def cheap_relation(store: Store, a: str, b: str, config: FusionConfig = DEFAULT)
     fps_a = {f.layer_id: f for f in store.fingerprints(view_id=a)}
     fps_b = {f.layer_id: f for f in store.fingerprints(view_id=b)}
     comparable_groups: set[str] = set()
+    tiers_seen: set[Tier] = set()
     for layer_id in fps_a.keys() & fps_b.keys():
         layer = layers.get(layer_id)
         check = getattr(comparators.get(layer.comparator), "compatible", None)
         if check is None or check(fps_a[layer_id], fps_b[layer_id]):
             comparable_groups.add(layer.group)
+            tiers_seen.add(layer.tier)
     total = {layer.group for layer in layers.all()}
     if active_groups() is not None:
         total &= active_groups()
     coverage = len(comparable_groups & total) / len(total) if total else 0.0
-    rtype = RelationType.UNRELATED if coverage >= config.min_coverage else RelationType.INSUFFICIENT
+    # the same rule as fusion: unrelated needs the identity tier comparable, high also artifact
+    separable = coverage >= config.min_coverage and Tier.IDENTITY in tiers_seen
+    rtype = RelationType.UNRELATED if separable else RelationType.INSUFFICIENT
+    high = coverage >= config.unrelated_high_coverage and Tier.ARTIFACT in tiers_seen
     return Relation(
         view_a=a,
         view_b=b,
         type=rtype,
-        confidence="high"
-        if rtype is RelationType.UNRELATED and coverage >= 0.6
-        else ("low" if rtype is RelationType.UNRELATED else ""),
+        confidence=("high" if high else "low") if separable else "",
         coverage=round(coverage, 4),
         tier_scores={t.value: 0.0 for t in (Tier.IDENTITY, Tier.ARTIFACT, Tier.KIT, Tier.PLAYBOOK)},
         reasons=["not a candidate: the two views share no indexed value, band or dense layer"],

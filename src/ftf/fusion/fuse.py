@@ -5,7 +5,8 @@
     coverage    = share of correlation groups comparable on both sides
 
 Decisions in order, strongest first: duplicate, same campaign, same family, same playbook,
-unrelated, insufficient evidence. A contradiction caps the pair at family. Demoted values
+unrelated, insufficient evidence. A contradiction caps the pair at family. So does identity
+that rests on the shared domain alone: it needs a second independent group to be a campaign. Demoted values
 are moved from identity to kit before any score is computed. Playbook evidence never
 reaches the first three rules. Nothing here is asserted by a model.
 """
@@ -59,6 +60,8 @@ class Fused:
     anchors: list[Key]
     duplicate_text: float | None  # None when the text layer is not comparable
     coverage: float
+    comparable_groups: int = 0  # the coverage fraction, as counts
+    total_groups: int = 0
 
 
 def _rescore(items: list[dict]) -> float:
@@ -149,6 +152,8 @@ def summarise(
         anchors=sorted(set(anchors)),
         duplicate_text=duplicate_text,
         coverage=covered / total if total else 0.0,
+        comparable_groups=covered,
+        total_groups=total,
     )
 
 
@@ -188,8 +193,16 @@ def decide(f: Fused, config: FusionConfig = DEFAULT) -> tuple[RelationType, str,
 
     # 2. same campaign: identity, or two independent artifact groups; never across a contradiction
     strong_artifact = [g for g, s in t2.groups.items() if s >= config.artifact_group_floor]
+    # Identity resting on a solo group (the domain) with nothing else agreeing is not a campaign.
+    solo = (
+        t1.score >= config.identity
+        and bool(t1.agreeing)
+        and all(g in config.identity_solo_groups for g in t1.agreeing)
+        and not strong_artifact
+        and t3.score < config.kit
+    )
     if not f.contradictions:
-        if t1.score >= config.identity:
+        if t1.score >= config.identity and not solo:
             reasons.append(agree(t1, "identity"))
             return (
                 RelationType.SAME_CAMPAIGN,
@@ -212,6 +225,13 @@ def decide(f: Fused, config: FusionConfig = DEFAULT) -> tuple[RelationType, str,
             _confidence(t3.score, f.coverage, len(t3.agreeing), config.kit),
             reasons,
         )
+    if solo and not f.contradictions:
+        reasons.append(agree(t1, "identity"))
+        reasons.append(
+            f"shared {' and '.join(t1.agreeing)} only: no second independent group agrees, so "
+            "this is shared infrastructure, not a campaign link (possible white page or shared host)"
+        )
+        return RelationType.SAME_FAMILY, "low", reasons
     if f.contradictions and (t2.score >= config.artifact or t1.score >= config.identity):
         reasons.append(
             agree(t2, "artifact") if t2.score >= config.artifact else agree(t1, "identity")
@@ -229,10 +249,26 @@ def decide(f: Fused, config: FusionConfig = DEFAULT) -> tuple[RelationType, str,
         )
 
     # 5. nothing above: unrelated if we saw enough, else insufficient
+    counts = f"{f.comparable_groups} of {f.total_groups} groups comparable"
+    # A separation is a claim too. It needs the identity tier seen on both sides: without
+    # it, the evidence that defines a campaign is unavailable, and unavailable is not absent
+    # (two screenshots whose hashes differ are not thereby unrelated).
+    if f.coverage >= config.min_coverage and t1.groups:
+        reasons.append(f"no tier reached its threshold; coverage {f.coverage:.2f} ({counts})")
+        for tier, label in ((t1, "identity"), (t2, "artifact"), (t3, "kit"), (t4, "playbook")):
+            if tier.score >= 0.1:
+                reasons.append("below threshold, not used: " + agree(tier, label))
+        if not t2.groups:
+            reasons.append("not comparable: artifact tier; separation is low confidence")
+        high = f.coverage >= config.unrelated_high_coverage and bool(t2.groups)
+        return RelationType.UNRELATED, "high" if high else "low", reasons
     if f.coverage >= config.min_coverage:
-        reasons.append(f"no tier reached its threshold; coverage {f.coverage:.2f}")
-        return RelationType.UNRELATED, "high" if f.coverage >= 0.6 else "low", reasons
-    reasons.append(f"too few comparable layers: coverage {f.coverage:.2f}")
+        reasons.append(
+            f"identity tier not comparable on both sides: the pair cannot be called unrelated; "
+            f"coverage {f.coverage:.2f} ({counts})"
+        )
+    else:
+        reasons.append(f"too few comparable layers: coverage {f.coverage:.2f} ({counts})")
     return RelationType.INSUFFICIENT, "", reasons
 
 

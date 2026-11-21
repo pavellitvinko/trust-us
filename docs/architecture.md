@@ -242,8 +242,8 @@ A warning-list hit is strong risk evidence. The reverse does not hold: not being
 
 | Enricher | Adds | MVP |
 | --- | --- | --- |
-| DNS | A, NS, MX; name-server pair; dead or parked status | Yes |
-| RDAP | Registration date, registrar → domain age at capture | Yes |
+| DNS | A, NS, MX; name-server pair; dead or parked status | Yes (`enrich/dns_lookup.py`). Name-server pair falls back to the RDAP delegation when the zone gives no NS |
+| RDAP | Registration date, registrar → domain age at capture | Yes (`enrich/rdap.py`). Capture time from the HAR, else the bundle manifest, else lookup time (marked). Coverage confirmed 2026-11-21 for `.live .pro .xyz .top .icu .life .org .com` |
 | Certificate transparency | Issuer, first-seen, sibling host names, evidence of a prior life | Yes |
 | National phishing warning list (CERT Polska) | Domain listed / not listed | Yes. Public file, refreshed at start-up, matched locally. Confirmed reachable 2026-11-21 |
 | Financial regulator's public warning list (KNF) | Named entity or domain listed; a hit is also a link between views naming the same listed entity | Yes. The public page parses as tables (about 680 rows on 2026-11-21); scraped at start-up, snapshot kept in the image. Brand and offer names are matched with normalisation and fuzzy matching |
@@ -388,6 +388,14 @@ Confidence is reported as a label derived from score, coverage and how many inde
 
 Decisions in order: **duplicate** (shared `url.host_path` or primary hash, or an ad creative within 6 bits, and text ≥ 0.9 or absent); **same campaign** (identity ≥ 0.8, or artifact ≥ 0.8 from two groups; never across a contradiction); **same family** (kit ≥ 0.7, or a contradiction with strong artifact or identity evidence); **same playbook** (playbook ≥ 0.7); **unrelated** (coverage ≥ 0.3); **insufficient evidence**. Contradictions are computed from fingerprints over the exclusive namespaces, and every identity value shared across a contradicting pair is demoted corpus-wide; demoted items are re-scored inside the kit tier under a `demoted:<group>` group. On the sample's fixtures the demoted set is exactly `APPA-165`, `shadowtracecore.com`, `/v1/landing/form-event` and `showflashdaily.com`. Confidence is a label: high (score ≥ 0.9, two agreeing groups, coverage ≥ 0.4), medium, low.
 
+**Changed 2026-11-21 (HAC-54), after the first real-sample runs.** Three rules, all in `fuse.py` and `layers/ids_domain.py`:
+
+- *A shared domain alone is not a campaign.* Identity that rests only on the `domain` group, with no artifact group ≥ 0.5 and the kit tier under its threshold, gives **same family, low** with the reason "shared domain only". On the sample this moved the case-61 business page out of the article and chat campaign: the three pages share `glowpixel.org` and nothing else. The groups that cannot stand alone are `FusionConfig.identity_solo_groups`.
+- *One fact is counted once.* `url.host` is dropped from the `ids.domain` fingerprint when it equals the registrable domain; counted twice, one shared domain scored 0.99.
+- *A separation needs evidence too.* **Unrelated** requires the identity tier to be comparable on both sides, and **unrelated, high** also the artifact tier and coverage ≥ 0.6. Otherwise the pair is **insufficient evidence**, whatever its coverage: two screenshots whose hashes differ are not thereby unrelated. Similarity below a threshold is listed in the reasons as "below threshold, not used".
+
+Measured results of these rules on the organiser files are in [method-results-real-sample.md](method-results-real-sample.md).
+
 ---
 
 ## 10. Grouping and assigning new material
@@ -417,7 +425,7 @@ followed by the ranked related items at each level. "Novel pattern" and "insuffi
 
 `grouping/funnel.py`: inside an incident an ad or screenshot joins a page only with evidence (shown domain = page host, shared ad ID, shared brand or named person, redirect or stored navigation naming the landing); `co_captured` edges are returned for display and never grouped; with pages present and no evidence, a `funnel.mismatch` observation (purpose risk) is written instead. Campaign membership propagates along funnel edges (`ftf incidents`).
 
-`grouping/assign.py`: candidates from the identifier index (`store.views_with_value`, weight > 0) plus every view sharing a hash or vector layer; six outcomes in the order duplicate of X, new variant of campaign C, new campaign in family F, new campaign with known playbook P, novel pattern (compared at adequate coverage, no tier reached), insufficient evidence; ranked related items per relation type (`ftf assign`, `ftf loio`).
+`grouping/assign.py`: candidates from the identifier index (`store.views_with_value`, weight > 0) plus every view sharing a hash or vector layer; six outcomes in the order duplicate of X, new variant of campaign C, new campaign in family F, new campaign with known playbook P, novel pattern (at least one comparison fusion itself could call unrelated: adequate coverage with the identity tier seen on both sides, no tier reached), insufficient evidence (nothing could be called unrelated, however much was compared: two differing screenshots stay uncertain); ranked related items per relation type (`ftf assign`, `ftf loio`).
 
 `grouping/candidates.py`: inverted index plus MinHash bands (band size 4) plus dense-layer buckets; on the fixtures 81 of 171 pairs are compared in full and the relation table, coverage and all three group levels are identical to the all-pairs run (`ftf run --candidates`).
 
@@ -508,6 +516,8 @@ The organiser sample was not on the build machine, so every number below is on `
 
 **Runs on the organiser sample (2026-11-21).** With the reference extractor only: 30 observations, all domains; one duplicate found, everything else insufficient evidence. After the Evidence track's identifier, conversion and kit extractors landed (HAC-8, 9, 10): 502 observations, 65 fingerprints, and `ftf eval` reports 75 % agreement (56 % exact), **0 false merges**: duplicate 2/2, same campaign 4/4 at precision 1.0 (1 ↔ 2 across domains, both case-14 landings, 61 article ↔ chat), same family 2/3 (48 ↔ 61 article and chat through the template UUID, bundle and demoted form host; the 1/2 ↔ 61 `main.css` link waits on the asset-hash extractor), unrelated precision 0.78 and recall 0.64. The misses are all pairs that need an extractor that does not exist yet: the cleaned body text (`page.clean_text`) for text and narrative, image and video hashes, DOM classes, and the model readings (`ftf perceive` needs a key). Coverage is measured over the correlation groups observed anywhere in the corpus, so layers nobody can build yet do not push every pair to insufficient; pairs involving the case-3 screenshot, which carries no observation at all, still are.
 
+**Real-file validation (HAC-54).** Reference agreement, the checkpoint outcomes, the negative pairs, the confidence audit, degradation on damaged copies of the files, layer ablation and leave-one-incident-out, all model off and on fresh stores, are generated into [method-results-real-sample.md](method-results-real-sample.md) by `ftf validate`. Those are real-sample measurements; everything above this paragraph that is not labelled as a sample run is fixture evidence.
+
 **What was cut or left unverified:** the Gemini embedder path has no live-key run; `narrative.skeleton` closeness of the Brzoska, Olejnik and Lis stories is verified only as an ordering with the fake embedder (above the unrelated pairs, above the name-keeping semantic layer), not as an absolute score; `visual.layout` is a named-block stand-in, not an embedding; threshold tuning stayed at the hand-set values because they reproduce the reference without a false merge; groups are not persisted.
 
 ---
@@ -578,7 +588,7 @@ Nothing is built yet. Every status below says whether the design covers the poin
 | …likenesses of people | Names from text, captions, file names; reused portrait images matched whole (§5) | Must | No face detection or cropping in the stack. Naming a face with no name anywhere in the material needs the face-reference layer, which is a stretch item |
 | …logos, visual features | Vision model reading of screenshots; perceptual hashes; layout embedding | Must / Should | Logo detection rests on the vision model alone |
 | …domains, redirects, links, page structure | HAR and HTML parsers; redirect trace in capture; DOM and class fingerprints | Must | Archived HARs in the sample contain no cross-site redirect chains |
-| …public domain and infrastructure metadata | DNS, RDAP, certificate enrichers; regulator and warning lists (§7) | Must; certificates Should | RDAP confirmed for `.org` only. The gambling register cannot be fetched by script and ships as a manual snapshot |
+| …public domain and infrastructure metadata | DNS, RDAP, certificate enrichers; regulator and warning lists (§7) | Must; certificates Should | RDAP confirmed 2026-11-21 for every TLD in the sample (`.live .pro .xyz .top .icu .life .org .com`). The gambling register cannot be fetched by script and ships as a manual snapshot |
 | Turn the data into comparable features | 22 fingerprint layers (§8) | Must for the scripted layers, Should for most model-based ones | — |
 | Identify duplicates and variants of one message | *Duplicate* and *same campaign* relations (§9) | Must | — |
 | Propose a similarity and grouping method, into campaigns or groups of similar campaigns | Typed fusion; campaign, family and playbook levels (§9–10) | Must | Thresholds set by hand on ten incidents |

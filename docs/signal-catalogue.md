@@ -250,7 +250,7 @@ All optional, cached, and timestamped. A failed lookup yields `not observable`, 
 
 | # | Check | Source | Status on 2026-11-21 |
 | --- | --- | --- | --- |
-| N1 | Domain registration date, registrar, name servers | RDAP | Responded for `.org`; coverage of `.live .pro .xyz .top .icu .life` to be confirmed per TLD |
+| N1 | Domain registration date, registrar, name servers | RDAP (IANA bootstrap) | In MVP. Confirmed 2026-11-21 for every sample TLD: `.live .pro .life` (Identity Digital), `.xyz .icu` (CentralNic), `.top` (ZDNS), `.org` (PIR), `.com` (Verisign) |
 | N2 | Certificate history, sibling host names | crt.sh (CT logs) | Responded, JSON |
 | N3 | Domain on the national phishing warning list | CERT Polska list (`hole.cert.pl`) | In MVP. Responded, JSON (~22 MB) and plain text; downloaded once and matched locally |
 | N4 | Entity on the financial regulator's public warning list | KNF | In MVP. Public page responded and parses as tables, about 680 rows |
