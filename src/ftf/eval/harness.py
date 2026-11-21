@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from ..contracts import Relation, RelationType
-from .reference import STRENGTH, ReferencePair, load_reference
+from .reference import STRENGTH, ReferencePair, load_reference, resolve_view
 
 if TYPE_CHECKING:
     from ..store import Store
@@ -109,8 +109,10 @@ def evaluate(store: Store, reference: list[ReferencePair] | None = None) -> Repo
     results = []
     for ref in reference:
         if ref.level == "view":
-            r = by_views.get((ref.a, ref.b))
-            results.append(PairResult(ref, r.type if r else None, None))
+            a, b = resolve_view(store, ref.a), resolve_view(store, ref.b)
+            r = by_views.get(tuple(sorted((a, b)))) if a and b else None
+            via = (a, b) if a and b and (a, b) != (ref.a, ref.b) else None
+            results.append(PairResult(ref, r.type if r else None, via))
         else:
             hit = by_incidents.get((ref.a, ref.b))
             results.append(PairResult(ref, hit[0].type if hit else None, hit[1] if hit else None))

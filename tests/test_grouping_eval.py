@@ -119,3 +119,64 @@ def test_false_merge_is_counted(grouped):
     assert not report.false_merges  # we say unrelated, which is a disagreement, not a merge
     fake = ReferencePair(a="1", b="2", expected=RelationType.SAME_PLAYBOOK)
     assert evaluate(s, [fake]).false_merges  # a campaign link where only playbook is allowed
+
+
+def test_reference_aliases_resolve_against_real_view_ids():
+    from ftf.contracts import Incident, View, ViewKind
+    from ftf.eval.reference import resolve_view
+    from ftf.store import Store
+
+    s = Store(":memory:")
+    s.put_incident(
+        Incident(incident_id="61", root="/x"),
+        [],
+        [
+            View(
+                view_id="61:aaa",
+                incident_id="61",
+                kind=ViewKind.PAGE,
+                label="a",
+                primary="strona_1/art.html",
+                meta={"origin": "saved_page"},
+            ),
+            View(
+                view_id="61:bbb",
+                incident_id="61",
+                kind=ViewKind.PAGE,
+                label="b",
+                primary="strona_2/chat.html",
+                meta={"origin": "saved_page"},
+            ),
+            View(view_id="61:ccc", incident_id="61", kind=ViewKind.IMAGE, label="c"),
+        ],
+    )
+    s.put_incident(
+        Incident(incident_id="2", root="/x"),
+        [],
+        [
+            View(
+                view_id="2:ppp",
+                incident_id="2",
+                kind=ViewKind.PAGE,
+                label="p",
+                primary="page.html",
+                meta={"origin": "saved_page"},
+            ),
+            View(
+                view_id="2:hhh",
+                incident_id="2",
+                kind=ViewKind.PAGE,
+                label="h",
+                meta={"origin": "har_only"},
+            ),
+        ],
+    )
+    assert resolve_view(s, "61:article") == "61:aaa"
+    assert resolve_view(s, "61:chat") == "61:bbb"
+    assert resolve_view(s, "61:ad") == "61:ccc"
+    assert resolve_view(s, "61:page") is None  # ambiguous: two saved pages, none plain
+    assert resolve_view(s, "2:page") == "2:ppp"
+    assert resolve_view(s, "2:healthlinkq") == "2:hhh"
+    assert resolve_view(s, "2:hhh") == "2:hhh"  # a real id resolves to itself
+    assert resolve_view(s, "9:page") is None
+    s.close()

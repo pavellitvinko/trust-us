@@ -5,9 +5,13 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from ..contracts import RelationType
+from ..contracts import RelationType, ViewKind
 from .fixtures import FIXTURES_DIR
+
+if TYPE_CHECKING:
+    from ..store import Store
 
 REFERENCE = FIXTURES_DIR / "reference_pairs.json"
 
@@ -54,3 +58,46 @@ def load_reference(path: Path = REFERENCE) -> list[ReferencePair]:
             )
         )
     return out
+
+
+# -- resolving fixture-style names against a real store -------------------------------------
+#
+# Reference pairs below folder level name views the way the fixtures do (`2:healthlinkq`,
+# `61:article`). Real view ids are content hashes, so each alias is resolved from what the
+# ingest recorded about the view: its origin, its kind and the folder its primary file sits in.
+
+_ALIASES: dict[str, tuple[str, ...]] = {
+    # alias: (kind, origin or "*", primary-path hint or "")
+    "page": ("page", "saved_page", ""),
+    "healthlinkq": ("page", "har_only", ""),
+    "capture": ("page", "capture_bundle", ""),
+    "article": ("page", "saved_page", "strona_1/"),
+    "chat": ("page", "saved_page", "strona_2/"),
+    "business": ("page", "saved_page", "strona_3/"),
+    "video": ("video", "*", ""),
+    "ad": ("image", "*", ""),
+}
+
+
+def resolve_view(store: Store, name: str) -> str | None:
+    """Return the real view id for a fixture-style alias, or the name itself if it is a view id."""
+    try:
+        store.get_view(name)
+        return name
+    except KeyError:
+        pass
+    incident_id, _, alias = name.partition(":")
+    rule = _ALIASES.get(alias)
+    if rule is None:
+        return None
+    kind, origin, hint = rule
+    candidates = [
+        v
+        for v in store.views(incident_id)
+        if v.kind is ViewKind(kind)
+        and (origin == "*" or v.meta.get("origin") == origin)
+        and (not hint or hint in (v.primary or ""))
+    ]
+    if alias == "page" and len(candidates) > 1:  # several saved pages: "page" is ambiguous
+        candidates = [v for v in candidates if "strona_" not in (v.primary or "")]
+    return candidates[0].view_id if len(candidates) == 1 else None
