@@ -100,25 +100,40 @@ def assign(
     def best(t: RelationType) -> Related | None:
         return related[t.value][0] if related[t.value] else None
 
-    if d := best(RelationType.DUPLICATE):
+    from ..fusion.demotion import contradicts_any
+
+    refused_family: str | None = None
+
+    def compatible(match: str) -> str:
+        """The campaign holding `match`, or "" if the view contradicts any of its members.
+
+        A match with one member does not override a contradiction with another, whether
+        the match is a duplicate or a same-campaign link."""
+        nonlocal refused_family
+        target = groups.campaign_of.get(match, f"c:{match}")
+        members = [m for m in groups.campaigns.get(target, [match]) if m != view_id]
+        clash = contradicts_any(store, view_id, members, config)
+        if not clash:
+            return target
+        other, ns = clash[0]
+        reasons.append(f"campaign {target} refused: contradicts {other} on {ns}")
+        refused_family = refused_family or groups.family_of.get(target) or f"f:{target}"
+        return ""
+
+    for d in related[RelationType.DUPLICATE.value]:
+        if not compatible(d.view_id):
+            continue
         reasons += d.relation.reasons
         return Assignment(
             view_id, Outcome.DUPLICATE_OF, d.view_id, related, len(candidates), reasons
         )
-    from ..fusion.demotion import contradicts_any
 
     guarded = [
         x for x in related[RelationType.SAME_CAMPAIGN.value] if merge_guard(x.relation, config)
     ]
-    refused_family: str | None = None
     for c in guarded:
-        target = groups.campaign_of.get(c.view_id, f"c:{c.view_id}")
-        members = [m for m in groups.campaigns.get(target, [c.view_id]) if m != view_id]
-        clash = contradicts_any(store, view_id, members, config)
-        if clash:  # a match with one member does not override a contradiction with another
-            other, ns = clash[0]
-            reasons.append(f"campaign {target} refused: contradicts {other} on {ns}")
-            refused_family = refused_family or groups.family_of.get(target) or f"f:{target}"
+        target = compatible(c.view_id)
+        if not target:
             continue
         reasons += c.relation.reasons
         return Assignment(

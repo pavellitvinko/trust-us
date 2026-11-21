@@ -7,14 +7,26 @@ screenshot-only item may carry nothing else, which is why these are must-have.
 
 from __future__ import annotations
 
-from ..contracts import Fingerprint, FingerprintKind, Observation, Tier, View
+from ..contracts import Fingerprint, FingerprintKind, Observation, Tier, View, ViewKind
 from ..registry import layers
 from ._set_layer import linkage_items
 
 
-def _hash_layer(name: str, group: str, namespace, doc: str, min_values: int = 1):
+def _whole_image(view: View, o: Observation) -> bool:
+    """`asset.phash` of an image view's own file: the screenshot or creative itself."""
+    return (
+        view.kind is ViewKind.IMAGE
+        and o.namespace == "asset.phash"
+        and bool(view.primary)
+        and o.source.file == view.primary
+    )
+
+
+def _hash_layer(name: str, group: str, namespace, doc: str, min_values: int = 1, keep=None):
     class HashLayer:
         def build(self, view: View, observations: list[Observation]) -> Fingerprint | None:
+            if keep is not None:
+                observations = [o for o in observations if keep(view, o)]
             values = sorted({v.lower() for _, v in linkage_items(observations, self.namespaces)})
             if len(values) < min_values:
                 return None
@@ -39,14 +51,23 @@ def _hash_layer(name: str, group: str, namespace, doc: str, min_values: int = 1)
     return HashLayer
 
 
+# The asset extractor hashes an image view's own file under `asset.phash` too. That hash
+# is the creative, not a content image on a page, so it goes to `ad.creative` (a duplicate
+# anchor when close) and only there: counting it in both groups would turn one fact into
+# two "independent" artifact agreements.
 _hash_layer(
     "asset.perceptual",
     "perceptual",
     ("image.phash", "asset.phash"),
     "E2: pHash of a page's content images.",
+    keep=lambda view, o: not _whole_image(view, o),
 )
 _hash_layer(
-    "ad.creative", "creative", "creative.phash", "L2: pHash of an ad creative or screenshot."
+    "ad.creative",
+    "creative",
+    ("creative.phash", "asset.phash"),
+    "L2: pHash of an ad creative or screenshot.",
+    keep=lambda view, o: o.namespace == "creative.phash" or _whole_image(view, o),
 )
 _hash_layer(
     "media.video", "video", "video.frame_phash", "M1: pHash of sampled key frames.", min_values=2

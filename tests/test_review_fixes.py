@@ -385,3 +385,95 @@ def test_cheap_coverage_honours_comparator_compatibility():
     assert r.coverage == pytest.approx(0.5)  # domain yes; absence vector of another page kind no
     weights.reset()
     s.close()
+
+
+# [third review, eba631a] -------------------------------------------------------------------
+
+
+def _put(s: Store, vid: str, rows) -> None:
+    iid = vid.split(":")[0]
+    s.put_incident(
+        Incident(incident_id=iid, root="/x"),
+        [],
+        [View(view_id=vid, incident_id=iid, kind=ViewKind.PAGE, label=vid)],
+    )
+    rows = [("domain.registrable", f"{iid}.example"), *rows]
+    s.put_observations(
+        vid,
+        "t",
+        [
+            Observation(
+                view_id=vid, signal_id="A1", namespace=ns, value=v, extractor="t", version="1"
+            )
+            for ns, v in rows
+        ],
+    )
+
+
+def test_duplicate_assignment_is_refused_when_the_campaign_has_a_contradicting_member():
+    """Campaign {A, B}: A declares campaign X, B has no UUID. C declares Y and carries B's
+    creative. C-B alone is a duplicate, but C contradicts A, so it is not a duplicate of B."""
+    creative = "f0f0f0f00f0f0f0f"
+    s = Store(":memory:")
+    _put(s, "a:page", [("aio.campaign_uuid", "X"), ("fb_pixel", "P1"), ("fb_pixel", "P2")])
+    _put(s, "b:page", [("fb_pixel", "P1"), ("fb_pixel", "P2"), ("creative.phash", creative)])
+    pipeline.run_fingerprint(s)
+    g = run_method(s)
+    assert g.campaign_of["a:page"] == g.campaign_of["b:page"], g.campaigns
+
+    _put(s, "c:page", [("aio.campaign_uuid", "Y"), ("creative.phash", creative)])
+    pipeline.run_fingerprint(s, ["c:page"])
+    a = assign(s, "c:page", g)
+    assert any(x.view_id == "b:page" for x in a.related[RelationType.DUPLICATE.value])
+    assert a.outcome is not Outcome.DUPLICATE_OF, a.reasons
+    assert a.outcome is Outcome.NEW_CAMPAIGN_IN_FAMILY
+    assert any("refused: contradicts a:page on aio.campaign_uuid" in r for r in a.reasons)
+    weights.reset()
+    s.close()
+
+
+def test_duplicate_assignment_still_works_without_a_contradiction():
+    creative = "f0f0f0f00f0f0f0f"
+    s = Store(":memory:")
+    _put(s, "a:page", [("fb_pixel", "P1"), ("fb_pixel", "P2")])
+    _put(s, "b:page", [("fb_pixel", "P1"), ("fb_pixel", "P2"), ("creative.phash", creative)])
+    pipeline.run_fingerprint(s)
+    g = run_method(s)
+    _put(s, "c:page", [("creative.phash", creative)])
+    pipeline.run_fingerprint(s, ["c:page"])
+    a = assign(s, "c:page", g)
+    assert a.outcome is Outcome.DUPLICATE_OF and a.target == "b:page", a.reasons
+    weights.reset()
+    s.close()
+
+
+def test_standalone_image_and_its_reencode_are_duplicates(tmp_path):
+    """A PNG screenshot and its JPEG re-encoding: the asset extractor's whole-image pHash
+    reaches `ad.creative`, which anchors a duplicate. It does not also count in
+    `asset.perceptual`, which stays for content images on pages."""
+    from ftf.ingest import ingest_folder
+
+    from .test_extract_assets import picture, reencode
+
+    png = picture(7)
+    for name, data in (("one", png), ("two", reencode(png))):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / ("reklama.png" if name == "one" else "reklama.jpg")).write_bytes(data)
+    s = Store(":memory:")
+    ids = []
+    for name in ("one", "two"):
+        _, views = ingest_folder(tmp_path / name, s)
+        ids += [v.view_id for v in views if v.kind is ViewKind.IMAGE]
+    assert len(ids) == 2
+    pipeline.run_extract(s)
+    pipeline.run_fingerprint(s)
+    layers_of = {v: {f.layer_id for f in s.fingerprints(view_id=v)} for v in ids}
+    for v in ids:
+        assert "ad.creative" in layers_of[v]
+        assert "asset.perceptual" not in layers_of[v]
+    g = run_method(s)
+    assert g.campaign_of[ids[0]] == g.campaign_of[ids[1]], g.campaigns
+    a = assign(s, ids[1], g, prepared=True)
+    assert a.outcome is Outcome.DUPLICATE_OF and a.target == ids[0], a.reasons
+    weights.reset()
+    s.close()
