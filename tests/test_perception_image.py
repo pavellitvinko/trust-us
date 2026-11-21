@@ -1,13 +1,16 @@
 """Screenshot reading tests. Fake client only: nothing here touches the network."""
 
+import base64
 import json
 from contextlib import contextmanager
+from dataclasses import replace
 from types import SimpleNamespace as NS
 
 import pytest
+from PIL import Image
 
 from ftf.config import Settings
-from ftf.contracts import Incident, State, View, ViewKind
+from ftf.contracts import Incident, Purpose, State, View, ViewKind
 from ftf.perception.image import (
     FIELDS,
     NAME,
@@ -151,6 +154,98 @@ def test_secret_read_from_an_image_is_redacted(ctx, settings):
     assert "abc123secret" not in stored.value and "abc123secret" not in stored.raw
 
 
+def test_secret_read_from_an_image_never_reaches_the_cache(ctx, settings):
+    client = FakeOpenAI(message(reading(visible_text=[item("https://x.pl/?token=abc123secret")])))
+    run_perceive(ctx, settings=settings, client=client)
+    cached = "".join(p.read_text() for p in settings.model_cache_dir.rglob("*.json"))
+    assert cached and "abc123secret" not in cached
+
+
+def test_inline_image_data_is_not_redacted(ctx, settings, tmp_path):
+    data = b"\x89PNG\r\n\x1a\n" + base64.b64decode("AAAA/token==")
+    (tmp_path / "incident" / "ad.png").write_bytes(data)
+    client = FakeOpenAI(message(reading()))
+    run_perceive(ctx, settings=settings, client=client)
+    url = client.requests[0]["input"][0]["content"][1]["image_url"]
+    assert base64.b64decode(url.partition(",")[2]) == data
+
+
+def test_transient_failure_keeps_the_earlier_reading(ctx, settings):
+    run_perceive(
+        ctx, settings=settings, client=FakeOpenAI(message(reading(visible_text=[item("tekst")])))
+    )
+    changed = replace(settings, openai_model="another-model")  # forces a cache miss, no key
+    summary = run_perceive(ctx, settings=changed)
+    assert summary["kept"] == 1
+    assert [o.value for o in ctx.store.observations("v1")] == ["tekst"]
+
+
+def test_stable_failure_replaces_the_earlier_reading(ctx, settings, tmp_path):
+    run_perceive(
+        ctx, settings=settings, client=FakeOpenAI(message(reading(visible_text=[item("tekst")])))
+    )
+    (tmp_path / "incident" / "ad.png").write_bytes(b"BM not an accepted format")
+    run_perceive(ctx, settings=settings)
+    assert {o.state for o in ctx.store.observations("v1")} == {State.NOT_OBSERVABLE}
+
+
+@pytest.mark.parametrize(
+    ("text", "name"),
+    [("Joanna poleca", "Anna"), ("Jankowski", "Jan"), ("Rafał", "Rafał Brzoska")],
+)
+def test_partial_word_is_not_a_written_name(ctx, settings, text, name):
+    client = FakeOpenAI(message(reading(visible_text=[item(text)], person_names=[item(name)])))
+    run_perceive(ctx, settings=settings, client=client)
+    assert "image.person_name" not in by_namespace(ctx.store)
+
+
+def test_name_split_across_two_blocks_is_dropped(ctx, settings):
+    client = FakeOpenAI(
+        message(
+            reading(
+                visible_text=[item("Poleca Anna"), item("Nowak inwestuje")],
+                person_names=[item("Anna Nowak")],
+            )
+        )
+    )
+    run_perceive(ctx, settings=settings, client=client)
+    assert "image.person_name" not in by_namespace(ctx.store)
+
+
+def test_domain_survives_redacted_credentials(ctx, settings):
+    client = FakeOpenAI(
+        message(reading(visible_domains=[item("https://user:hunter2@example.com/a")]))
+    )
+    run_perceive(ctx, settings=settings, client=client)
+    stored = by_namespace(ctx.store)["image.domain"]
+    assert stored.value == "example.com" and "hunter2" not in stored.raw
+
+
+def test_text_value_is_normalised_and_raw_kept(ctx, settings):
+    client = FakeOpenAI(message(reading(cta_labels=[item("SPRAWDŹ   Teraz")])))
+    run_perceive(ctx, settings=settings, client=client)
+    stored = by_namespace(ctx.store)["image.cta"]
+    assert stored.value == "sprawdź teraz" and stored.raw == "SPRAWDŹ   Teraz"
+    assert stored.purpose is Purpose.LINKAGE
+
+
+def test_animated_gif_makes_no_request(ctx, settings, tmp_path):
+    frames = [Image.new("L", (2, 2), color) for color in (0, 255)]
+    path = tmp_path / "incident" / "ad.png"
+    frames[0].save(path, format="GIF", save_all=True, append_images=frames[1:])
+    client = FakeOpenAI()
+    run_perceive(ctx, settings=settings, client=client)
+    assert client.requests == []
+    assert {o.raw for o in ctx.store.observations("v1")} == {"unsupported"}
+
+
+def test_still_gif_is_sent(ctx, settings, tmp_path):
+    Image.new("P", (2, 2)).save(tmp_path / "incident" / "ad.png", format="GIF")
+    client = FakeOpenAI(message(reading()))
+    run_perceive(ctx, settings=settings, client=client)
+    assert len(client.requests) == 1
+
+
 def test_perception_is_not_a_pipeline_extractor():
     load_plugins()
     assert NAME not in extractors.names()
@@ -163,6 +258,8 @@ def test_perception_is_not_a_pipeline_extractor():
         ("https://sub.example.co.uk/a?b=1", "sub.example.co.uk"),
         ("kliknij tutaj", None),
         ("localhost", None),
+        ("przykład.pl", "xn--przykad-rjb.pl"),
+        ("https://example.com:8443/a", "example.com"),
     ],
 )
 def test_normalise_domain(text, expected):
@@ -175,6 +272,8 @@ def test_normalise_domain(text, expected):
         ((0.12, 0.8, 0.4, 0.06), "image:region[0.12,0.8,0.4,0.06]"),
         ((0.9, 0.1, 0.5, 0.1), "image"),
         ((0.1, 0.1, 0, 0.1), "image"),
+        ((0.1, 0.1, 0.00004, 0.1), "image"),
+        ((0.12345, 0.1, 0.87655, 0.1), "image:region[0.1235,0.1,0.8765,0.1]"),
     ],
 )
 def test_region_locator(box, expected):

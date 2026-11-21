@@ -41,7 +41,9 @@ def cmd_perceive(args) -> None:
     summary = run_perceive(Context(_store()), args.view or None)
     print(
         f"image views: {summary['views']}, read: {summary['read']}, "
-        f"not observable: {summary['not_observable']}, observations: {summary['observations']}"
+        f"not observable: {summary['not_observable']}, "
+        f"failed but kept earlier reading: {summary['kept']}, "
+        f"observations: {summary['observations']}"
     )
 
 
