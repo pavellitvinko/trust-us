@@ -60,6 +60,46 @@ def contradictions_between(
     return out
 
 
+def view_exclusive(
+    store: Store, view_id: str, config: FusionConfig = DEFAULT
+) -> dict[str, set[str]]:
+    """namespace -> values of one view's exclusive namespaces, from its identity fingerprints."""
+    load_plugins()
+    identity_layers = {layer.name for layer in layers.all() if layer.tier is Tier.IDENTITY}
+    out: dict[str, set[str]] = defaultdict(set)
+    for fp in store.fingerprints(view_id=view_id):
+        if fp.layer_id in identity_layers and isinstance(fp.payload, list):
+            for i in fp.payload:
+                if i["ns"] in config.exclusive_namespaces:
+                    out[i["ns"]].add(str(i["value"]))
+    return out
+
+
+def contradicting_pairs(store: Store, config: FusionConfig = DEFAULT) -> set[tuple[str, str]]:
+    """Every pair of views whose exclusive records differ, computed from fingerprints, so it
+    covers pairs candidate generation never compared."""
+    exclusive = exclusive_values(identity_items(store), config)
+    out: set[tuple[str, str]] = set()
+    for a, b in combinations(sorted(exclusive), 2):
+        if contradictions_between(exclusive[a], exclusive[b]):
+            out.add((a, b))
+    return out
+
+
+def contradicts_any(
+    store: Store, view_id: str, others, config: FusionConfig = DEFAULT
+) -> list[tuple[str, str]]:
+    """(other view, namespace) for every member of `others` the view contradicts."""
+    mine = view_exclusive(store, view_id, config)
+    if not mine:
+        return []
+    found = []
+    for other in others:
+        for ns, _, _ in contradictions_between(mine, view_exclusive(store, other, config)):
+            found.append((other, ns))
+    return found
+
+
 def find_demotions(
     store: Store, config: FusionConfig = DEFAULT
 ) -> tuple[set[Key], list[tuple[str, str, str]]]:

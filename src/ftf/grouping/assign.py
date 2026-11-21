@@ -105,19 +105,30 @@ def assign(
         return Assignment(
             view_id, Outcome.DUPLICATE_OF, d.view_id, related, len(candidates), reasons
         )
+    from ..fusion.demotion import contradicts_any
+
     guarded = [
         x for x in related[RelationType.SAME_CAMPAIGN.value] if merge_guard(x.relation, config)
     ]
-    if guarded:
-        c = guarded[0]
-        reasons += c.relation.reasons
+    refused_family: str | None = None
+    for c in guarded:
         target = groups.campaign_of.get(c.view_id, f"c:{c.view_id}")
+        members = [m for m in groups.campaigns.get(target, [c.view_id]) if m != view_id]
+        clash = contradicts_any(store, view_id, members, config)
+        if clash:  # a match with one member does not override a contradiction with another
+            other, ns = clash[0]
+            reasons.append(f"campaign {target} refused: contradicts {other} on {ns}")
+            refused_family = refused_family or groups.family_of.get(target) or f"f:{target}"
+            continue
+        reasons += c.relation.reasons
         return Assignment(
             view_id, Outcome.VARIANT_OF_CAMPAIGN, target, related, len(candidates), reasons
         )
-    if f := best(RelationType.SAME_FAMILY):
-        reasons += f.relation.reasons
-        target = groups.family_of_view(f.view_id) or f"f:{f.view_id}"
+    f = best(RelationType.SAME_FAMILY)
+    if f or refused_family:
+        if f:
+            reasons += f.relation.reasons
+        target = (groups.family_of_view(f.view_id) or f"f:{f.view_id}") if f else refused_family
         return Assignment(
             view_id, Outcome.NEW_CAMPAIGN_IN_FAMILY, target, related, len(candidates), reasons
         )

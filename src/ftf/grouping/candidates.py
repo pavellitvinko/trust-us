@@ -73,15 +73,24 @@ def candidate_pairs(store: Store, band_size: int = 4) -> set[Pair]:
 
 
 def cheap_relation(store: Store, a: str, b: str, config: FusionConfig = DEFAULT) -> Relation:
-    """The relation of a non-candidate pair, from layer presence alone."""
-    groups_a = {layers.get(f.layer_id).group for f in store.fingerprints(view_id=a)}
-    groups_b = {layers.get(f.layer_id).group for f in store.fingerprints(view_id=b)}
+    """The relation of a non-candidate pair, from layer presence alone. A layer counts as
+    comparable only if its comparator would accept the pair (`compatible`, where defined):
+    a three-state vector of another page kind, or a vector from another model, does not."""
     from ..fusion.fuse import active_groups
+    from ..registry import comparators
 
+    fps_a = {f.layer_id: f for f in store.fingerprints(view_id=a)}
+    fps_b = {f.layer_id: f for f in store.fingerprints(view_id=b)}
+    comparable_groups: set[str] = set()
+    for layer_id in fps_a.keys() & fps_b.keys():
+        layer = layers.get(layer_id)
+        check = getattr(comparators.get(layer.comparator), "compatible", None)
+        if check is None or check(fps_a[layer_id], fps_b[layer_id]):
+            comparable_groups.add(layer.group)
     total = {layer.group for layer in layers.all()}
     if active_groups() is not None:
         total &= active_groups()
-    coverage = len(groups_a & groups_b) / len(total) if total else 0.0
+    coverage = len(comparable_groups & total) / len(total) if total else 0.0
     rtype = RelationType.UNRELATED if coverage >= config.min_coverage else RelationType.INSUFFICIENT
     return Relation(
         view_a=a,

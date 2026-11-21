@@ -125,6 +125,9 @@ class CalibratedCosine:
     name = "calibrated_cosine"
     version = "1"
 
+    def compatible(self, a: Fingerprint, b: Fingerprint) -> bool:
+        return a.payload.get("model") == b.payload.get("model")
+
     def compare(self, a: Fingerprint, b: Fingerprint) -> Evidence:
         ma, mb = a.payload.get("model"), b.payload.get("model")
         if ma != mb:

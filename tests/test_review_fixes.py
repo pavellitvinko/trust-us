@@ -272,3 +272,116 @@ def test_coverage_counts_only_groups_the_corpus_can_build():
     weights.reset()
     assert active_groups() is None
     s.close()
+
+
+# second review (61811d2): contradictions beyond candidate pairs, component checks in assign,
+# comparator compatibility in the novel fallback --------------------------------------------
+
+
+def _abc_store() -> Store:
+    """A=(campaign X, pixel P1), B=(pixels P1, P2), C=(campaign Y, pixel P2). A-C is never a
+    candidate pair: they share no value, yet they contradict."""
+    s = Store(":memory:")
+    spec = {
+        "a:page": [("aio.campaign_uuid", "X"), ("fb_pixel", "P1")],
+        "b:page": [("fb_pixel", "P1"), ("fb_pixel", "P2")],
+        "c:page": [("aio.campaign_uuid", "Y"), ("fb_pixel", "P2")],
+    }
+    for vid, rows in spec.items():
+        iid = vid.split(":")[0]
+        s.put_incident(
+            Incident(incident_id=iid, root="/x"),
+            [],
+            [View(view_id=vid, incident_id=iid, kind=ViewKind.PAGE, label=vid)],
+        )
+        obs = [
+            Observation(
+                view_id=vid,
+                signal_id="A14",
+                namespace="domain.registrable",
+                value=f"{iid}.example",
+                extractor="t",
+                version="1",
+            )
+        ]
+        obs += [
+            Observation(
+                view_id=vid, signal_id="A1", namespace=ns, value=v, extractor="t", version="1"
+            )
+            for ns, v in rows
+        ]
+        s.put_observations(vid, "t", obs)
+    pipeline.run_fingerprint(s)
+    return s
+
+
+@pytest.mark.parametrize("candidates", [False, True])
+def test_contradiction_between_non_candidates_still_blocks_the_chain(candidates):
+    s = _abc_store()
+    g = run_method(s, candidates=candidates)
+    assert g.campaign_of["a:page"] == g.campaign_of["b:page"]
+    assert g.campaign_of["c:page"] != g.campaign_of["a:page"], g.campaigns
+    assert any("contradiction between the components" in why for *_, why in g.rejected_merges)
+    weights.reset()
+    s.close()
+
+
+def test_assign_refuses_a_campaign_containing_a_contradicting_member():
+    s = _abc_store()
+    g = run_method(s)  # all-pairs grouping: {A, B} is one campaign, C is apart
+    assert g.campaign_of["a:page"] == g.campaign_of["b:page"]
+    a = assign(s, "c:page", g, prepared=True)
+    assert a.outcome is not Outcome.VARIANT_OF_CAMPAIGN
+    assert a.outcome is Outcome.NEW_CAMPAIGN_IN_FAMILY  # capped at family by the contradiction
+    assert any("refused: contradicts a:page on aio.campaign_uuid" in r for r in a.reasons)
+    weights.reset()
+    s.close()
+
+
+def test_cheap_coverage_honours_comparator_compatibility():
+    from ftf.grouping.candidates import cheap_relation
+
+    s = Store(":memory:")
+    for vid, kind in (("k1:page", "advertorial"), ("k2:page", "product_lander")):
+        iid = vid.split(":")[0]
+        s.put_incident(
+            Incident(incident_id=iid, root="/x"),
+            [],
+            [View(view_id=vid, incident_id=iid, kind=ViewKind.PAGE, label=vid)],
+        )
+        obs = [
+            Observation(
+                view_id=vid,
+                signal_id="A14",
+                namespace="domain.registrable",
+                value=f"{iid}.example",
+                extractor="t",
+                version="1",
+            ),
+            Observation(
+                view_id=vid,
+                signal_id="K",
+                namespace="page.kind",
+                value=kind,
+                extractor="t",
+                version="1",
+            ),
+        ]
+        obs += [
+            Observation(
+                view_id=vid,
+                signal_id="K",
+                namespace="expect.element",
+                value=el,
+                extractor="t",
+                version="1",
+            )
+            for el in ("imprint", "author", "contact", "terms")
+        ]
+        s.put_observations(vid, "t", obs)
+    pipeline.run_fingerprint(s)
+    prepare(s)
+    r = cheap_relation(s, "k1:page", "k2:page")
+    assert r.coverage == pytest.approx(0.5)  # domain yes; absence vector of another page kind no
+    weights.reset()
+    s.close()

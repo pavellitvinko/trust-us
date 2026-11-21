@@ -22,6 +22,9 @@ class PerceptualHash:
     version = "1"
     max_distance = 10
 
+    def compatible(self, a: Fingerprint, b: Fingerprint) -> bool:
+        return bool(a.payload.get("values")) and bool(b.payload.get("values"))
+
     def compare(self, a: Fingerprint, b: Fingerprint) -> Evidence:
         ha = list(dict.fromkeys(a.payload.get("values", [])))
         hb = list(dict.fromkeys(b.payload.get("values", [])))

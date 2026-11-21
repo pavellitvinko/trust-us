@@ -53,6 +53,12 @@ class AbsenceAgreement:
     version = "1"
     min_co_observed = 3
 
+    def compatible(self, a: Fingerprint, b: Fingerprint) -> bool:
+        if a.payload.get("kind") != b.payload.get("kind"):
+            return False
+        co = {i["value"] for i in a.payload["items"]} & {i["value"] for i in b.payload["items"]}
+        return len(co) >= self.min_co_observed
+
     def compare(self, a: Fingerprint, b: Fingerprint) -> Evidence:
         base = {
             "view_a": a.view_id,

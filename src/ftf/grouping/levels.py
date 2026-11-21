@@ -88,6 +88,7 @@ def build_campaigns(
     relations: list[Relation],
     config: FusionConfig = DEFAULT,
     funnel: list[tuple[str, str]] = (),
+    contradicting: set[tuple[str, str]] | None = None,
 ):
     """Union-find over duplicate and same-campaign edges, strongest first, with two guards:
     the edge itself must rest on identity or two artifact groups, and the two components
@@ -96,7 +97,9 @@ def build_campaigns(
     side and the other merge is refused). Funnel unions go through the same check."""
     uf = UnionFind(view_ids)
     rejected: list[tuple[str, str, str]] = []
-    contradicting = {
+    # Contradictions come from exclusive fingerprints (build_groups passes them) so that pairs
+    # candidate generation never compared still count; relation reasons are a fallback.
+    contradicting = set(contradicting or ()) | {
         (r.view_a, r.view_b)
         for r in relations
         if any(x.startswith("contradiction") for x in r.reasons)
@@ -192,13 +195,16 @@ def build_playbooks(
 
 
 def build_groups(store: Store, config: FusionConfig = DEFAULT, funnel: bool = True) -> Groups:
+    from ..fusion.demotion import contradicting_pairs
     from .funnel import run_funnel
 
     view_ids = [v.view_id for v in store.views()]
     relations = store.relations()
     edges = run_funnel(store) if funnel else {}
     funnel_pairs = [(e.source, e.target) for f, _ in edges.values() for e in f]
-    campaigns, campaign_of, rejected = build_campaigns(view_ids, relations, config, funnel_pairs)
+    campaigns, campaign_of, rejected = build_campaigns(
+        view_ids, relations, config, funnel_pairs, contradicting_pairs(store, config)
+    )
     families, family_of = build_families(campaigns, campaign_of, relations)
     playbooks, playbooks_of = build_playbooks(view_ids, relations, config)
     return Groups(
