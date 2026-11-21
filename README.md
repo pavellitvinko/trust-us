@@ -9,7 +9,8 @@ HackNation challenge "Kolekcjoner fejków", set by NASK.
 **Status: skeleton + identifier extractors.** Ingestion, storage, the plugin interfaces and
 one reference slice (page domain → `ids.domain` layer → shared-value comparison) work end
 to end. The Evidence track's identifier extractors (tracker config, pixels and tag IDs, ad
-parameters, conversion and outbound targets) produce observations on the sample; no layer
+parameters, conversion and outbound targets) and asset hashes (exact by role, grayscale
+perceptual) produce observations on the sample; no layer
 consumes them yet. Everything else in the design is still to be built.
 
 ## Run locally

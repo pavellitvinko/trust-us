@@ -168,7 +168,10 @@ _KIT_TIER = {
     "public_key",
     "push_public_key",
     "third_party.host",
+    "asset.sha256.code",  # main.css is shared by the whole 1, 2, 61 family
 }
+# Never linked on, or too generic to link on alone: left to rarity weighting.
+_NOT_LINKING = {"asset.sha256.noise", "asset.sha256.icon", "asset.name_shape"}
 
 
 def test_no_false_links_across_incidents(sample_store):
@@ -182,6 +185,52 @@ def test_no_false_links_across_incidents(sample_store):
     false_links = sorted(
         (ns, val, sorted(inc))
         for (ns, val), inc in seen.items()
-        if len(inc) > 1 and not allowed(ns, inc)
+        if len(inc) > 1 and ns not in _NOT_LINKING and not allowed(ns, inc)
     )
     assert false_links == []
+
+
+# --- asset hashes (HAC-11) -----------------------------------------------------------------
+
+
+def _assets(store, view, *roles):
+    return {
+        (o.raw, o.value)
+        for o in store.observations(view.view_id)
+        if o.namespace in {f"asset.sha256.{r}" for r in roles}
+    }
+
+
+def test_hac11_done_when(sample_store):
+    s = sample_store
+    v1, v2 = _view(s, "1:page"), _view(s, "2:page")
+    shared = _assets(s, v1, "content", "avatar") & _assets(s, v2, "content", "avatar")
+    assert len(shared) == 11, sorted(name for name, _ in shared)
+
+    v48, v61 = _view(s, "48:page"), _view(s, "61:article")
+    news = {(n, h) for n, h in _assets(s, v48, "content") if n.startswith("news")}
+    assert {n for n, _ in news} == {f"news{i}.webp" for i in range(1, 6)}
+    assert {h for _, h in news} <= {h for _, h in _assets(s, v61, "content")}
+
+    for key in ("14:page", "47:page"):
+        v = _view(s, key)
+        noise = {n for n, _ in _assets(s, v, "noise")}
+        assert any(n.startswith("jquery") for n in noise), key
+        assert not any(n.startswith("jquery") for n, _ in _assets(s, v, "content", "code"))
+
+
+def test_hac11_one_role_per_file(sample_store):
+    """The same bytes never appear under two roles on one view."""
+    s = sample_store
+    for v in s.views():
+        roles = defaultdict(set)
+        for o in s.observations(v.view_id):
+            if o.namespace.startswith("asset.sha256."):
+                roles[o.value].add(o.namespace)
+        assert all(len(r) == 1 for r in roles.values()), v.view_id
+
+
+def test_hac11_screenshots_have_phash(sample_store):
+    s = sample_store
+    images = [v for v in s.views() if v.kind.value == "image"]
+    assert images and all(_values(s, v, "asset.phash") for v in images)

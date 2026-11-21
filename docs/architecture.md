@@ -286,6 +286,8 @@ Each layer declares: which observations it consumes, the fingerprint kind, the c
 | `visual.layout` | E4, E9 | vector | calibrated cosine | T4 | screenshot embedding | layout-specific model |
 | `ad.creative` | L2, L3 | hash + vector | Hamming / cosine | T2–T4 | pHash + OCR text shingle | — |
 
+Asset-layer input namespaces (HAC-11): `asset.sha256.content`, `asset.sha256.avatar` (E1, E12), `asset.sha256.code` (D3), `asset.sha256.icon`, `asset.sha256.noise` (libraries, browser stubs, pixels: recorded, never linked on), `asset.phash` (E2, 64-bit DCT hash on grayscale, 16 hex), `asset.name_shape` (E5, e.g. `01-hero.webp` → `9-a.webp`). One role per file; noise wins.
+
 Layers are added by registering a class; nothing else changes. The entity-masked narrative layer deserves a note: before embedding, every person, organisation, product, amount and date is replaced with a role placeholder (`[CELEBRITY]`, `[BANK]`, `[PLATFORM]`, `[AMOUNT]`). The Brzoska, Olejnik and Lis stories then land near each other because their skeleton is the same, while `text.semantic`, which keeps the names, still separates them. Together the two layers distinguish "same text" from "same story with a different cast".
 
 ---
