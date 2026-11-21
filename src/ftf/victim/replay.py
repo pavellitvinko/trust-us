@@ -8,7 +8,8 @@ our reconstruction from the saved URLs, not the operator's server:
   with its links to `https://glowpixel.org/` rewritten to this server;
 - the article's call-to-action links (`/?cd8474…=…`) answer 302 to the chat's URL;
 - the chat's URL (`/?utm_id=xjxk…`) serves the chat page as the HAR recorded it;
-- a bare `/` serves the saved decoy page (`strona_3`), as a cloaker would;
+- a bare `/` serves the saved decoy page (`strona_3`), as a cloaker would; any other query
+  (such as the page after the lead form, which the sample never saved) says it is not recorded;
 - any other path is answered from the HAR bodies, then from the saved `_files` folders;
 - POST requests are answered with the HAR's recorded response, or `{}`.
 
@@ -40,6 +41,11 @@ AD_QUERY = (
     f"utm_id={ARTICLE_UTM_ID}&utm_medium=ROR1qwj3fk&utm_campaign=KosMMIF9P4"
     "&utm_content=YmjRtdN0XW&utm_visit=01a158a9-054c-73e2-ab76-e210e18fdc98"
     "&fbclid=IwZXh0bgNhZW0BMABhZGlkAasreplay"
+)
+NOT_RECORDED = (
+    b"<!doctype html><html><head><meta charset='utf-8'><title>Not in the replay</title></head>"
+    b"<body><p>Replay of case 61: the sample has no recording of this step of the funnel.</p>"
+    b"</body></html>"
 )
 _SAVE_SUFFIXES = (".pobrane", ".pobierz", ".download")
 _HOP_HEADERS = {"content-encoding", "content-length", "transfer-encoding", "connection"}
@@ -166,6 +172,8 @@ class Case61:
                 return 200, html, self.rewrite(self.article_html)
             if query.get("utm_id") == "xjxkmObS3y9oLQ9mfVgW" and self.chat is not None:
                 return 200, html, self.rewrite(self.chat.body)
+            if query:  # a funnel step (e.g. the page after the lead form) the sample never saved
+                return 404, html, NOT_RECORDED
             return 200, html, self.rewrite(self.decoy_html)
         recorded = self.har.lookup(f"https://{ORIGINAL_HOST}{raw_path}")
         if recorded is not None and recorded.status < 400:

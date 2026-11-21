@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -25,10 +26,15 @@ DEFAULT_CASE_61 = Path("testing_sample/61")
 
 
 def _resolve_case(arg: str | None) -> Path:
+    sample = os.environ.get("FTF_SAMPLE_DIR")  # the same setting Docker uses for the sample
     candidates = (
         [Path(arg)]
         if arg
-        else [DEFAULT_CASE_61, Path(__file__).resolve().parents[3] / "testing_sample" / "61"]
+        else [
+            *([Path(sample) / "61"] if sample else []),
+            DEFAULT_CASE_61,
+            Path(__file__).resolve().parents[3] / "testing_sample" / "61",
+        ]
     )
     for path in candidates:
         if path.is_dir():
