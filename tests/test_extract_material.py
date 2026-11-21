@@ -270,3 +270,27 @@ def test_cache_sees_a_resource_edited_in_place(store, tmp_path, ctx_for):
     os.utime(files, ns=(folder_mtime, folder_mtime))  # the folder itself looks unchanged
     view = _page(store, root)  # re-ingest in the same process, no clear_cache()
     assert m.load(view, Context(store)).first_party_scripts[0].text.endswith("'2222222222222222');")
+
+
+def test_cache_sees_a_renamed_resource(store, tmp_path, ctx_for):
+    # Review of PR #2, second round: a rename keeps count, total size and mtimes.
+    from ftf.extract.tracking_ids import TrackingPixels
+
+    root = tmp_path / "r3"
+    root.mkdir()
+    (root / "page.html").write_text(
+        "<!-- saved from url=(0028)https://shop.example.org/L1/ -->\n<html></html>"
+    )
+    files = root / "page_files"
+    files.mkdir()
+    (files / "2012165449475163").write_text("")
+    view = _page(store, root)
+    first = TrackingPixels().run(view, Context(store))
+    assert [o.value for o in first] == ["2012165449475163"]
+
+    (files / "2012165449475163").rename(files / "1549107073347817")
+    view = _page(store, root)  # re-ingest in the same process, no clear_cache()
+    second = TrackingPixels().run(view, Context(store))
+    assert [(o.value, o.source.file) for o in second] == [
+        ("1549107073347817", "page_files/1549107073347817")
+    ]

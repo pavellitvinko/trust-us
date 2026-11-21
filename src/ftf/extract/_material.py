@@ -11,6 +11,7 @@ Every reading step runs in its own guard: a malformed file drops that step only.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import re
 from collections.abc import Callable
@@ -381,7 +382,7 @@ def _load(
     har: str | None,
     resources_dir: str | None,
     page_host: str | None,
-    stamp: tuple[int, ...],  # file state: a changed file is read again
+    stamp: tuple[int | str, ...],  # file state: a changed or renamed file is read again
 ) -> Material:
     base = Path(root)
     errors: list[str] = []
@@ -537,26 +538,30 @@ def _file_stamp(root: Path, rel: str | None) -> tuple[int, int]:
     return st.st_mtime_ns, st.st_size
 
 
-def _dir_stamp(root: Path, rel: str | None) -> tuple[int, int, int]:
-    """(file count, total size, newest mtime in ns) of a resources folder.
+def _dir_stamp(root: Path, rel: str | None) -> tuple[str]:
+    """Digest of every file in a resources folder: relative path, mtime in ns and size.
 
     A directory's own mtime does not change when a file inside it is edited in place,
-    so the files themselves are looked at.
+    and a rename keeps count, size and mtime, while file names are an identifier source
+    (`_files/<pixel id>`). So each file's path and state go into the key.
     """
     if not rel:
-        return 0, 0, 0
-    count = size = newest = 0
+        return ("",)
+    digest = hashlib.sha1()
+    folder = root / rel
     try:
-        for p in (root / rel).rglob("*"):
-            try:
-                st = p.stat()
-            except OSError:
-                continue
-            if p.is_file():
-                count, size, newest = count + 1, size + st.st_size, max(newest, st.st_mtime_ns)
+        files = sorted(p for p in folder.rglob("*") if p.is_file())
     except OSError:
-        return 0, 0, 0
-    return count, size, newest
+        return ("",)
+    for p in files:
+        try:
+            st = p.stat()
+        except OSError:
+            continue
+        digest.update(
+            f"{p.relative_to(folder).as_posix()}\0{st.st_mtime_ns}\0{st.st_size}\n".encode()
+        )
+    return (digest.hexdigest(),)
 
 
 def clear_cache() -> None:
