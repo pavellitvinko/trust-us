@@ -229,3 +229,71 @@ def test_no_html_no_observations(store, tmp_path):
     for view in views:
         assert PageText().run(view, Context(store)) == []
         assert PageStructure().run(view, Context(store)) == []
+
+
+# --- review fixes (PR 10) -----------------------------------------------------------------
+
+
+def test_unfilled_macro_keeps_the_page_text(store, tmp_path):
+    root = page(tmp_path / "a", f"<p>Gratulacje {{firstname}}, wygrałeś!</p><p>{PL}</p>")
+    obs = run(PageText(), store, root)
+    assert "{firstname}" in values(obs, "page.clean_text")[0]
+    assert PL in values(obs, "page.body_text")[0]
+
+
+def test_svg_title_is_not_the_page_title():
+    dom = parse(
+        "<head><title>Zamach — Gazeta</title></head>"
+        "<body><svg><title>Facebook</title></svg><p>Treść</p></body>"
+    )
+    assert dom.title == "Zamach — Gazeta"
+
+
+@pytest.mark.parametrize("cls", ["single comments-open", "has-sidebar", "menu-open"])
+def test_page_wide_class_sets_no_zone(cls):
+    dom = parse(f'<body class="{cls}"><p>Treść artykułu</p></body>')
+    assert {b.zone for b in dom.blocks} == {"body"}
+
+
+def test_comments_wrapper_around_the_headline_is_not_comments():
+    dom = parse('<body><div class="opinion-page"><h1>Nagłówek</h1><p>Treść</p></div></body>')
+    assert {b.zone for b in dom.blocks} == {"body"}
+
+
+def test_logo_h1_in_header_is_not_the_headline():
+    dom = parse(
+        '<body><header><h1 class="logo">Gazeta</h1><a href="/">Sport</a></header>'
+        "<article><h1>Zamach na prezesa</h1><p>Treść</p></article></body>"
+    )
+    zones = {b.text: b.zone for b in dom.blocks}
+    assert zones["Sport"] == "chrome" and zones["Gazeta"] == "chrome"
+    assert dom.h1 == ("Zamach na prezesa", "Gazeta")
+
+
+def test_backdrop_filter_is_not_evasion():
+    assert evasion_filters(parse("<style>body{backdrop-filter:blur(4px)}</style>")) == []
+    assert evasion_filters(parse("<style>:root{--x-filter:blur(4px)}</style>")) == []
+    assert evasion_filters(parse("<style>body{filter:blur(4px)}</style>"))
+
+
+def test_honey_in_a_class_is_page_content():
+    dom = parse(
+        '<body><div class="honey-offer">Miód manuka leczy</div>'
+        "<honey-container>Honey coupons</honey-container></body>"
+    )
+    assert dom.text() == "Miód manuka leczy"
+    assert "honey-offer" in dom.classes
+
+
+def test_hidden_fields_are_not_visible_fields():
+    dom = parse(
+        '<form><div style="display:none"><input name="pesel"></div>'
+        '<input name="token" hidden><template><input name="tpl"></template>'
+        '<input name="phone" type="tel"></form>'
+    )
+    assert dom.fields == (("tel", "phone"),)
+
+
+def test_italian_e_is_not_french():
+    text = "Il prodotto è ottimo, è economico, è veloce, è sicuro, è facile da usare ogni giorno"
+    assert detect(text, min_words=8) == "it"

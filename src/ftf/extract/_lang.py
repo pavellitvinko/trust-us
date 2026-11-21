@@ -46,7 +46,7 @@ _STOPWORDS = {lang: frozenset(stop - _SHARED) for lang, stop in _STOPWORDS.items
 _LETTERS: dict[str, frozenset[str]] = {
     "pl": frozenset("ąęłńśźżć"),
     "de": frozenset("äß"),
-    "fr": frozenset("çèêëîïôûœ"),
+    "fr": frozenset("çêëîïôûœ"),  # not `è`: Italian `è` is its most common word
     "es": frozenset("ñ"),
 }
 _WORD = re.compile(r"[^\W\d_]+", re.UNICODE)

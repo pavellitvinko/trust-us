@@ -40,12 +40,17 @@ _BLOCK_TAGS = {
 _CLOSES_P = _BLOCK_TAGS - {"br", "button", "label", "select", "textarea", "option"}
 _STRUCK_TAGS = {"s", "del", "strike"}
 _NEVER_SKIPPED = {"html", "body"}
+_NO_ZONE = {"html", "body", "main"}  # page-wide: a class here (`comments-open`) sets no zone
+_FOREIGN_TITLE = {"svg", "math"}  # an icon's `<title>` is not the page title
 
 TRANSLATE = re.compile(r"goog-te|goog-gt|skiptranslate|google_translate|VIpgJd", re.IGNORECASE)
 _TRANSLATE_STATE = {"translated-ltr", "translated-rtl"}  # page-level class, no own text
 _EXTENSION_VALUE = re.compile(r"(?:chrome|moz|safari-web)-extension://", re.IGNORECASE)
-_EXTENSION_NAME = re.compile(r"grammarly|lastpass|dashlane|honey", re.IGNORECASE)
-_EXTENSION_ATTR = re.compile(r"^data-(?:gr-|lastpass|dashlane|grammarly)", re.IGNORECASE)
+# Extension elements (`<grammarly-desktop-integration>`, `<honey-container>`). In class and id
+# only the brand names that never occur as page words: `honey-offer` is page content.
+_EXTENSION_TAG = re.compile(r"^(?:grammarly|lastpass|dashlane|honey)-", re.IGNORECASE)
+_EXTENSION_MARK = re.compile(r"grammarly|lastpass|dashlane", re.IGNORECASE)
+_EXTENSION_ATTR = re.compile(r"^data-(?:gr-|lastpass|dashlane|grammarly|honey)", re.IGNORECASE)
 _HIDDEN_STYLE = re.compile(r"display\s*:\s*none|visibility\s*:\s*hidden", re.IGNORECASE)
 _LINE_THROUGH = re.compile(r"line-through", re.IGNORECASE)
 _COUNTDOWN = re.compile(r"countdown|timer|odlicz", re.IGNORECASE)
@@ -102,7 +107,7 @@ def _tokens(attrs: dict[str, str]) -> list[str]:
 def is_polluting(tag: str, attrs: dict[str, str]) -> bool:
     """Browser-translate or extension markup: never part of the page as served."""
     marks = f"{attrs.get('class', '')} {attrs.get('id', '')}"
-    if TRANSLATE.search(marks) or _EXTENSION_NAME.search(tag) or _EXTENSION_NAME.search(marks):
+    if TRANSLATE.search(marks) or _EXTENSION_TAG.search(tag) or _EXTENSION_MARK.search(marks):
         return True
     return any(
         _EXTENSION_ATTR.match(name) or _EXTENSION_VALUE.search(value)
@@ -137,10 +142,11 @@ class _Parser(HTMLParser):
         self._demoted: set[int] = set()
         self.title: list[str] = []
         self._in_title = False
+        self._title_done = False
         self._style: list[str] | None = None
         self.meta_description = ""
         self.og_title = ""
-        self.h1: list[str] = []
+        self.h1: list[tuple[str, int]] = []  # (text, owner)
         self.struck: list[str] = []
         self.html_lang: str | None = None
         self.html_style = ""
@@ -170,8 +176,10 @@ class _Parser(HTMLParser):
                 self._demoted.add(frame.owner)
             if frame.capture is not None:
                 text = squash("".join(frame.capture))
-                if text:
-                    (self.h1 if frame.capture_kind == "h1" else self.struck).append(text)
+                if text and frame.capture_kind == "h1":
+                    self.h1.append((text, frame.owner))
+                elif text:
+                    self.struck.append(text)
             if frame.tag in _BLOCK_TAGS:
                 self._flush()
 
@@ -196,6 +204,8 @@ class _Parser(HTMLParser):
 
     def _marker(self, tag: str, tokens: list[str], parent: _Frame) -> Zone | None:
         """The zone this element sets by itself, or None when it inherits its parent's."""
+        if tag in _NO_ZONE:
+            return None
         if any(t.startswith(_COMMENT_PREFIXES) for t in tokens):
             return "comments"
         if tag in _CHROME_TAGS and not (tag in {"header", "footer"} and parent.in_article):
@@ -214,7 +224,9 @@ class _Parser(HTMLParser):
             owner = self._owners[owner][1]
         return self._owners[owner][0]
 
-    def _record(self, tag: str, a: dict[str, str], parent: _Frame, foreign: bool) -> str:
+    def _record(
+        self, tag: str, a: dict[str, str], parent: _Frame, foreign: bool, invisible: bool
+    ) -> str:
         path = f"{parent.path}>{tag}" if parent.path else tag
         if foreign:
             return path
@@ -233,7 +245,7 @@ class _Parser(HTMLParser):
             self.html_style = a.get("style", "")
         elif tag == "body":
             self.body_style = a.get("style", "")
-        elif tag in _FIELD_TAGS:
+        elif tag in _FIELD_TAGS and not invisible:
             kind = (a.get("type") or "text").lower() if tag == "input" else tag
             name = a.get("name") or a.get("id") or ""
             if name and kind not in _NOT_FIELDS and (kind, name) not in self.fields:
@@ -251,18 +263,19 @@ class _Parser(HTMLParser):
         self._implied_close(tag)
         parent = self.stack[-1]
         foreign = parent.foreign or (tag not in _NEVER_SKIPPED and is_polluting(tag, a))
-        path = self._record(tag, a, parent, foreign)
-        if tag == "title":
-            self._in_title = not foreign
+        hidden = "hidden" in a or bool(_HIDDEN_STYLE.search(a.get("style", "")))
+        hidden = tag not in _NEVER_SKIPPED and hidden
+        # A field that is hidden, or under a hidden, template or noscript element, is not visible.
+        path = self._record(tag, a, parent, foreign, hidden or parent.skipped)
+        if tag == "title" and not foreign and not self._title_done:
+            self._in_title = not any(f.tag in _FOREIGN_TITLE for f in self.stack)
         if tag == "style" and not foreign:
             self._style = []
         if tag in _BLOCK_TAGS:
             self._flush()
         if tag in _VOID_TAGS:
             return
-        hidden = "hidden" in a or bool(_HIDDEN_STYLE.search(a.get("style", "")))
-        skipped = foreign or parent.skipped or tag in _SKIPPED_TAGS
-        skipped = skipped or (hidden and tag not in _NEVER_SKIPPED)
+        skipped = foreign or parent.skipped or tag in _SKIPPED_TAGS or hidden
         marker = self._marker(tag, _tokens(a), parent)
         owner = parent.owner
         if marker is not None:
@@ -279,9 +292,6 @@ class _Parser(HTMLParser):
             owns=marker is not None,
         )
         if not skipped and tag == "h1":
-            for o in self._chain(owner):  # the headline is never inside navigation
-                if self._owners[o][0] == "chrome":
-                    self._demoted.add(o)
             frame.capture, frame.capture_kind = [], "h1"
         elif not skipped and (tag in _STRUCK_TAGS or _LINE_THROUGH.search(a.get("style", ""))):
             frame.capture, frame.capture_kind = [], "struck"
@@ -293,8 +303,8 @@ class _Parser(HTMLParser):
             self._pop_to(len(self.stack) - 1)
 
     def handle_endtag(self, tag: str) -> None:
-        if tag == "title":
-            self._in_title = False
+        if tag == "title" and self._in_title:
+            self._in_title, self._title_done = False, True
         if tag == "style" and self._style is not None:
             self._css("".join(self._style))
             self._style = None
@@ -344,15 +354,30 @@ class _Parser(HTMLParser):
             if names & _ROOT_SELECTORS:
                 self.root_css.append(f"{selectors.strip()}{{{body.strip()}}}")
 
+    def _headlines(self) -> tuple[str, ...]:
+        """h1 texts, those in the body zone first.
+
+        A logo `<h1>` in the site header leaves the header chrome when the article has its
+        own h1. When no h1 is in the body zone, the wrappers around them (`<header>` or
+        `<div class="opinion-page">` around a whole lander) are page containers: demoted.
+        """
+        in_body = [self._resolve(owner) == "body" for _, owner in self.h1]
+        if not any(in_body):
+            for _, owner in self.h1:
+                self._demoted.update(self._chain(owner))
+        ranked = sorted(zip(in_body, self.h1), key=lambda pair: not pair[0])  # stable
+        return tuple(text for _, (text, _) in ranked)
+
     def result(self) -> Dom:
         self._pop_to(1)
         self._flush()
+        h1 = self._headlines()
         return Dom(
             blocks=tuple(Block(text, self._resolve(owner)) for text, owner in self.lines),
             title=squash("".join(self.title)),
             meta_description=self.meta_description,
             og_title=self.og_title,
-            h1=tuple(self.h1),
+            h1=h1,
             html_lang=self.html_lang,
             html_style=self.html_style,
             body_style=self.body_style,

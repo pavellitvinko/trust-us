@@ -45,11 +45,12 @@ class PageText:
             return m.at(html.source, detail)
 
         def texts() -> None:
-            emit("F1", "page.clean_text", dom.text()[:MAX_TEXT], src("text:all"), raw="")
-            emit("F1", "page.body_text", body[:MAX_TEXT], src("text:body"), raw="")
+            all_text = dom.text()[:MAX_TEXT]
+            emit("F1", "page.clean_text", all_text, src("text:all"), raw="", whole=True)
+            emit("F1", "page.body_text", body[:MAX_TEXT], src("text:body"), raw="", whole=True)
             comments = [b.text for b in dom.blocks if b.zone == "comments"]
             if comments:
-                emit("F6", "page.comments", comments, src("text:comments"), raw="")
+                emit("F6", "page.comments", comments, src("text:comments"), raw="", whole=True)
 
         def template() -> None:
             emit("D7", "page.title", dom.title, src("title"))

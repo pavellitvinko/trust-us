@@ -19,7 +19,8 @@ from ._lang import detect, has_cyrillic
 _FILTER_FUNCS = r"hue-rotate|invert|blur|saturate|grayscale|sepia|contrast|brightness"
 # A literal call such as `hue-rotate(7deg)`; `var(--tw-hue-rotate)` has no `(` after the name.
 _EVASION = re.compile(rf"(?<![\w-])({_FILTER_FUNCS})\(\s*[-\d.]", re.IGNORECASE)
-_FILTER_DECL = re.compile(r"(?:-webkit-)?filter\s*:[^;}]*", re.IGNORECASE)
+# `backdrop-filter` and custom properties such as `--x-filter` are not the page's filter.
+_FILTER_DECL = re.compile(r"(?<![\w-])(?:-webkit-)?filter\s*:[^;}]*", re.IGNORECASE)
 _STOCK = re.compile(
     r"pozostał[oa]?\D{0,30}\d+|zostało\s+(?:tylko\s+)?\d+|\d+\s*(?:sztuk\w*|szt\.|miejsc\w*)"
     r"|only\s+\d+\s+left",
@@ -78,14 +79,14 @@ class PageStructure:
 
         def skeleton() -> None:
             if dom.classes:
-                emit("D2", "dom.class_set", sorted(dom.classes), src("class"), raw="")
+                emit("D2", "dom.class_set", sorted(dom.classes), src("class"), raw="", whole=True)
             if dom.tag_paths:
-                emit("D1", "dom.tag_paths", sorted(dom.tag_paths), src("tags"), raw="")
+                emit("D1", "dom.tag_paths", sorted(dom.tag_paths), src("tags"), raw="", whole=True)
 
         def comments() -> None:
             if not dom.comments:
                 return
-            emit("D5", "dom.comments", list(dom.comments), src("comment"), raw="")
+            emit("D5", "dom.comments", list(dom.comments), src("comment"), raw="", whole=True)
             for lang in comment_langs(dom.comments):
                 if lang:
                     emit("D5", "dom.comment_lang", lang, src("comment"), purpose=Purpose.BOTH)

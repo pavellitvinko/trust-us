@@ -603,8 +603,11 @@ class Emitter:
         raw: str | None = None,
         purpose: Purpose = Purpose.LINKAGE,
         confidence: float = 1.0,
+        whole: bool = False,
     ) -> bool:
-        if is_placeholder(value):
+        """`whole` marks a whole text or list (page text, comments): a macro somewhere
+        inside it is page content, not an unfilled value, so only emptiness drops it."""
+        if not value if whole else is_placeholder(value):
             return False
         key = (namespace, json.dumps(value, sort_keys=True, default=str))
         if key in self._seen:

@@ -253,6 +253,7 @@ def test_markup_facts_are_sent_before_the_text(ctx, settings):
         )
 
     facts = [fact("markup.countdown", "timer"), fact("markup.form_field", "tel:phone")]
+    facts.append(fact("markup.crossed_price", "Bearer abcdefghijklmnop1234"))
     facts.append(fact("dom.class_set", ["a", "b"], Purpose.LINKAGE))  # not a fact
     ctx.store.put_observations("v1", "page.structure", facts)
     client = FakeOpenAI(message(reading(kind=spanned("news", "ujawnia sekret"))))
@@ -260,8 +261,10 @@ def test_markup_facts_are_sent_before_the_text(ctx, settings):
     sent = client.requests[0]["input"][0]["content"]
     assert sent.startswith(
         "Facts found in the page markup (not page text):\n"
-        "- markup.countdown: timer\n- markup.form_field: tel:phone\n\nPage text:\n"
+        "- markup.countdown: timer\n- markup.crossed_price: Bearer [REDACTED:sha256:"
     )
+    assert "- markup.form_field: tel:phone\n\nPage text:\n" in sent
+    assert "abcdefghijklmnop1234" not in sent  # facts are redacted like the page text
     assert "dom.class_set" not in sent
     read = stored(ctx.store, READ_TEXT_NAMESPACE)[0].value
     assert not read.startswith("Facts")  # spans index the page text, not the message
