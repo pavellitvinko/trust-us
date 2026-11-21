@@ -16,11 +16,12 @@ since different page kinds have different expected elements.
 
 from __future__ import annotations
 
-from ..contracts import Fingerprint, FingerprintKind, Observation, State, Tier, View
-from ..registry import layers, Context
-from ..store import Store
-from .library import KindLibraryStore, ElementChecked, KindProfile
-from .matching import ViewElementVector, check_view_against_profile
+from ..contracts import Fingerprint, FingerprintKind, Observation, Tier, View
+from ..registry import Context, layers
+
+# The kind profiles and the matching live in `ftf.expectations` (library, matching). They are
+# imported here once `build` uses them: importing a missing name from a layer module breaks
+# `load_plugins` and with it every run.
 
 
 @layers.register
@@ -34,7 +35,9 @@ class ElementsLayer:
     group = "expectations"
     comparator = "shared_value"
 
-    def build(self, view: View, observations: list[Observation], ctx: Context) -> Fingerprint | None:
+    def build(
+        self, view: View, observations: list[Observation], ctx: Context | None = None
+    ) -> Fingerprint | None:
         """Build the expected-elements fingerprint for a view.
 
         This layer requires:
@@ -51,7 +54,8 @@ class ElementsLayer:
         Args:
             view: The view being fingerprinted.
             observations: Observations collected for this view.
-            ctx: Registry context for accessing the store.
+            ctx: Registry context for accessing the store. Optional: the pipeline calls
+                `build(view, observations)`, as the `Layer` protocol declares.
 
         Returns:
             Fingerprint with set of (element, state) pairs, or None if unable to build.
