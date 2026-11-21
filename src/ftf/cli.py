@@ -36,15 +36,18 @@ def cmd_run(args) -> None:
 
 def cmd_perceive(args) -> None:
     from .perception.image import run_perceive
+    from .perception.page import run_perceive_pages
     from .registry import Context
 
-    summary = run_perceive(Context(_store()), args.view or None)
-    print(
-        f"image views: {summary['views']}, read: {summary['read']}, "
-        f"not observable: {summary['not_observable']}, "
-        f"failed but kept earlier reading: {summary['kept']}, "
-        f"observations: {summary['observations']}"
-    )
+    ctx = Context(_store())
+    for label, run in (("image", run_perceive), ("page", run_perceive_pages)):
+        summary = run(ctx, args.view or None)
+        print(
+            f"{label} views: {summary['views']}, read: {summary['read']}, "
+            f"not observable: {summary['not_observable']}, "
+            f"failed but kept earlier reading: {summary['kept']}, "
+            f"observations: {summary['observations']}"
+        )
 
 
 def cmd_views(args) -> None:
@@ -92,7 +95,7 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("run", help="extract, fingerprint and compare everything stored").set_defaults(
         func=cmd_run
     )
-    p = sub.add_parser("perceive", help="read stored image views with the vision model")
+    p = sub.add_parser("perceive", help="read stored image and page views with the model")
     p.add_argument("--view", action="append", help="only this view id; may be repeated")
     p.set_defaults(func=cmd_perceive)
 
