@@ -62,15 +62,31 @@ class Report:
     results: list[PairResult]
     by_type: dict[RelationType, TypeScore] = field(default_factory=dict)
 
+    # A reference pair is evaluated when both of its sides exist in the corpus and a relation
+    # was stored for it. Every rate below is over evaluated pairs only: a pair that could not
+    # be evaluated is neither an agreement nor a miss, and "0 false merges" says nothing about it.
+
+    @property
+    def evaluated(self) -> list[PairResult]:
+        return [r for r in self.results if r.predicted is not None]
+
+    @property
+    def not_evaluated(self) -> list[PairResult]:
+        return [r for r in self.results if r.predicted is None]
+
+    @property
+    def strict(self) -> list[PairResult]:
+        return [r for r in self.evaluated if r.predicted == r.ref.expected]
+
     @property
     def agreement(self) -> float:
-        return sum(r.agrees for r in self.results) / len(self.results) if self.results else 0.0
+        done = self.evaluated
+        return sum(r.agrees for r in done) / len(done) if done else 0.0
 
     @property
     def exact_agreement(self) -> float:
-        if not self.results:
-            return 0.0
-        return sum(r.predicted == r.ref.expected for r in self.results) / len(self.results)
+        done = self.evaluated
+        return len(self.strict) / len(done) if done else 0.0
 
     @property
     def false_merges(self) -> list[PairResult]:
@@ -78,7 +94,8 @@ class Report:
 
     @property
     def disagreements(self) -> list[PairResult]:
-        return [r for r in self.results if not r.agrees]
+        """Misses: evaluated pairs whose relation is neither expected nor an accepted alternative."""
+        return [r for r in self.evaluated if not r.agrees]
 
     @property
     def deviations(self) -> list[PairResult]:
@@ -130,9 +147,15 @@ def evaluate(store: Store, reference: list[ReferencePair] | None = None) -> Repo
 def format_report(report: Report, show_agreed: bool = False) -> str:
     lines = []
     lines.append(
-        f"reference pairs: {len(report.results)}   agreement: {report.agreement:.0%} "
+        f"reference pairs: {len(report.evaluated)}   agreement: {report.agreement:.0%} "
         f"(exact {report.exact_agreement:.0%}, {len(report.deviations)} accepted deviations)   "
         f"false merges: {len(report.false_merges)}"
+    )
+    lines.append(
+        f"evaluated {len(report.evaluated)} of {len(report.results)}: "
+        f"strict {len(report.strict)}, accepted alternatives {len(report.deviations)}, "
+        f"misses {len(report.disagreements)}, false merges {len(report.false_merges)}; "
+        f"not evaluated {len(report.not_evaluated)} (rates are over evaluated pairs only)"
     )
     lines.append("")
     lines.append(f"{'relation type':22} {'ref':>4} {'pred':>4} {'exact':>5} {'prec':>6} {'rec':>6}")
@@ -162,6 +185,9 @@ def format_report(report: Report, show_agreed: bool = False) -> str:
     if report.deviations:
         lines += ["", "accepted deviations from the baseline letter:"]
         lines += [row(r) for r in report.deviations]
+    if report.not_evaluated:
+        lines += ["", "not evaluated (a side is missing from this corpus):"]
+        lines += [row(r) for r in report.not_evaluated]
     if show_agreed:
         lines += ["", "agreed:"]
         lines += [row(r) for r in report.results if r.agrees and not r.deviates]

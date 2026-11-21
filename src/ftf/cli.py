@@ -1,5 +1,5 @@
 """Command line: ftf ingest | run | perceive | views | observations | compare | pairs | relations |
-explain | groups | incidents | assign | eval | loio | ablate | load-fixtures."""
+explain | groups | incidents | assign | eval | loio | ablate | validate | load-fixtures."""
 
 from __future__ import annotations
 
@@ -251,13 +251,45 @@ def cmd_assign(args) -> None:
 
 
 def cmd_loio(args) -> None:
-    """Leave-one-incident-out on the fixtures."""
+    """Leave-one-incident-out on the fixtures, or on real files with --sample."""
+    if args.sample:
+        from .eval import sample
+
+        base = sample.extracted(Path(args.sample))
+        print("\n".join(sample.format_loio(sample.loio_sample(base, incidents=args.incident))))
+        return
     from .eval.loio import format_loio, loio_all
 
     print(format_loio(loio_all(incidents=args.incident or None)))
 
 
+def cmd_validate(args) -> None:
+    """Real-file validation, model off: reference agreement, checkpoint, negative pairs,
+    confidence audit, degradation, ablation and leave-one-out, as one Markdown document."""
+    from .eval import sample
+
+    parts = [p for p in ("degrade", "ablate", "loio") if p not in (args.skip or [])]
+    workdir = get_settings().data_dir / "tmp"
+    text = sample.validation_report(Path(args.path), workdir=workdir, parts=parts)
+    if args.out:
+        Path(args.out).write_text(text, encoding="utf-8")
+        print(f"wrote {args.out}")
+    else:
+        print(text)
+
+
 def cmd_ablate(args) -> None:
+    if args.sample:
+        from .eval import sample
+
+        base = sample.extracted(Path(args.sample))
+        if args.degrade:
+            workdir = get_settings().data_dir / "tmp"
+            runs = sample.degrade_sample(Path(args.sample), base, workdir=workdir)
+        else:
+            runs = sample.ablate_sample(base)
+        print("\n".join(sample.format_runs(runs)))
+        return
     from .eval.ablation import ablate, degrade, format_runs
 
     if args.degrade:
@@ -332,10 +364,23 @@ def main(argv: list[str] | None = None) -> None:
 
     p = sub.add_parser("loio", help="leave-one-incident-out on the fixtures")
     p.add_argument("--incident", action="append", help="only these incidents; repeatable")
+    p.add_argument("--sample", help="run on this folder of real incident folders, model off")
     p.set_defaults(func=cmd_loio)
+
+    p = sub.add_parser(
+        "validate",
+        help="real-file validation report, model off (docs/method-results-real-sample.md)",
+    )
+    p.add_argument("path", help="a folder of incident folders")
+    p.add_argument("--out", help="write the Markdown report here instead of printing it")
+    p.add_argument(
+        "--skip", action="append", choices=["degrade", "ablate", "loio"], help="leave a part out"
+    )
+    p.set_defaults(func=cmd_validate)
 
     p = sub.add_parser("ablate", help="layer ablation table on the fixtures")
     p.add_argument("--degrade", action="store_true", help="degradation runs instead of ablation")
+    p.add_argument("--sample", help="run on this folder of real incident folders, model off")
     p.set_defaults(func=cmd_ablate)
 
     p = sub.add_parser("eval", help="agreement with the reference pairs (docs/baseline-report.md)")

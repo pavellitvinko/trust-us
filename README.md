@@ -38,6 +38,9 @@ uv run ftf eval                           # agreement with docs/baseline-report.
 uv run ftf load-fixtures && uv run ftf eval --fixtures   # the same on the hand-made fixtures
 uv run ftf loio                           # leave-one-incident-out on the fixtures
 uv run ftf ablate [--degrade]             # layer ablation / degradation tables
+uv run ftf ablate [--degrade] --sample testing_sample   # the same on real files, model off
+uv run ftf loio --sample testing_sample   # leave-one-out on real files, weights frozen
+uv run ftf validate testing_sample --out docs/method-results-real-sample.md   # the whole real-file validation
 uv run streamlit run app/streamlit_app.py
 uv run pytest
 ```
