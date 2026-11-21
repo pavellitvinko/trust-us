@@ -6,7 +6,7 @@ Correlation groups, tier scores, coverage, the contradiction rule and the demoti
 
 from .config import DEFAULT, FusionConfig
 from .fuse import decide, fuse, summarise
-from .run import fuse_pair, prepare, run_fuse
+from .run import fuse_pair, prepare, run_fuse, run_method
 
 __all__ = [
     "DEFAULT",
@@ -16,5 +16,6 @@ __all__ = [
     "fuse_pair",
     "prepare",
     "run_fuse",
+    "run_method",
     "summarise",
 ]

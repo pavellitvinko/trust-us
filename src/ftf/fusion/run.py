@@ -46,6 +46,17 @@ def fuse_pair(
     return relation
 
 
+def run_method(store: Store, config: FusionConfig = DEFAULT):
+    """Fuse, group, then fuse again with rarity counted over the campaigns just found.
+    Returns the final groups."""
+    from ..grouping import build_groups
+
+    run_fuse(store, config)
+    groups = build_groups(store, config)
+    run_fuse(store, config, campaigns=groups.campaign_of)
+    return build_groups(store, config)
+
+
 def run_fuse(
     store: Store,
     config: FusionConfig = DEFAULT,

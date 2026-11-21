@@ -8,7 +8,7 @@ from pathlib import Path
 from . import pipeline
 from .config import get_settings
 from .contracts import RelationType
-from .fusion import fuse_pair, prepare, run_fuse
+from .fusion import fuse_pair, prepare, run_method
 from .ingest import ingest_path
 from .store import Store
 
@@ -34,7 +34,10 @@ def cmd_run(args) -> None:
     print(f"observations: {pipeline.run_extract(store)}")
     print(f"fingerprints: {pipeline.run_fingerprint(store)}")
     print(f"evidence rows: {pipeline.run_compare_all(store)}")
-    print(f"relations: {run_fuse(store)}")
+    groups = run_method(store)
+    print(
+        f"relations: {len(store.relations())}; campaigns: {len(groups.campaigns)}; families: {len(groups.families)}"
+    )
 
 
 def cmd_load_fixtures(args) -> None:
@@ -45,7 +48,10 @@ def cmd_load_fixtures(args) -> None:
     print(f"views: {len(store.views())}")
     print(f"fingerprints: {pipeline.run_fingerprint(store)}")
     print(f"evidence rows: {pipeline.run_compare_all(store)}")
-    print(f"relations: {run_fuse(store)}")
+    groups = run_method(store)
+    print(
+        f"relations: {len(store.relations())}; campaigns: {len(groups.campaigns)}; families: {len(groups.families)}"
+    )
 
 
 def cmd_views(args) -> None:
@@ -125,6 +131,42 @@ def cmd_explain(args) -> None:
         print(f"  - {reason}")
 
 
+def cmd_eval(args) -> None:
+    """Agreement with the reference pairs from the baseline report."""
+    from .eval import evaluate, format_report
+    from .eval.fixtures import store_from_fixtures
+
+    if args.fixtures:
+        store = store_from_fixtures()
+        pipeline.run_fingerprint(store)
+        run_method(store)
+    else:
+        store = _store()
+    print(format_report(evaluate(store), show_agreed=args.all))
+
+
+def cmd_groups(args) -> None:
+    from .grouping import build_groups
+
+    store = _store()
+    labels = {v.view_id: v.label for v in store.views()}
+    g = build_groups(store)
+    for fid, cids in sorted(g.families.items()):
+        print(f"family {fid}  ({len(cids)} campaign{'s' if len(cids) != 1 else ''})")
+        for cid in cids:
+            print(f"  campaign {cid}")
+            for v in g.campaigns[cid]:
+                print(f"    {v:16} {labels.get(v, '')}")
+    if g.playbooks:
+        print()
+        for pid, views in sorted(g.playbooks.items()):
+            print(f"playbook {pid}: " + ", ".join(views))
+    if g.rejected_merges:
+        print()
+        for a, b, why in g.rejected_merges:
+            print(f"rejected merge {a} <-> {b}: {why}")
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="ftf", description="Follow the Fake")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -168,6 +210,15 @@ def main(argv: list[str] | None = None) -> None:
     )
     p.add_argument("path", nargs="?", default=None)
     p.set_defaults(func=cmd_load_fixtures)
+
+    sub.add_parser(
+        "groups", help="campaigns, families and playbooks from stored relations"
+    ).set_defaults(func=cmd_groups)
+
+    p = sub.add_parser("eval", help="agreement with the reference pairs (docs/baseline-report.md)")
+    p.add_argument("--fixtures", action="store_true", help="evaluate the fixtures in memory")
+    p.add_argument("--all", action="store_true", help="also list the agreed pairs")
+    p.set_defaults(func=cmd_eval)
 
     args = parser.parse_args(argv)
     args.func(args)
