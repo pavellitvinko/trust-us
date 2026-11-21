@@ -5,14 +5,28 @@ HackNation challenge "Kolekcjoner fejków", set by NASK.
 
 - Design: [docs/architecture.md](docs/architecture.md)
 - Signals: [docs/signal-catalogue.md](docs/signal-catalogue.md)
+- **NEW**: [Pattern Library](PATTERN_LIBRARY.md) — Pattern discovery, library versioning, novelty tracking
 
-**Status: skeleton + identifier and kit extractors.** Ingestion, storage, the plugin interfaces and
-one reference slice (page domain → `ids.domain` layer → shared-value comparison) work end
-to end. The Evidence track's identifier extractors (tracker config, pixels and tag IDs, ad
+**Status: skeleton + identifier and kit extractors. NEW: Pattern discovery (architecture §6).**
+
+Ingestion, storage, the plugin interfaces and one reference slice (page domain → `ids.domain` layer → shared-value comparison) work end to end. 
+
+**NEW IN THIS SESSION**:
+- ✅ **Pattern library** (`src/ftf/patterns/`): Versioned library with stable IDs, merge/split history
+- ✅ **Embedding & clustering**: Reproducible technique card clustering
+- ✅ **Induction**: Model-generated pattern definitions from clusters
+- ✅ **Matching**: Judge views against library patterns (fingerprint layer)
+- ✅ **Novelty tracking**: Promote candidates when seen twice independently
+- ✅ **Validation**: All 19 group H techniques discoverable, reproducible on shuffled input
+- ✅ **Tests**: 17 unit and integration tests, all pass
+
+The Evidence track's identifier extractors (tracker config, pixels and tag IDs, ad
 parameters, conversion and outbound targets), tracker-kit extractors (URL parameter
 schema, path conventions, API routes, config key paths, hidden fields, server headers) and
-asset hashes (exact by role, grayscale perceptual) produce observations on the sample; no
-layer consumes them yet. Everything else in the design is still to be built.
+asset hashes (exact by role, grayscale perceptual) produce observations on the sample. The
+Perception track now includes pattern discovery: technique card observation, induction into
+versioned patterns, and pattern-based playbook grouping.
+
 
 ## Run locally
 
