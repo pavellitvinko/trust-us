@@ -188,6 +188,25 @@ def test_held_out_folder_does_not_shape_the_weights(base):
     assert headline.outcome is Outcome.DUPLICATE_OF and after == before
 
 
+def test_candidate_generation_matches_all_pairs_on_real_files(base):
+    """HAC-36: the same relations and groups either way, and an honest count of the saving."""
+    parity = sample.candidate_parity(base)
+    assert parity.differences == [] and parity.groups_equal and parity.reasons_differ == 0
+    assert parity.holds
+    assert parity.all_pairs == parity.views * (parity.views - 1) // 2
+    # no saving within a view kind: the catch-all buckets propose every page and image pair
+    assert parity.by_kind["page-page"][0] == parity.by_kind["page-page"][1]
+    assert parity.by_kind["image-page"][0] == 0
+    assert sum(got for got, _ in parity.by_kind.values()) == parity.compared
+    built, index_only = parity.variants
+    assert built.pairs == parity.compared and built.scored_missed == []
+    assert index_only.pairs < built.pairs / 2
+    assert index_only.linked_found == index_only.linked_total > 0  # no link is lost
+    assert all(score < 0.5 for _, _, score in index_only.scored_missed)  # only weak similarity
+    text = "\n".join(sample.format_candidates(parity))
+    assert "**holds**" in text and "not a saving" in text
+
+
 # -- the file-level damage, on synthetic files (no sample needed) ----------------------------
 
 

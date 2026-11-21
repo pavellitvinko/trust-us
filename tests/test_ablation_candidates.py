@@ -59,6 +59,34 @@ def test_cheap_relation_for_non_candidates_uses_coverage_only():
     s.close()
 
 
+def test_skipped_pairs_carry_the_fusion_reasons_and_a_marker():
+    """HAC-36: a pair that was not compared reads like the all-pairs result, plus one line."""
+    from ftf.fusion import fuse_pair, prepare
+    from ftf.grouping.candidates import NOT_COMPARED, candidate_pairs
+
+    s = store_from_fixtures()
+    pipeline.run_fingerprint(s)
+    prepare(s)
+    proposed = candidate_pairs(s)
+    views = sorted(v.view_id for v in s.views())
+    skipped = [
+        (a, b) for i, a in enumerate(views) for b in views[i + 1 :] if (a, b) not in proposed
+    ]
+    assert skipped
+    for a, b in skipped:
+        cheap = cheap_relation(s, a, b)
+        full = fuse_pair(s, a, b, persist=False)
+        assert (cheap.type, cheap.confidence, cheap.coverage) == (
+            full.type,
+            full.confidence,
+            full.coverage,
+        ), (a, b)
+        assert cheap.reasons == [*full.reasons, NOT_COMPARED], (a, b)
+        assert "groups comparable" in cheap.reasons[0]
+    weights.reset()
+    s.close()
+
+
 def test_disabled_layers_restores_the_registry():
     before = layers.names()
     with disabled_layers(["ids.campaign", "kit.dom"]):

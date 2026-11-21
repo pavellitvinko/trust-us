@@ -658,6 +658,229 @@ def loio_sample(
     return out
 
 
+# -- candidate generation against all pairs ---------------------------------------------------
+
+
+@dataclass
+class IndexVariant:
+    """What one choice of index keys would propose, measured against the all-pairs result."""
+
+    name: str
+    pairs: int
+    page_pairs: int
+    linked_found: int
+    linked_total: int
+    scored_missed: list[tuple[str, str, float]]  # pairs with a non-zero tier score not proposed
+
+
+@dataclass
+class CandidateParity:
+    views: int
+    all_pairs: int
+    compared: int
+    by_kind: dict[str, tuple[int, int]]  # "page-page" -> (compared, all)
+    by_key: list[tuple[str, int]]  # index key family -> pairs it proposes
+    differences: list[str]  # empty when the two runs agree
+    reasons_differ: int  # skipped pairs whose reasons differ beyond the marker
+    groups_equal: bool
+    variants: list[IndexVariant]
+
+    @property
+    def holds(self) -> bool:
+        return not self.differences and self.groups_equal and not self.reasons_differ
+
+
+def _kind_pair(kinds: dict[str, str], a: str, b: str) -> str:
+    return "-".join(sorted((kinds[a], kinds[b])))
+
+
+def candidate_parity(base: Store, config: FusionConfig = DEFAULT) -> CandidateParity:
+    """Run the method twice on fresh stores, all pairs and candidates only, and compare
+    every relation and every group. Then measure what the index proposes with and without
+    the catch-all buckets of the perceptual and vector layers."""
+    from itertools import combinations
+
+    from ..grouping.candidates import NOT_COMPARED, build_index, candidate_pairs
+
+    load_plugins()
+    with model_off():
+        full = clone(base)
+        pipeline.run_fingerprint(full)
+        groups_full = run_method(full, config)
+        rel_full = {(r.view_a, r.view_b): r for r in full.relations()}
+        weights.reset()
+
+        cand = clone(base)
+        pipeline.run_fingerprint(cand)
+        groups_cand = run_method(cand, config, candidates=True)
+        rel_cand = {(r.view_a, r.view_b): r for r in cand.relations()}
+        proposed = candidate_pairs(cand)
+        index = build_index(cand)
+        kinds = {v.view_id: v.kind.value for v in cand.views()}
+        labels = view_labels(cand)
+        cand.close()
+        full.close()
+    weights.reset()
+
+    differences = []
+    reasons_differ = 0
+    for key in sorted(set(rel_full) | set(rel_cand)):
+        a, b = rel_full.get(key), rel_cand.get(key)
+        name = f"{labels[key[0]]} ~ {labels[key[1]]}"
+        if a is None or b is None:
+            differences.append(f"{name}: relation missing from one run")
+            continue
+        if (a.type, a.confidence) != (b.type, b.confidence):
+            differences.append(
+                f"{name}: {a.type.value}/{a.confidence or '-'} vs {b.type.value}/{b.confidence or '-'}"
+            )
+        elif abs(a.coverage - b.coverage) > 1e-6:
+            differences.append(f"{name}: coverage {a.coverage} vs {b.coverage}")
+        elif key in proposed and a.tier_scores != b.tier_scores:
+            differences.append(f"{name}: tier scores differ on a compared pair")
+        elif key not in proposed and max(a.tier_scores.values()) >= 0.1:
+            differences.append(
+                f"{name}: skipped although a tier scores {max(a.tier_scores.values()):.2f}"
+            )
+        if key not in proposed and [*a.reasons, NOT_COMPARED] != b.reasons:
+            reasons_differ += 1
+        if key in proposed and a.reasons != b.reasons:
+            reasons_differ += 1
+
+    all_by_kind: Counter = Counter(
+        _kind_pair(kinds, a, b) for a, b in combinations(sorted(kinds), 2)
+    )
+    got_by_kind: Counter = Counter(_kind_pair(kinds, a, b) for a, b in proposed)
+    pairs_by_key: dict[str, set] = defaultdict(set)
+    for key, members in index.items():
+        family = key[0] + (" (every holder)" if key[1] == "*" else "")
+        pairs_by_key[family] |= {tuple(sorted(p)) for p in combinations(sorted(members), 2)}
+    by_key = sorted(
+        ((family, len(pairs)) for family, pairs in pairs_by_key.items() if pairs),
+        key=lambda x: (-x[1], x[0]),
+    )
+
+    linked = {k for k, r in rel_full.items() if r.type in LINKED}
+    scored = {k: max(r.tier_scores.values()) for k, r in rel_full.items()}
+
+    def variant(name: str, keep: Callable[[tuple], bool]) -> IndexVariant:
+        pairs: set[tuple[str, str]] = set()
+        for key, members in index.items():
+            if keep(key):
+                pairs |= {tuple(sorted(p)) for p in combinations(sorted(members), 2)}
+        missed = sorted(
+            (
+                (labels[a], labels[b], scored[(a, b)])
+                for (a, b) in scored
+                if scored[(a, b)] > 0 and (a, b) not in pairs
+            ),
+            key=lambda x: -x[2],
+        )
+        return IndexVariant(
+            name=name,
+            pairs=len(pairs),
+            page_pairs=sum(1 for a, b in pairs if _kind_pair(kinds, a, b) == "page-page"),
+            linked_found=len(linked & pairs),
+            linked_total=len(linked),
+            scored_missed=missed,
+        )
+
+    return CandidateParity(
+        views=len(kinds),
+        all_pairs=len(rel_full),
+        compared=len(proposed),
+        by_kind={k: (got_by_kind.get(k, 0), n) for k, n in sorted(all_by_kind.items())},
+        by_key=by_key,
+        differences=differences,
+        reasons_differ=reasons_differ,
+        groups_equal=(
+            groups_full.campaigns == groups_cand.campaigns
+            and groups_full.families == groups_cand.families
+            and groups_full.playbooks == groups_cand.playbooks
+            and {
+                i: [(e.source, e.target) for e in edges[0]]
+                for i, edges in groups_full.funnel_edges.items()
+            }
+            == {
+                i: [(e.source, e.target) for e in edges[0]]
+                for i, edges in groups_cand.funnel_edges.items()
+            }
+        ),
+        variants=[
+            variant("as built: all index keys", lambda key: True),
+            variant("identifier, set and MinHash keys only", lambda key: key[1] != "*"),
+        ],
+    )
+
+
+def format_candidates(p: CandidateParity) -> list[str]:
+    page = p.by_kind.get("page-page", (0, 0))
+    out = [
+        f"Parity with the all-pairs run: **{'holds' if p.holds else 'BROKEN'}**. Both runs store "
+        f"{p.all_pairs} relations for {p.views} views. Relation type, confidence label and "
+        "coverage are equal for every pair, tier scores for every compared pair, and campaigns, "
+        "families, playbooks and funnel edges are identical. A skipped pair carries the same "
+        "reasons as in the all-pairs run plus one line saying it was not compared in full"
+        + (f" ({p.reasons_differ} pairs differ in their reasons)." if p.reasons_differ else "."),
+        *[f"- {d}" for d in p.differences],
+        "",
+        (
+            f"Pairs compared in full: {p.compared} of {p.all_pairs}. This is **not a saving on this "
+            f"corpus**: {page[0]} of {page[1]} page pairs are still compared, because the perceptual "
+            "and vector layers put every view that holds them into one bucket. Only pairs across "
+            "view kinds are skipped, and those are insufficient evidence in either run."
+        ),
+        "",
+        *_table(
+            ["View kinds", "Compared in full", "All pairs"],
+            [[k, got, total] for k, (got, total) in p.by_kind.items()],
+        ),
+        "",
+        *_table(
+            ["Index key family (layer)", "Distinct pairs it proposes"],
+            [[k, n] for k, n in p.by_key],
+        ),
+        "",
+        (
+            "What the index would propose under two key choices, measured against the all-pairs "
+            "relations (a measurement only; the first row is what the code does):"
+        ),
+        "",
+        *_table(
+            [
+                "Index keys",
+                "Pairs proposed",
+                "Page pairs",
+                "Linked pairs found",
+                "Pairs with a non-zero score not proposed",
+            ],
+            [
+                [
+                    v.name,
+                    v.pairs,
+                    f"{v.page_pairs} of {page[1]}",
+                    f"{v.linked_found} of {v.linked_total}",
+                    f"{len(v.scored_missed)}"
+                    + (
+                        f" (highest tier score {v.scored_missed[0][2]:.2f})"
+                        if v.scored_missed
+                        else ""
+                    ),
+                ]
+                for v in p.variants
+            ],
+        ),
+        "",
+        (
+            "Scaling is therefore not demonstrated: at this size the catch-all buckets make "
+            "candidate generation equal to all pairs within a view kind. The identifier index "
+            "alone finds every linked pair here, but it would not find a link that rests only on "
+            "vector similarity (a playbook link from real embeddings), which is why the buckets stay."
+        ),
+    ]
+    return out
+
+
 # -- markdown ----------------------------------------------------------------------------------
 
 
@@ -784,7 +1007,7 @@ def validation_report(
     sample_dir: Path,
     config: FusionConfig = DEFAULT,
     workdir: Path | None = None,
-    parts: Iterable[str] = ("degrade", "ablate", "loio"),
+    parts: Iterable[str] = ("candidates", "degrade", "ablate", "loio"),
 ) -> str:
     """The whole real-sample validation as one Markdown document."""
     parts = set(parts)
@@ -885,6 +1108,13 @@ def validation_report(
         "- Reading what a screenshot or a video shows, and so an ad-to-page funnel edge,",
         "  needs the vision model: unavailable in this mode.",
     ]
+    if "candidates" in parts:
+        out += [
+            "",
+            "## Candidate generation against all pairs (HAC-36)",
+            "",
+            *format_candidates(candidate_parity(base, config)),
+        ]
     if "degrade" in parts:
         out += [
             "",
