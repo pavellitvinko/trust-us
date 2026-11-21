@@ -12,7 +12,7 @@ ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
     PATH=/opt/venv/bin:$PATH
 
 WORKDIR /app
-COPY pyproject.toml README.md uv.lock ./
+COPY pyproject.toml uv.lock ./
 RUN uv sync --locked --no-dev --no-install-project --no-cache
 
 COPY src ./src

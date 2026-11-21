@@ -11,6 +11,7 @@ services:
     volumes:
       - ./data:/data
       # Material to ingest, read-only. Point FTF_SAMPLE_DIR at your copy of the sample.
+      # If the folder is missing, Docker mounts an empty one and `ftf ingest` reports no views.
       - ${FTF_SAMPLE_DIR:-./testing_sample}:/sample:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health', timeout=3)"]
