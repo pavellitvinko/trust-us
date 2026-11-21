@@ -8,18 +8,11 @@ from __future__ import annotations
 
 from urllib.parse import urlsplit
 
-import tldextract
-
-from ..contracts import Observation, Source, View, ViewKind
+from ..contracts import Observation, View, ViewKind
 from ..registry import Context, extractors
+from ._material import landing_url, registrable_domain
 
-# Use the suffix list bundled with the library: no network call at run time.
-_tld = tldextract.TLDExtract(suffix_list_urls=())
-
-
-def registrable_domain(host: str) -> str:
-    parts = _tld(host)
-    return f"{parts.domain}.{parts.suffix}" if parts.domain and parts.suffix else host
+__all__ = ["PageIdentity", "registrable_domain"]
 
 
 @extractors.register
@@ -30,19 +23,10 @@ class PageIdentity:
     def run(self, view: View, ctx: Context) -> list[Observation]:
         if view.kind is not ViewKind.PAGE:
             return []
-        # In order of trust. A first-party request is not the page itself, so it gives the host only.
-        choices = (
-            ("saved_from", view.primary, "html:comment[saved from url]", True),
-            ("manifest_url", view.primary, "manifest.json:page_url", True),
-            ("har_document", view.har, "har:main document request.url", True),
-            ("har_first_party", view.har, "har:busiest first-party host", False),
-        )
-        for key, file, locator, is_page_url in choices:
-            if key in view.meta:
-                url, source = view.meta[key], Source(file=file, locator=locator)
-                break
-        else:
+        found = landing_url(view)
+        if found is None:
             return []
+        url, source, is_page_url = found
         parts = urlsplit(url)
         host = (parts.hostname or "").lower()
         if not host:

@@ -45,7 +45,7 @@ Harvest from every location, not one regex: inline scripts, config blobs, hidden
 | A8 | Embedded public keys, API key IDs (`APPA-165`), encrypted blobs' static parts | L | T1 | S | 48 = 61 |
 | A9 | Internal human-readable labels (`1038 \| PL - Brzoska Crime 2 - …`, `OPER / PL / Camp1`) | B | T1 | S | 1, 2, 48, 61 |
 | A10 | Ad platform IDs in the landing URL (`ad_id`, `adset_name`, `utm_id`, account naming conventions such as `hk77_tv6_…`) | L | T1–T3 | S | 14, 36, 47 |
-| A11 | Leaked secrets in URLs (ad-platform access tokens). Store only a hash; never display or send to a model. | B | T1 | S | 36 |
+| A11 | Leaked secrets in URLs (ad-platform access tokens). Stored as found, like any other identifier (team decision 2026-11-21). | B | T1 | S | 36 |
 | A12 | Contact identifiers: phone, e-mail, Telegram/WhatsApp handle, payment account, crypto wallet | L | T1 | S | — |
 | A13 | Product / brand / offer name (invented names like "Świtowin Zyskarnia", "Orzeł Fundaris", "Trwały Działunek") | L | T1–T2 | S+T | 1, 2, 14, 47, 48, 61 |
 | A14 | Registrable domain of the page (public-suffix aware), and host + landing path | L | T1 | S | `healthlinkq.pro` + same path in 2 and 3; `glowpixel.org` in all three 61 views; `ineptsolidoval.top` in both 14 variants |
