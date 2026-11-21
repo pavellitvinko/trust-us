@@ -335,7 +335,9 @@ def _body_text(entry: dict[str, Any]) -> str | None:
 
 
 def _post_text(request: dict[str, Any]) -> str | None:
-    post = request.get("postData") or {}
+    post = request.get("postData")
+    if not isinstance(post, dict):
+        return None
     text = post.get("text")
     if isinstance(text, str) and text:
         return text
@@ -345,6 +347,24 @@ def _post_text(request: dict[str, Any]) -> str | None:
             f"{p.get('name', '')}={p.get('value', '')}" for p in params if isinstance(p, dict)
         )
     return None
+
+
+def _har_request(index: int, entry: dict[str, Any], har: str) -> HarRequest | None:
+    req = entry.get("request") or {}
+    url = req.get("url")
+    if not isinstance(url, str) or not url:
+        return None
+    response = entry.get("response") or {}
+    content = response.get("content") or {} if isinstance(response, dict) else {}
+    return HarRequest(
+        index=index,
+        url=url,
+        method=str(req.get("method") or "GET").upper(),
+        post_text=_post_text(req),
+        resource_type=str(entry.get("_resourceType") or "").lower(),
+        mime=str(content.get("mimeType") or "") if isinstance(content, dict) else "",
+        file=har,
+    )
 
 
 def _guard(errors: list[str], step: str, fn: Callable[[], None]) -> None:
@@ -361,7 +381,7 @@ def _load(
     har: str | None,
     resources_dir: str | None,
     page_host: str | None,
-    stamp: tuple[float, ...],  # mtimes: a re-saved file is read again
+    stamp: tuple[int, ...],  # file state: a changed file is read again
 ) -> Material:
     base = Path(root)
     errors: list[str] = []
@@ -374,24 +394,11 @@ def _load(
         state["entries"] = entries
         requests = []
         for i, entry in enumerate(entries):
-            req = entry.get("request") or {}
-            url = req.get("url")
-            if not isinstance(url, str) or not url:
+            try:  # one malformed entry must not cost the others
+                requests.append(_har_request(i, entry, har))
+            except Exception:  # noqa: BLE001, S112
                 continue
-            requests.append(
-                HarRequest(
-                    index=i,
-                    url=url,
-                    method=str(req.get("method") or "GET").upper(),
-                    post_text=_post_text(req),
-                    resource_type=str(entry.get("_resourceType") or "").lower(),
-                    mime=str(
-                        ((entry.get("response") or {}).get("content") or {}).get("mimeType") or ""
-                    ),
-                    file=har,
-                )
-            )
-        state["har_requests"] = tuple(requests)
+        state["har_requests"] = tuple(r for r in requests if r is not None)
 
     def read_html() -> None:
         if primary and Path(primary).suffix.lower() in (".html", ".htm"):
@@ -463,7 +470,7 @@ def _load(
         entries = state.get("entries") or []
         scripts = []
         for req in state.get("har_requests", ()):
-            host = (urlsplit(req.url).hostname or "").lower()
+            host = host_of(req.url)
             is_js = req.resource_type == "script" or "javascript" in req.mime.lower()
             if not is_js or registrable_domain(host) != own:
                 continue
@@ -510,17 +517,46 @@ def load(view: View, ctx: Context) -> Material:
         return Material(errors=("incident not found",))
     found = landing_url(view)
     page_host = ((urlsplit(found[0]).hostname or "").lower() or None) if found else None
-    stamp = tuple(_mtime(Path(root), rel) for rel in (view.primary, view.har, view.resources_dir))
+    base = Path(root)
+    stamp = (
+        *_file_stamp(base, view.primary),
+        *_file_stamp(base, view.har),
+        *_dir_stamp(base, view.resources_dir),
+    )
     return _load(root, view.primary, view.har, view.resources_dir, page_host, stamp)
 
 
-def _mtime(root: Path, rel: str | None) -> float:
+def _file_stamp(root: Path, rel: str | None) -> tuple[int, int]:
+    """(mtime in ns, size) of one file; zeros when absent."""
     if not rel:
-        return 0.0
+        return 0, 0
     try:
-        return (root / rel).stat().st_mtime
+        st = (root / rel).stat()
     except OSError:
-        return 0.0
+        return 0, 0
+    return st.st_mtime_ns, st.st_size
+
+
+def _dir_stamp(root: Path, rel: str | None) -> tuple[int, int, int]:
+    """(file count, total size, newest mtime in ns) of a resources folder.
+
+    A directory's own mtime does not change when a file inside it is edited in place,
+    so the files themselves are looked at.
+    """
+    if not rel:
+        return 0, 0, 0
+    count = size = newest = 0
+    try:
+        for p in (root / rel).rglob("*"):
+            try:
+                st = p.stat()
+            except OSError:
+                continue
+            if p.is_file():
+                count, size, newest = count + 1, size + st.st_size, max(newest, st.st_mtime_ns)
+    except OSError:
+        return 0, 0, 0
+    return count, size, newest
 
 
 def clear_cache() -> None:

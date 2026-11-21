@@ -220,3 +220,53 @@ def test_emitter_dedups_and_keeps_first_source(store, tmp_path):
     assert not emit("A3", "fb_pixel", "123456789012345", second)
     assert not emit("A6", "aff.sub1", "{sub1}", first)
     assert [o.source for o in emit.out] == [first]
+
+
+# --- review of PR #2 ----------------------------------------------------------------------
+
+
+def test_malformed_post_body_does_not_cost_other_requests(store, tmp_path, ctx_for):
+    root = tmp_path / "r1"
+    root.mkdir()
+    url = "https://shop.example.org/L1/"
+    (root / "page.html").write_text(f"<!-- saved from url=(0028){url} -->\n<html></html>")
+    post = lambda u, body: {"request": {"url": u, "method": "POST", "postData": body}}
+    entries = [
+        {
+            "request": {"url": url, "method": "GET"},
+            "response": {"status": 200, "content": {"mimeType": "text/html"}},
+            "_resourceType": "document",
+        },
+        post("https://a.example.net/x", {"text": "pixel=1"}),
+        post("https://b.example.net/y", "oops"),
+        post("https://c.example.net/z", {"params": [{"name": "k", "value": "v"}]}),
+    ]
+    (root / "shop.example.org.har").write_text(json.dumps({"log": {"entries": entries}}))
+    view = _page(store, root)
+    mat = m.load(view, ctx_for(store))
+    assert [r.index for r in mat.har_requests] == [0, 1, 2, 3]
+    assert [r.post_text for r in mat.har_requests[1:]] == ["pixel=1", None, "k=v"]
+
+
+def test_cache_sees_a_resource_edited_in_place(store, tmp_path, ctx_for):
+    import os
+
+    root = tmp_path / "r2"
+    root.mkdir()
+    (root / "page.html").write_text(
+        "<!-- saved from url=(0028)https://shop.example.org/L1/ -->\n<html></html>"
+    )
+    files = root / "page_files"
+    files.mkdir()
+    script = files / "app.js"
+    script.write_text("fbq('init', '1111111111111111');")
+    view = _page(store, root)
+    assert m.load(view, ctx_for(store)).first_party_scripts[0].text.endswith("'1111111111111111');")
+
+    folder_mtime = files.stat().st_mtime_ns
+    script.write_text("fbq('init', '2222222222222222');")  # same size, same folder
+    later = script.stat().st_mtime_ns + 5_000_000_000
+    os.utime(script, ns=(later, later))
+    os.utime(files, ns=(folder_mtime, folder_mtime))  # the folder itself looks unchanged
+    view = _page(store, root)  # re-ingest in the same process, no clear_cache()
+    assert m.load(view, Context(store)).first_party_scripts[0].text.endswith("'2222222222222222');")

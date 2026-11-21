@@ -73,6 +73,9 @@ _ID_LIKE = re.compile(r"^(?:\d+|[0-9a-f]{8}-[0-9a-f-]{27,}|[0-9a-f]{16,})$", re.
 
 PHONE = re.compile(r"^\+?\d{7,15}$")
 EMAIL = re.compile(r"^[\w.+\-]+@[\w\-]+(?:\.[\w\-]+)+$")
+TELEGRAM_HOSTS = {"t.me", "telegram.me", "telegram.dog"}
+TELEGRAM_RESERVED = {"joinchat", "s", "share", "addstickers", "addemoji", "proxy", "iv", "c"}
+WHATSAPP_HOSTS = {"wa.me", "api.whatsapp.com", "web.whatsapp.com", "whatsapp.com"}
 HANDLE = re.compile(r"^[A-Za-z][\w]{3,31}$")
 IBAN = re.compile(r"\b([A-Z]{2}\d{2}(?: ?[A-Z0-9]{4}){3,7}(?: ?[A-Z0-9]{1,3})?)\b")
 _TAGS = re.compile(r"<(script|style)\b.*?</\1\s*>|<[^>]+>", re.IGNORECASE | re.DOTALL)
@@ -149,8 +152,8 @@ class ConversionTargets:
                 action = form.attrs.get("action", "").strip()
                 if not action or action.startswith(("#", "javascript:")):
                     continue
-                url = absolute(action)
-                endpoint(url if "//" in action else urlsplit(url).path, form.source)
+                url = absolute(action)  # resolved against <base href> or the page URL
+                endpoint(url, form.source)
                 outbound(url, form.source)
 
         def endpoint_constants() -> None:
@@ -242,6 +245,26 @@ class ConversionTargets:
                     else:
                         emit("A13", "offer.name", value, source, purpose=Purpose.BOTH)
 
+        def messenger(href: str, source: Source) -> None:
+            """Telegram and WhatsApp links, recognised by hostname only."""
+            try:
+                parts = urlsplit(href)
+            except ValueError:
+                return
+            host = (parts.hostname or "").lower().removeprefix("www.")
+            path = parts.path.strip("/")
+            if host in TELEGRAM_HOSTS:
+                handle = path.split("/")[0].lstrip("@")
+                if HANDLE.match(handle) and handle.lower() not in TELEGRAM_RESERVED:
+                    emit("A12", "contact.telegram", handle.lower(), source, raw=href)
+            elif host in WHATSAPP_HOSTS:
+                phone = path if host == "wa.me" else dict(m.query_params(href)).get("phone", "")
+                if host != "wa.me" and path != "send":
+                    return
+                phone = re.sub(r"\D", "", phone)
+                if PHONE.match(phone):
+                    emit("A12", "contact.whatsapp", phone, source, raw=href)
+
         def contacts() -> None:
             for a in mat.anchors:
                 href = unquote(a.attrs.get("href", "").strip())
@@ -254,16 +277,8 @@ class ConversionTargets:
                     email = href[7:].split("?")[0].strip().lower()
                     if EMAIL.match(email):
                         emit("A12", "contact.email", email, a.source, raw=href)
-                elif "t.me/" in lower or "telegram.me/" in lower:
-                    handle = urlsplit(href).path.strip("/").split("/")[0].lstrip("@")
-                    if HANDLE.match(handle):
-                        emit("A12", "contact.telegram", handle.lower(), a.source, raw=href)
-                elif "wa.me/" in lower or "whatsapp.com/send" in lower:
-                    phone = urlsplit(href).path.strip("/") if "wa.me/" in lower else ""
-                    phone = phone or dict(m.query_params(href)).get("phone", "")
-                    phone = re.sub(r"\D", "", phone)
-                    if PHONE.match(phone):
-                        emit("A12", "contact.whatsapp", phone, a.source, raw=href)
+                else:
+                    messenger(href, a.source)
             if mat.html is not None:
                 visible = _TAGS.sub(" ", mat.html.text)
                 for match in IBAN.finditer(visible):

@@ -242,3 +242,31 @@ def test_vendor_library_in_files_is_not_the_operator(store, tmp_path):
     obs = conv(store, page(tmp_path / "1", files=files))
     assert values(obs, "form_endpoint_path") == ["/api/order"]
     assert values(obs, "form_endpoint_host") == ["lead.example-crm.com"]
+
+
+# --- review of PR #2 ----------------------------------------------------------------------
+
+
+def test_messengers_are_matched_by_hostname(store, tmp_path):
+    body = (
+        '<a href="https://www.visit.me/promo">not telegram</a>'
+        '<a href="https://example.com/?next=https://t.me/hidden">telegram in a query</a>'
+        '<a href="https://shop.example.com/t.me/path">telegram in a path</a>'
+        '<a href="https://t.me/joinchat/AAAAAE">invite link, no handle</a>'
+        '<a href="https://notwa.me/48600100200">not whatsapp</a>'
+        '<a href="https://whatsapp.com/channel?phone=48600100299">not a send link</a>'
+        '<a href="https://www.t.me/RealHandle">real</a>'
+        '<a href="https://web.whatsapp.com/send?phone=48600100202">real</a>'
+    )
+    obs = conv(store, page(tmp_path / "1", body=body))
+    assert values(obs, "contact.telegram") == ["realhandle"]
+    assert values(obs, "contact.whatsapp") == ["48600100202"]
+
+
+def test_relative_form_action_keeps_host_resolved_through_base(store, tmp_path):
+    head = '<base href="https://crm.target.net/leads/">'
+    body = '<form action="submit.php" method="post"></form>'
+    obs = conv(store, page(tmp_path / "1", head=head, body=body))
+    assert values(obs, "form_endpoint_host") == ["crm.target.net"]
+    assert values(obs, "form_endpoint_path") == ["/leads/submit.php"]
+    assert values(obs, "outbound.domain") == ["target.net"]
