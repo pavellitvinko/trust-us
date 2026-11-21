@@ -13,7 +13,7 @@ from ..registry import enrichers
 from .warning_sources import Sources, digest, domain, load_sources, parent_hosts
 
 NAME = "enrich.warning_lists"
-VERSION = "2"
+VERSION = "3"
 SIGNALS = {"cert": "N3", "knf": "N4", "gambling": "N5"}
 DOMAIN_NAMESPACES = {"url.host", "domain.registrable", "image.domain"}
 ENTITY_NAMESPACES = {"page.entity.organisation", "brand.offer", "offer.name", "image.brand_offer"}
@@ -80,7 +80,9 @@ def supported_inputs(observations: list[Observation]) -> list[dict]:
         value = o.value.get("name") if isinstance(o.value, dict) else o.value
         if not isinstance(value, str) or not value.strip():
             continue
-        normalised = domain(value) if kind == "domain" else normalise_name(value)
+        normalised = (
+            domain(value, allow_underscores=True) if kind == "domain" else normalise_name(value)
+        )
         if not normalised:
             continue
         inputs.append(

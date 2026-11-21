@@ -13,12 +13,14 @@ from http.client import HTTPException
 from pathlib import Path
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
+from xml.etree import ElementTree
 
 CERT_URL = "https://hole.cert.pl/domains/v2/domains.txt"
 KNF_URL = "https://www.knf.gov.pl/dla_konsumenta/ostrzezenia_publiczne"
 MF_URL = "https://hazard.mf.gov.pl/"
+MF_REGISTER_URL = "https://hazard.mf.gov.pl/api/Register"
 URLS = {"cert": CERT_URL, "knf": KNF_URL, "gambling": MF_URL}
-PARSER_VERSION = "2"
+PARSER_VERSION = "3"
 MAX_DOWNLOAD = 32 * 1024 * 1024
 
 
@@ -26,7 +28,7 @@ def digest(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
-def domain(value: str) -> str | None:
+def domain(value: str, *, allow_underscores: bool = False) -> str | None:
     """A host, never a substring, IP address, wildcard or URL path."""
     try:
         host = urlsplit(value if "://" in value else "//" + value).hostname
@@ -38,8 +40,14 @@ def domain(value: str) -> str | None:
     if len(host) > 253 or "." not in host or host.replace(".", "").isdigit():
         return None
     labels = host.split(".")
-    if any(not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", x) for x in labels):
-        return None
+    for i, label in enumerate(labels):
+        pattern = (
+            r"[a-z0-9_](?:[a-z0-9_-]{0,61}[a-z0-9_])?"
+            if allow_underscores and i < len(labels) - 1
+            else r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
+        )
+        if not re.fullmatch(pattern, label):
+            return None
     return host
 
 
@@ -164,6 +172,52 @@ def parse_domains(content: str) -> list[dict]:
     return records
 
 
+def parse_gambling_xml(content: str) -> list[dict]:
+    """Parse a browser-downloaded active MF register, retaining each public record ID."""
+    if re.search(r"<!\s*(?:DOCTYPE|ENTITY)\b", content, re.IGNORECASE):
+        raise ValueError("XML declarations with external/custom entities are not supported")
+    try:
+        root = ElementTree.fromstring(content)
+    except ElementTree.ParseError as exc:
+        raise ValueError("invalid gambling-register XML") from exc
+    ns = "{http://www.hazard.mf.gov.pl/2017/03/21/}"
+    if root.tag != ns + "Rejestr":
+        raise ValueError("expected the official MF register XML namespace and root")
+    records, ids = [], set()
+    for entry in root:
+        number = entry.get("Lp", "")
+        raw = (entry.findtext(ns + "AdresDomeny") or "").strip()
+        listed_at = (entry.findtext(ns + "DataWpisu") or "").strip()
+        if entry.tag != ns + "PozycjaRejestru" or not number.isdecimal() or number in ids:
+            raise ValueError("invalid or duplicate MF register record ID")
+        if entry.find(ns + "DataWykreslenia") is not None:
+            raise ValueError("active MF register required; removed entries are not supported")
+        # MF publishes some addresses with underscores in a non-TLD label. Preserve and
+        # match those exact host labels; URL paths, wildcards and other syntax stay invalid.
+        host = (
+            domain(raw, allow_underscores=True)
+            if not any(c in raw for c in "/ :<>\t\r\n")
+            else None
+        )
+        if not raw or not listed_at:
+            raise ValueError(f"invalid MF register entry {number}")
+        datetime.fromisoformat(listed_at)  # Preserve the source value, including its precision.
+        ids.add(number)
+        records.append(
+            {
+                "id": f"mf:{number}",
+                "domain": host,
+                "validation_error": None if host else "unsupported_domain_syntax",
+                "listed_at": listed_at,
+                "raw": {"Lp": number, "AdresDomeny": raw, "DataWpisu": listed_at},
+                "locator": f"xml:Rejestr/PozycjaRejestru[@Lp='{number}']/AdresDomeny",
+            }
+        )
+    if not records:
+        raise ValueError("MF register empty")
+    return records
+
+
 @dataclass
 class Snapshot:
     source: str
@@ -185,6 +239,10 @@ class Snapshot:
             "snapshot_file": self.path,
             "parser_version": PARSER_VERSION,
             "access": self.access,
+            "record_count": len(self.records),
+            "unmatchable_record_count": sum(
+                "domain" in r and r["domain"] is None for r in self.records
+            ),
         }
 
 
@@ -194,9 +252,17 @@ def make_snapshot(source: str, content: str, fetched_at: str, *, access="automat
         raise ValueError("snapshot timestamp must include timezone")
     if source not in URLS or (source == "gambling" and access != "manual"):
         raise ValueError("gambling snapshots require manual access")
-    records = parse_knf(content) if source == "knf" else parse_domains(content)
+    is_gambling_xml = source == "gambling" and content.lstrip("\ufeff \r\n\t").startswith("<")
+    records = (
+        parse_gambling_xml(content)
+        if is_gambling_xml
+        else parse_knf(content)
+        if source == "knf"
+        else parse_domains(content)
+    )
+    source_url = MF_REGISTER_URL if is_gambling_xml else URLS[source]
     return Snapshot(
-        source, URLS[source], fetched_at, digest(content), content, records, access=access
+        source, source_url, fetched_at, digest(content), content, records, access=access
     )
 
 

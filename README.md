@@ -123,21 +123,33 @@ Snapshots under `data/warning_lists/` retain the source content, URL, retrieval 
 and SHA-256 of the decoded UTF-8 content. Dated versions are kept in `archive/`, including
 when unchanged source content is downloaded again. A failed refresh keeps the last valid
 snapshot, its original date, and an explicit refresh error. A malformed or missing source
-falls back to the most recently archived valid file, then the bundled KNF snapshot.
+falls back to the most recently archived valid file, then the bundled KNF or gambling snapshot.
 Without a valid fallback it produces `not_observable`. Interrupted HTTP responses are treated
 as source failures, never negative findings.
 
-The Ministry of Finance source has **no automated fetch path**. After a person downloads
-the register, convert its domain column to UTF-8 text with one domain per line and import it
-with its actual download date:
+The image includes the **2026-11-22 Ministry of Finance snapshot**, downloaded through
+Chrome from the documented [active-register XML API](https://hazard.mf.gov.pl/api/Register).
+It contains 60,231 source records. The snapshot retains the original XML, SHA-256,
+retrieval time with timezone, public record IDs, entry dates and XML locators. All 60,231
+addresses are indexed, including the eight official addresses with underscores in a host
+label. Future unsupported addresses remain in the source with validation errors;
+snapshot provenance reports both the total and unmatchable record counts.
+
+The API is a data source for the dated snapshot, rather than a live per-domain lookup.
+An earlier scripted request was blocked; the browser download succeeded without a bot-check
+workaround. The application retains **no automated fetch path** for this source. To refresh
+it, download the API response in the browser (use **Save Link As** on the API link in the
+[official specification](https://hazard.mf.gov.pl/Content/files/Rejestr_Stron%20Hazardowych_Specyfikacja_WeWy_v1-2.pdf))
+and import the XML with its actual retrieval date. UTF-8 domain-per-line files remain supported:
 
 ```bash
-uv run ftf enrich --offline --import-gambling /path/to/domains.txt --snapshot-date 2026-11-21
+uv run ftf enrich --offline --import-gambling /path/to/Register.xml --snapshot-date 2026-11-22
 ```
 
-The imported dated snapshot lives with the persistent application data. To ship it in a
-future image, include its generated `gambling.json` in `src/ftf/enrich/snapshots/`.
-Until supplied, N5 remains `not_observable`; the application never attempts the bot check.
+Imported updates live with the persistent application data and take precedence over the
+bundled snapshot. To ship a newer snapshot, replace `src/ftf/enrich/snapshots/gambling.json`
+with the generated `data/warning_lists/gambling.json`. N5 is now available offline from the
+bundled source; missing inputs or unavailable valid data still yield `not_observable`.
 
 `warning.cert`, `warning.knf` and `warning.gambling` observations include the checked input
 and its provenance, snapshot metadata, original matched records and source locators, and

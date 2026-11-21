@@ -131,7 +131,7 @@ def cmd_enrich(args) -> None:
         if not args.snapshot_date:
             raise SystemExit("--snapshot-date YYYY-MM-DD is required for a manual snapshot")
         try:
-            content = Path(args.import_gambling).read_text(encoding="utf-8-sig")
+            content = Path(args.import_gambling).read_bytes().decode("utf-8-sig")
             snapshot = make_snapshot(
                 "gambling",
                 content,
@@ -402,7 +402,11 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("enrich", help="DNS/RDAP enrichment plus CERT/KNF refresh and local checks")
     p.add_argument("--view", action="append", help="only this view id; repeatable")
     p.add_argument("--offline", action="store_true", help="use cached/bundled snapshots only")
-    p.add_argument("--import-gambling", metavar="FILE", help="manual domain-per-line export")
+    p.add_argument(
+        "--import-gambling",
+        metavar="FILE",
+        help="browser-downloaded MF XML or domain-per-line export",
+    )
     p.add_argument("--snapshot-date", metavar="YYYY-MM-DD", help="date of the manual export")
     p.set_defaults(func=cmd_enrich)
 
