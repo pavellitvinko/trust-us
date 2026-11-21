@@ -14,9 +14,23 @@ def load_har(path: Path) -> list[dict[str, Any]]:
         with open(path, encoding="utf-8", errors="replace") as fh:
             data = json.load(fh)
         entries = data["log"]["entries"]
-        return entries if isinstance(entries, list) else []
+        if not isinstance(entries, list):
+            return []
+        # Keep indexes stable for locators: a malformed entry becomes an empty one.
+        return [e if _well_formed(e) else {} for e in entries]
     except (OSError, ValueError, KeyError, TypeError):
         return []
+
+
+def _well_formed(entry: Any) -> bool:
+    if not isinstance(entry, dict):
+        return False
+    response = entry.get("response", {})
+    return (
+        isinstance(entry.get("request", {}), dict)
+        and isinstance(response, dict)
+        and isinstance(response.get("content", {}) or {}, dict)
+    )
 
 
 def _is_html(entry: dict[str, Any]) -> bool:

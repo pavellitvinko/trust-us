@@ -6,9 +6,11 @@ HackNation challenge "Kolekcjoner fejków", set by NASK.
 - Design: [docs/architecture.md](docs/architecture.md)
 - Signals: [docs/signal-catalogue.md](docs/signal-catalogue.md)
 
-**Status: skeleton.** Ingestion, storage, the plugin interfaces and one reference slice
-(page domain → `ids.domain` layer → shared-value comparison) work end to end. Everything
-else in the design is still to be built.
+**Status: skeleton + identifier extractors.** Ingestion, storage, the plugin interfaces and
+one reference slice (page domain → `ids.domain` layer → shared-value comparison) work end
+to end. The Evidence track's identifier extractors (tracker config, pixels and tag IDs, ad
+parameters, conversion and outbound targets) produce observations on the sample; no layer
+consumes them yet. Everything else in the design is still to be built.
 
 ## Run locally
 
