@@ -122,6 +122,40 @@ def test_tracker_config_absent_or_macro(store, tmp_path):
     assert run(TrackerConfig(), store, page(tmp_path / "2", head=aio_script(macro))) == []
 
 
+def test_tracker_navigation_keeps_only_visited_landing_ids(store, tmp_path):
+    other = "5c68be98-5565-4610-bf12-736a77480c11"
+    config = {
+        **AIO,
+        "landed_on_landings_uuids": {
+            CAMPAIGN.upper(): True,
+            other: False,
+            "not-a-uuid": True,
+            "10.1.2.3": True,
+            TEMPLATE: "true",
+        },
+        "time_on_landings_uuids": {other: 254},
+    }
+    obs = run(TrackerConfig(), store, page(tmp_path / "1", head=aio_script(config)))
+    nav = [o for o in obs if o.namespace == "nav.landing_uuid"]
+    assert [o.value for o in nav] == [CAMPAIGN]
+    assert nav[0].signal_id == "I4"
+    assert nav[0].source.file == "page.html"
+    assert "landed_on_landings_uuids[" in nav[0].source.locator
+    flat = json.dumps([o.model_dump() for o in obs])
+    for leaked in (other, "254", "10.1.2.3", "Warszawa", "sess-should-not-appear"):
+        assert leaked not in flat
+
+
+@pytest.mark.parametrize("visited", [None, [], "bad", True])
+def test_tracker_navigation_ignores_malformed_state(store, tmp_path, visited):
+    obs = run(
+        TrackerConfig(),
+        store,
+        page(tmp_path / "1", head=aio_script({"landed_on_landings_uuids": visited})),
+    )
+    assert obs == []
+
+
 # --- pixels: one location each -----------------------------------------------------------
 
 
