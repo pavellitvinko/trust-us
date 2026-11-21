@@ -11,7 +11,7 @@ from __future__ import annotations
 from ..compare.minhash import default_hasher, shingles
 from ..contracts import Fingerprint, FingerprintKind, Observation, Tier, View
 from ..registry import layers
-from ._set_layer import linkage_items
+from ._text import TEXT_NAMESPACES, body_text
 
 MIN_WORDS = 20
 
@@ -19,15 +19,15 @@ MIN_WORDS = 20
 @layers.register
 class TextShingle:
     name = "text.shingle"
-    version = "1"
+    version = "2"
     kind = FingerprintKind.HASH
     tier = Tier.ARTIFACT
     group = "text"
     comparator = "minhash"
-    namespaces = ("text.body", "page.clean_text")
+    namespaces = TEXT_NAMESPACES
 
     def build(self, view: View, observations: list[Observation]) -> Fingerprint | None:
-        body = "\n".join(value for _, value in linkage_items(observations, self.namespaces))
+        body = body_text(observations)
         grams = shingles(body)
         if len(body.split()) < MIN_WORDS or not grams:
             return None

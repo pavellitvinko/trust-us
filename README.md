@@ -19,26 +19,10 @@ conventions, API routes, config key paths, hidden fields, server headers) and as
 them; the Perception track reads pages and screenshots with the model (`ftf perceive`).
 `docs/method-namespaces.md` lists the namespaces the layers consume. Live capture, enrichment
 and the interface are still to be built.
-**Status: skeleton + identifier and kit extractors. NEW: Pattern discovery (architecture §6).**
 
-Ingestion, storage, the plugin interfaces and one reference slice (page domain → `ids.domain` layer → shared-value comparison) work end to end. 
-
-**NEW IN THIS SESSION**:
-- ✅ **Pattern library** (`src/ftf/patterns/`): Versioned library with stable IDs, merge/split history
-- ✅ **Embedding & clustering**: Reproducible technique card clustering
-- ✅ **Induction**: Model-generated pattern definitions from clusters
-- ✅ **Matching**: Judge views against library patterns (fingerprint layer)
-- ✅ **Novelty tracking**: Promote candidates when seen twice independently
-- ✅ **Validation**: All 19 group H techniques discoverable, reproducible on shuffled input
-- ✅ **Tests**: 17 unit and integration tests, all pass
-
-The Evidence track's identifier extractors (tracker config, pixels and tag IDs, ad
-parameters, conversion and outbound targets), tracker-kit extractors (URL parameter
-schema, path conventions, API routes, config key paths, hidden fields, server headers) and
-asset hashes (exact by role, grayscale perceptual) produce observations on the sample. The
-Perception track now includes pattern discovery: technique card observation, induction into
-versioned patterns, and pattern-based playbook grouping.
-
+Pattern discovery (architecture §6) includes a versioned library with stable IDs and
+merge/split history, embedding and clustering, pattern induction and matching, novelty
+tracking, and pattern-based playbook grouping. See [Pattern Library](PATTERN_LIBRARY.md).
 
 ## Run locally
 
@@ -62,6 +46,17 @@ uv run ftf ablate [--degrade]             # layer ablation / degradation tables
 uv run streamlit run app/streamlit_app.py
 uv run pytest
 ```
+
+With the organiser sample in `testing_sample/`, run the deterministic checkpoint with:
+
+```bash
+uv run pytest tests/test_checkpoint.py -q -s
+```
+
+The test ingests the real files into a temporary database through the CLI. It checks the
+1↔2 campaign, 2↔3 duplicate, 48↔61 family and 61 article→chat funnel. It blocks model
+imports and network access, uses local hashed text vectors, and checks an audit of zero
+attempts. It skips when the private sample is absent.
 
 ## Run in Docker
 

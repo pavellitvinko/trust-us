@@ -13,7 +13,7 @@ of their own; the layers read both, so nobody has to rename. Fixture name → al
 `campaign.label` → `aio.campaign_name` · `landing.label` → `aio.landing_name` · `brand.offer` →
 `offer.name` · `tracker.host` → `third_party.host` · `api.route_shape` → `api.route` ·
 `traffic_source` → `kit.cloaker`, `aio.source_name` · `url.path_convention` → `url.path_shape` ·
-`form.field` → `form.hidden_name` · `text.body` → `page.clean_text` · `entity.cast` →
+`form.field` → `form.hidden_name` · `text.body` → `page.body_text` · `entity.cast` →
 `page.entity.person` / `page.entity.organisation` / `page.entity.persona` (`{"name", "role"}`) ·
 `ocr.domain` → `image.domain` · `ocr.brand` → `image.brand_offer` · `ocr.person` →
 `image.person_name` · `ad.id` → `ad.ad_id`. Also consumed: `aio.source_uuid`, `aio.folder_uuid`,
@@ -21,9 +21,23 @@ of their own; the layers read both, so nobody has to rename. Fixture name → al
 `ad.adset_id`, `ad.account_label`, `gads_conversion`, `bing_uet`, `quora_pixel` (identity,
 tracking group); `aff.*` as a prefix, `public_key`, `push_public_key` (identity, conversion
 group); `url.host` (domain group); `aio.folder_name` (kit config); `http.via`, `http.powered_by`
-(infra). Still missing on the sample and read from fixtures only: `asset.sha256`, `image.phash`,
+(infra). Text layers prefer `page.body_text`, then legacy `text.body`, then
+`page.clean_text` when no body observation exists. They select one representation rather
+than concatenate body text with navigation, comments and widgets. `kit.dom` expands the
+`dom.class_set` list into individual classes and still accepts scalar `dom.class` rows.
+`kit.code` also reads `dom.comment_lang` and `dom.evasion_filter` at the corresponding
+kit weights. Risk-only markup facts remain excluded from linkage.
+
+`nav.landing_uuid` is extracted from UUID keys whose flag is `true` in
+`window.aio.landed_on_landings_uuids`. No engagement times or visitor data are emitted.
+A downstream capture that remembers another page's landing supports an edge from that
+page to the downstream capture, independent of view-ID ordering. Its own landing alone
+does not establish a transition. The stored state supports navigation, not an independently
+verified HTTP redirect or exact visit sequence.
+
+Still missing on the sample and read from fixtures only: `asset.sha256`, `image.phash`,
 `creative.phash`, `video.frame_phash`, `dom.class`, `firstparty.sha256`, `code.evasion_filter`,
-`page.clean_text` (the cleaned body text), `pattern.score`, `expect.element`.
+`pattern.score`, `expect.element`.
 
 ## Identity tier (T1): supports *same campaign*
 

@@ -124,6 +124,8 @@ BASE_WEIGHTS: dict[str, float] = {
     "code.comment_lang": 0.3,
     "code.naming": 0.3,
     "code.evasion_filter": 0.6,
+    "dom.comment_lang": 0.3,
+    "dom.evasion_filter": 0.6,
     # playbook
     "entity.cast": 0.6,
     "entity.role": 0.3,
