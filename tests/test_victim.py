@@ -659,3 +659,29 @@ def test_model_decider_picks_from_the_allowed_list_or_falls_back(settings):
     fresh = replace(settings, data_dir=settings.data_dir / "other")  # same input is cached
     d = ModelDecider(fresh, bad).choose(PERSONA, s, allowed, History())
     assert d.by.startswith("rules (model:") and d.n == 2
+
+
+def test_generated_test_phone_fills_phone_fields_and_survives_reformatting():
+    from ftf.victim.contacts import allowed_values, test_phone, value_allowed
+
+    phone = test_phone("20261122-1000-ab12")
+    assert phone == test_phone("20261122-1000-ab12") and len(phone.replace(" ", "")) == 9
+    assert phone.startswith("5")
+    form = lead_form(
+        field("email", type_="email", required=True), field("phone", type_="tel", required=True)
+    )
+    plan = plan_form(form, PERSONA, "a@victim.test", phone)
+    assert plan.submit and plan.values["//input[@name='phone']"] == phone
+    allowed = allowed_values(PERSONA, "a@victim.test", phone)
+    digits = phone.replace(" ", "")
+    assert value_allowed(f"+48 {digits[:3]}-{digits[3:6]}-{digits[6:]}", allowed, phone)
+    assert not value_allowed("600 000 000", allowed, phone)
+
+
+def test_generated_contacts_are_refused_for_live_urls(tmp_path, settings):
+    from ftf.victim.agent import VictimRun
+
+    with pytest.raises(ValueError, match="local runs only"):
+        VictimRun(
+            "https://glowpixel.org/?x=1", PERSONA, tmp_path, settings=settings, test_contacts=True
+        )

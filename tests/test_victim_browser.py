@@ -219,3 +219,25 @@ def test_stop_from_another_process_keeps_the_record(chromium, site, tmp_path):
     assert (result.root / "run_files" / "run.json").is_file()
     assert (result.root / "stage-01" / "dom.html").is_file()
     assert (result.root / "run_files" / "session.har").is_file()
+
+
+def test_generated_test_contacts_send_the_required_phone_form(chromium, site, tmp_path):
+    origin, posts = site
+    posts.clear()
+    opts = RunOptions(pace=0, panel=False, max_steps=10, human_wait_s=0)
+    run = VictimRun(
+        f"{origin}/phone.html",
+        PERSONA,
+        tmp_path / "runs",
+        settings=settings(tmp_path),
+        options=opts,
+        launcher=_headless,
+        notify=None,
+        test_contacts=True,
+    )
+    result = run.run()
+    assert result.stop_reason == rules.OFFSITE_HANDOFF, result.stop_detail
+    form = posts[0]["form"]
+    assert form["email"] == [f"retiree-income.{run.run_id}@victim.test"]
+    assert form["phone"] == [run.phone]
+    assert result.manifest["phone"] == run.phone and "local run" in result.manifest["phone_policy"]

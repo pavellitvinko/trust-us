@@ -22,7 +22,14 @@ from .. import __version__
 from ..config import Settings, get_settings
 from . import rules
 from .browser import VictimBrowser, launch, referrer_for
-from .contacts import allowed_values, plan_form, run_email
+from .contacts import (
+    TEST_EMAIL_DOMAIN,
+    allowed_values,
+    plan_form,
+    run_email,
+    test_phone,
+    value_allowed,
+)
 from .control import PanelServer, RunControl
 from .decide import Decider, Decision, History, RuleDecider
 from .observe import Candidate, PageState, observe
@@ -131,6 +138,7 @@ class VictimRun:
         control: RunControl | None = None,
         notify: Any = print,
         replay: bool = False,
+        test_contacts: bool = False,
     ):
         self.url = url
         self.persona = persona
@@ -147,6 +155,14 @@ class VictimRun:
         self.control = control or RunControl(self.rec.files)
         self.control.run_dir = self.rec.files
         self.email = run_email(persona, self.run_id, self.settings.victim_email_domain)
+        self.phone: str | None = None
+        self.test_contacts = test_contacts
+        if test_contacts:
+            # Generated contacts only where nothing leaves the machine (replay, fixtures).
+            if not rules.is_local(url):
+                raise ValueError("generated test contacts are for local runs only (VV-31)")
+            self.email = self.email or run_email(persona, self.run_id, TEST_EMAIL_DOMAIN)
+            self.phone = test_phone(self.run_id)
         self.history = History()
         self.stage: Stage | None = None
         self.step = 0
@@ -402,7 +418,7 @@ class VictimRun:
 
     def act_form(self, c: Candidate, state: PageState) -> dict[str, Any]:
         form = next(f for f in state.forms if f["index"] == c.detail.get("form_index"))
-        plan = plan_form(form, self.persona, self.email)
+        plan = plan_form(form, self.persona, self.email, self.phone)
         if self.stage is not None and "form" not in self.stage.kinds:
             self.stage.kinds.append("form")
             self.rec.write_manifest(self.stage)
@@ -424,8 +440,10 @@ class VictimRun:
             if f.get("visible") and f.get("type") not in {"checkbox", "radio"}
         ]
         present = self.page.evaluate(READ_VALUES_JS, xpaths)
-        allowed = allowed_values(self.persona, self.email)
-        foreign = [v for v in present if v is not None and v not in allowed]
+        allowed = allowed_values(self.persona, self.email, self.phone)
+        foreign = [
+            v for v in present if v is not None and not value_allowed(v, allowed, self.phone)
+        ]
         if foreign:
             plan.refuse(
                 "foreign_value", f"the form holds values the persona did not give: {foreign[:3]}"
@@ -821,10 +839,20 @@ class VictimRun:
             "steps": self.step,
             "decider": getattr(self.decider, "name", type(self.decider).__name__),
             "email": self.email,
-            "email_policy": "per-run address on FTF_VICTIM_EMAIL_DOMAIN"
-            if self.email
-            else "FTF_VICTIM_EMAIL_DOMAIN not set: forms needing an e-mail are not sent",
-            "phone_policy": "no safe range confirmed (VV-31): optional phone left empty, required phone stops the form",
+            "email_policy": (
+                f"generated test address on {TEST_EMAIL_DOMAIN} (local run)"
+                if self.test_contacts and not self.settings.victim_email_domain
+                else "per-run address on FTF_VICTIM_EMAIL_DOMAIN"
+                if self.email
+                else "FTF_VICTIM_EMAIL_DOMAIN not set: forms needing an e-mail are not sent"
+            ),
+            "phone": self.phone,
+            "phone_policy": (
+                "generated test number, local run only (nothing leaves the machine)"
+                if self.phone
+                else "no safe range confirmed (VV-31): optional phone left empty, "
+                "required phone stops the form"
+            ),
             "answers": self.history.answers,
             "blocked_requests": self.vb.events.blocked_requests[:500] if self.vb else [],
             "dialogs": self.vb.events.dialogs if self.vb else [],

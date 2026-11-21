@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -98,7 +99,28 @@ class FillPlan:
             self.submit, self.stop_reason, self.stop_detail = False, reason, detail
 
 
-def plan_form(form: dict[str, Any], persona: Persona, email: str | None) -> FillPlan:
+TEST_EMAIL_DOMAIN = "victim.test"  # reserved TLD (RFC 2606): can never receive mail
+
+
+def test_phone(run_id: str) -> str:
+    """A generated Polish-format mobile number for local test runs only, e.g. `512 345 678`.
+
+    It has the shape of a real number, so it is used only where nothing leaves the machine
+    (the case-61 replay, fixture pages). Live runs keep the VV-31 rule until a range that
+    cannot be assigned is confirmed.
+    """
+    digits = str(int(hashlib.sha256(run_id.encode()).hexdigest(), 16))[-8:]
+    number = "5" + digits
+    return f"{number[:3]} {number[3:6]} {number[6:]}"
+
+
+def digits_of(value: str) -> str:
+    return re.sub(r"\D", "", value or "")
+
+
+def plan_form(
+    form: dict[str, Any], persona: Persona, email: str | None, phone: str | None = None
+) -> FillPlan:
     """Decide every value for a lead form. Pure: the agent types exactly this."""
     plan = FillPlan()
     ident = persona.identity
@@ -129,8 +151,10 @@ def plan_form(form: dict[str, Any], persona: Persona, email: str | None) -> Fill
             else:
                 plan.values[xpath] = email
         elif kind == "phone":
+            if phone:  # a generated test number, local runs only
+                plan.values[xpath] = phone
             # VV-31: no safe number yet. Optional phone fields stay empty.
-            if required:
+            elif required:
                 plan.refuse("phone_required", "the form requires a phone number (VV-31 open)")
         elif kind == "first_name":
             plan.values[xpath] = ident.first_name
@@ -162,7 +186,7 @@ def plan_form(form: dict[str, Any], persona: Persona, email: str | None) -> Fill
     return plan
 
 
-def allowed_values(persona: Persona, email: str | None) -> set[str]:
+def allowed_values(persona: Persona, email: str | None, phone: str | None = None) -> set[str]:
     """Every value the victim may ever type into a form (read back before sending)."""
     i = persona.identity
     values = {
@@ -176,7 +200,16 @@ def allowed_values(persona: Persona, email: str | None) -> set[str]:
     }
     if email:
         values.add(email)
+    if phone:
+        # Phone widgets reformat what was typed; the digits are what must match.
+        values |= {phone, digits_of(phone), f"+48{digits_of(phone)}", f"+48 {phone}"}
     return values
+
+
+def value_allowed(value: str, allowed: set[str], phone: str | None) -> bool:
+    if value in allowed:
+        return True
+    return bool(phone) and digits_of(value).removeprefix("48") == digits_of(phone)
 
 
 _DIGITS = re.compile(r"\d[\d\s-]{7,}\d")
