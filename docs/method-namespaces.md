@@ -123,6 +123,23 @@ domain age `captured_at` and `basis`. A failed lookup is a `not_observable` row 
 | `domain.tld_risk` | `high` (`.live .pro .xyz .top .icu .life`), `low` (`.pl`), `other` | risk | C4 |
 | `domain.name_shape` | `hyphen_digits`, `generated_pronounceable`, `generated`, `plain`; metrics in `raw` | risk | C5 |
 
+## Live capture (I5, C11, C13, C14)
+
+Written by `capture.trace` from a capture bundle's `manifest.json` (`ftf capture`), or from
+an archived HAR's document redirects when there is no manifest. Locators cite
+`manifest:redirects[i]`, `manifest:server.*`, or `har:entries[i].response.redirectURL`.
+Observed redirects are kept apart from stored navigation history (`nav.landing_uuid`):
+a hop says how the page was reached, history only that another page was visited before.
+
+| Namespace | Value shape | Purpose | Catalogue |
+| --- | --- | --- | --- |
+| `redirect.domain` | registrable domain of every hop host other than the page's own | linkage (`ids.domain`) | I5 |
+| `redirect.hop` | `<kind>[ <status>]: <from> -> <to>`; kind `http`, `meta_refresh`, `script` or `history` | risk | I5 |
+| `origin.ip` | IP that served the final document; left out when CDN headers show an edge | linkage | C11 |
+| `tls.issuer` | certificate issuer as the browser reports it | risk | C14 |
+| `tls.validity_days` | days between `valid_from` and `valid_to`; both dates in `raw` | risk | C14 |
+| `capture.status` | `dns_failed`, `connection_failed`, `tls_failed`, `timeout`, `http_error`, `not_in_archive`, `failed`; browser error in `raw`. Absent when the capture succeeded | risk | C13 |
+
 ## Funnel evidence inside an incident (ad or screenshot view → page view)
 
 | Namespace | Value shape | Catalogue | Used for |
