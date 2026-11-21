@@ -242,8 +242,8 @@ A warning-list hit is strong risk evidence. The reverse does not hold: not being
 
 | Enricher | Adds | MVP |
 | --- | --- | --- |
-| DNS | A, NS, MX; name-server pair; dead or parked status | Yes |
-| RDAP | Registration date, registrar → domain age at capture | Yes |
+| DNS | A, NS, MX; name-server pair; dead or parked status | Yes (`enrich/dns_lookup.py`). Name-server pair falls back to the RDAP delegation when the zone gives no NS |
+| RDAP | Registration date, registrar → domain age at capture | Yes (`enrich/rdap.py`). Capture time from the HAR, else the bundle manifest, else lookup time (marked). Coverage confirmed 2026-11-21 for `.live .pro .xyz .top .icu .life .org .com` |
 | Certificate transparency | Issuer, first-seen, sibling host names, evidence of a prior life | Yes |
 | National phishing warning list (CERT Polska) | Domain listed / not listed | Yes. Public file, refreshed at start-up, matched locally. Confirmed reachable 2026-11-21 |
 | Financial regulator's public warning list (KNF) | Named entity or domain listed; a hit is also a link between views naming the same listed entity | Yes. The public page parses as tables (about 680 rows on 2026-11-21); scraped at start-up, snapshot kept in the image. Brand and offer names are matched with normalisation and fuzzy matching |
@@ -588,7 +588,7 @@ Nothing is built yet. Every status below says whether the design covers the poin
 | …likenesses of people | Names from text, captions, file names; reused portrait images matched whole (§5) | Must | No face detection or cropping in the stack. Naming a face with no name anywhere in the material needs the face-reference layer, which is a stretch item |
 | …logos, visual features | Vision model reading of screenshots; perceptual hashes; layout embedding | Must / Should | Logo detection rests on the vision model alone |
 | …domains, redirects, links, page structure | HAR and HTML parsers; redirect trace in capture; DOM and class fingerprints | Must | Archived HARs in the sample contain no cross-site redirect chains |
-| …public domain and infrastructure metadata | DNS, RDAP, certificate enrichers; regulator and warning lists (§7) | Must; certificates Should | RDAP confirmed for `.org` only. The gambling register cannot be fetched by script and ships as a manual snapshot |
+| …public domain and infrastructure metadata | DNS, RDAP, certificate enrichers; regulator and warning lists (§7) | Must; certificates Should | RDAP confirmed 2026-11-21 for every TLD in the sample (`.live .pro .xyz .top .icu .life .org .com`). The gambling register cannot be fetched by script and ships as a manual snapshot |
 | Turn the data into comparable features | 22 fingerprint layers (§8) | Must for the scripted layers, Should for most model-based ones | — |
 | Identify duplicates and variants of one message | *Duplicate* and *same campaign* relations (§9) | Must | — |
 | Propose a similarity and grouping method, into campaigns or groups of similar campaigns | Typed fusion; campaign, family and playbook levels (§9–10) | Must | Thresholds set by hand on ten incidents |

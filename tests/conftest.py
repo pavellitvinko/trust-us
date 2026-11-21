@@ -7,6 +7,17 @@ from ftf.store import Store
 SAMPLE = Path(__file__).resolve().parents[1] / "testing_sample"
 
 
+@pytest.fixture(autouse=True)
+def _no_network_enrichment(monkeypatch):
+    """Tests never make DNS or RDAP lookups; enrichment tests inject their own sources."""
+    from ftf.enrich import _cache
+
+    monkeypatch.setenv("FTF_ENRICH", "off")
+    _cache.reset_shared_cache()
+    yield
+    _cache.reset_shared_cache()
+
+
 @pytest.fixture
 def store():
     s = Store(":memory:")
