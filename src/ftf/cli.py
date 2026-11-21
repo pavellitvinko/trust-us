@@ -1,4 +1,4 @@
-"""Command line: ftf ingest | run | perceive | views | observations | compare | pairs | relations |
+"""Command line: ftf ingest | run | enrich | perceive | views | observations | compare | pairs | relations |
 explain | groups | incidents | assign | eval | loio | ablate | load-fixtures."""
 
 from __future__ import annotations
@@ -54,9 +54,27 @@ def _compare_and_group(store, args) -> None:
     )
 
 
+def _print_enrich(counts) -> None:
+    namespaces = sorted({ns for ns, _ in counts})
+    if not namespaces:
+        print("enrichment: no page views with a known domain")
+        return
+    for ns in namespaces:
+        present, missing = counts[(ns, "present")], counts[(ns, "not_observable")]
+        print(f"  {ns:22} present {present:4}  not observable {missing:4}")
+
+
+def cmd_enrich(args) -> None:
+    print("enrichment (DNS, RDAP):")
+    _print_enrich(pipeline.run_enrich(_store(), args.view or None))
+
+
 def cmd_run(args) -> None:
     store = _store()
     print(f"observations: {pipeline.run_extract(store)}")
+    if not getattr(args, "no_enrich", False):
+        print("enrichment (DNS, RDAP):")
+        _print_enrich(pipeline.run_enrich(store))
     print(f"fingerprints: {pipeline.run_fingerprint(store)}")
     _compare_and_group(store, args)
 
@@ -274,11 +292,17 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("path")
     p.add_argument("--no-run", action="store_true", help="only ingest; do not extract and compare")
     p.add_argument("--candidates", action="store_true", help="compare candidate pairs only")
+    p.add_argument("--no-enrich", action="store_true", help="skip DNS and RDAP lookups")
     p.set_defaults(func=cmd_ingest)
 
-    p = sub.add_parser("run", help="extract, fingerprint and compare everything stored")
+    p = sub.add_parser("run", help="extract, enrich, fingerprint and compare everything stored")
     p.add_argument("--candidates", action="store_true", help="compare candidate pairs only")
+    p.add_argument("--no-enrich", action="store_true", help="skip DNS and RDAP lookups")
     p.set_defaults(func=cmd_run)
+
+    p = sub.add_parser("enrich", help="DNS and RDAP lookups for page views (cached)")
+    p.add_argument("--view", action="append", help="only this view id; may be repeated")
+    p.set_defaults(func=cmd_enrich)
     p = sub.add_parser("perceive", help="read images and pages, and observe techniques")
     p.add_argument("--view", action="append", help="only this view id; may be repeated")
     p.set_defaults(func=cmd_perceive)

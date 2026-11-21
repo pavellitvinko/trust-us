@@ -106,6 +106,23 @@ the pair at *same family*. Everything else may rotate between deployments.
 | `entity.cast` | `entity.cast` | `{"entity": "<name>", "role": "<role>"}` | G1, G3 |
 | `visual.layout` | `screenshot.embedding` | `{"model": …, "values": [...]}` | E4 |
 
+## Domain risk and enrichment (C1–C5, C13)
+
+Written by `domain.shape` (script) and the `dns` / `rdap` enrichers. Every enrichment row keeps
+its provenance in `raw` as JSON: `endpoint`, `lookup_at`, `cache_age_s`, `cached`, and for
+domain age `captured_at` and `basis`. A failed lookup is a `not_observable` row with `error`.
+
+| Namespace | Value shape | Purpose | Catalogue |
+| --- | --- | --- | --- |
+| `dns.ns_pair` | name servers, lower-case, no trailing dot, sorted, `|`-joined; RDAP delegation when the zone has none (`confidence` 0.8) | linkage (`infra.host`) | C3 |
+| `rdap.registrar` | registrar name without corporate suffixes (`namecheap`); original and IANA ID in `raw` | both (`infra.host`) | C2 |
+| `rdap.registered_at` | ISO date of the `registration` event | risk | C1 |
+| `rdap.domain_age_days` | whole days from registration to capture; `basis` = `har:…`, `incident_har:…`, `manifest:…` or `lookup` (`confidence` 0.5) | risk | C1 |
+| `dns.status` | `live`, `dead`, `parked`, `sinkholed`; the rule in `raw` | risk | C13 |
+| `dns.a`, `dns.mx` | one row per address / mail host | risk | C13 |
+| `domain.tld_risk` | `high` (`.live .pro .xyz .top .icu .life`), `low` (`.pl`), `other` | risk | C4 |
+| `domain.name_shape` | `hyphen_digits`, `generated_pronounceable`, `generated`, `plain`; metrics in `raw` | risk | C5 |
+
 ## Funnel evidence inside an incident (ad or screenshot view → page view)
 
 | Namespace | Value shape | Catalogue | Used for |

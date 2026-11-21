@@ -1,0 +1,105 @@
+{
+ "objectClassName": "domain",
+ "ldhName": "ineptsolidoval.top",
+ "events": [
+  {
+   "eventAction": "registration",
+   "eventDate": "2026-08-02T16:00:58.0Z"
+  },
+  {
+   "eventAction": "expiration",
+   "eventDate": "2027-08-02T16:00:58.0Z"
+  },
+  {
+   "eventAction": "last changed",
+   "eventDate": "2026-08-02T16:01:18.0Z"
+  },
+  {
+   "eventAction": "last update of RDAP database",
+   "eventDate": "2026-11-21T22:35:51.0Z"
+  }
+ ],
+ "nameservers": [
+  {
+   "objectClassName": "nameserver",
+   "ldhName": "deborah.ns.cloudflare.com."
+  },
+  {
+   "objectClassName": "nameserver",
+   "ldhName": "miguel.ns.cloudflare.com."
+  }
+ ],
+ "status": [
+  "client transfer prohibited"
+ ],
+ "entities": [
+  {
+   "objectClassName": "entity",
+   "handle": "1068",
+   "roles": [
+    "registrar"
+   ],
+   "publicIds": [
+    {
+     "type": "IANA Registrar ID",
+     "identifier": "1068"
+    }
+   ],
+   "vcardArray": [
+    "vcard",
+    [
+     [
+      "version",
+      {},
+      "text",
+      "4.0"
+     ],
+     [
+      "fn",
+      {},
+      "text",
+      "Namecheap Inc."
+     ],
+     [
+      "email",
+      {},
+      "text",
+      "registry@namecheap.com"
+     ],
+     [
+      "tel",
+      {
+       "type": "voice"
+      },
+      "text",
+      "tel:6613102107"
+     ],
+     [
+      "tel",
+      {
+       "type": "fax"
+      },
+      "text",
+      "6613102107"
+     ],
+     [
+      "adr",
+      {
+       "cc": "US"
+      },
+      "text",
+      [
+       "",
+       "",
+       "",
+       "美国",
+       "美国",
+       "85034",
+       ""
+      ]
+     ]
+    ]
+   ]
+  }
+ ]
+}
