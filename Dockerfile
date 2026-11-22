@@ -1,7 +1,8 @@
-FROM python:3.12-slim
+# Playwright's image carries Chromium and its system libraries for live capture (`ftf capture`).
+# Its tag must match the `playwright` version pinned in uv.lock.
+FROM mcr.microsoft.com/playwright/python:v1.65.2-noble
 
-# ffmpeg (with ffprobe) is used for video frames. The Evidence track switches this base to the
-# Playwright image when live capture lands.
+# ffmpeg (with ffprobe) is used for video frames.
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
 COPY --from=ghcr.io/astral-sh/uv:0.13.9 /uv /usr/local/bin/uv
 
@@ -9,6 +10,8 @@ COPY --from=ghcr.io/astral-sh/uv:0.13.9 /uv /usr/local/bin/uv
 ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
     UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
+    UV_PYTHON_DOWNLOADS=never \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     PATH=/opt/venv/bin:$PATH
 
 WORKDIR /app

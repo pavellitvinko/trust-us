@@ -41,6 +41,20 @@ PARAM_NAMESPACES = frozenset({"url.param_name", "url.param_shape"})
 
 SEED_HOSTS = frozenset(
     {
+        # Public link shorteners and platform link wrappers: a redirect hop through one is
+        # shared by unrelated campaigns (redirect.domain).
+        "bit.ly",
+        "t.co",
+        "tinyurl.com",
+        "goo.gl",
+        "ow.ly",
+        "lnkd.in",
+        "is.gd",
+        "buff.ly",
+        "rebrand.ly",
+        "cutt.ly",
+        "shorturl.at",
+        "linktr.ee",
         "cdnjs.cloudflare.com",
         "cdn.jsdelivr.net",
         "unpkg.com",
