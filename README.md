@@ -28,8 +28,7 @@ Open <http://localhost:8000>. The app starts with the known sample campaigns alr
 
 ## Pre-analysed dataset (for mentors)
 
-Our full local analysis (10 cases, 37 items, 11 campaign groups, including 16 links added by hand)
-is shared as one archive, `ftf-data-full-fd9e296.tgz` (1.0 GB), on Google Drive. It works with
-commit `fd9e296`. How to download, unpack and use it:
-[Follow the Fake — dataset for mentors](https://claude.ai/artifact/M3zwvo7Wj2kn7wpB7S5tM5).
+Our full local analysis (10 cases, 37 items, 11 campaign groups) is shared as one archive,
+`ftf-data-full-fd9e296.tgz` (1.0 GB), on Google Drive. It works with commit `fd9e296`. How to
+download, unpack and use it: [docs/mentor-dataset.md](docs/mentor-dataset.md).
 
