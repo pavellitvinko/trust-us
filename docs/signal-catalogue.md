@@ -80,8 +80,8 @@ Mostly risk signals. Almost every sample sits behind Cloudflare, so IP, ASN, iss
 | C5 | Domain name shape: dictionary-word pairs, random pronounceable strings, hyphen+digits, entropy | B | T4 (weak) | S | `civicdaybook`, `acrosscommunities` (two-word); `meroporepufulo`, `shryxla-mynx` (generated) |
 | C6 | Look-alike of a known brand: edit distance, homoglyphs, brand token in sub-domain or path | R | — | S | — |
 | C7 | Domain name ↔ content topic mismatch (a "health" domain serving a news story) | R | — | S+T | `healthlinkq.pro` serving the Olejnik article |
-| C8 | Certificate history: issuer, first-seen, SAN siblings, wildcard use | B | T0–T3 | E (CT logs) | `glowpixel.org` |
-| C9 | Domain prior life: certificates or archive snapshots older than the current registration (re-registered / drop-caught domain) | R | — | E (CT, Wayback) | `glowpixel.org` has 2025 certificates, registered 2026-09 |
+| C8 | Certificate history: issuer, first-seen, SAN siblings, wildcard use. A certificate shared with another registrable domain links the two (`ct.shared_cert`) | B | T0–T3 | E (CT logs) | `glowpixel.org`: 54 certificates, sibling `a.glowpixel.org`; no shared certificate in the sample |
+| C9 | Domain prior life: certificates or archive snapshots older than the current registration (re-registered / drop-caught domain) | R | — | E (CT, Wayback) | `glowpixel.org` has certificates from 2025-05-16, registered 2026-09-11: `ct.prior_life_days` = 483 |
 | C10 | Server / proxy headers (`via: Caddy`, `server`, header-name order) | L | T3 (weak) | S (HAR) | Caddy in 2/healthlinkq and 36 |
 | C11 | Origin IP / ASN when not behind a CDN | L | T3 | S (HAR), E | 47 video on BunnyCDN pull zone `vz-6110f311-389` |
 | C12 | CDN pull-zone / storage bucket / video-library IDs | L | T1 | S | 47 (`b-cdn.net` zone + video GUID) |
@@ -251,7 +251,7 @@ All optional, cached, and timestamped. A failed lookup yields `not observable`, 
 | # | Check | Source | Status on 2026-11-21 |
 | --- | --- | --- | --- |
 | N1 | Domain registration date, registrar, name servers | RDAP (IANA bootstrap) | In MVP. Confirmed 2026-11-21 for every sample TLD: `.live .pro .life` (Identity Digital), `.xyz .icu` (CentralNic), `.top` (ZDNS), `.org` (PIR), `.com` (Verisign) |
-| N2 | Certificate history, sibling host names | crt.sh (CT logs) | Responded, JSON |
+| N2 | Certificate history, sibling host names | crt.sh (CT logs) | In MVP (`enrich/ct.py`). Responded, JSON, 2026-11-22: 0.5–60 s per domain, intermittent 502, 404, timeouts, and `[]` for a domain that has certificates (none of them trusted or cached as a fact) |
 | N3 | Domain on the national phishing warning list | CERT Polska list (`hole.cert.pl`) | In MVP. Responded, JSON (~22 MB) and plain text; downloaded once and matched locally |
 | N4 | Entity on the financial regulator's public warning list | KNF | In MVP. Public page responded and parses as tables, about 680 rows |
 | N5 | Domain in the register of prohibited gambling sites | Ministry of Finance | In MVP from a manual snapshot. Scripted requests were refused by a bot check |

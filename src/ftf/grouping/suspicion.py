@@ -7,6 +7,7 @@ unchecked, so a missing stage never reads as a clean result.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -18,7 +19,7 @@ YOUNG_DOMAIN_DAYS = 365
 
 # A kind counts as checked when one of these inputs was observed.
 _INPUTS = {
-    "domain": ("rdap.", "warning."),  # the host alone does not show age or listing
+    "domain": ("rdap.", "warning.", "ct.prior_life_days"),  # host alone: no age or listing
     "impersonation": ("page.read_text", "image.text"),
     "absent_elements": ("expect.element",),
     "evasion": ("page.clean_text", "page.body_text", "cloak."),
@@ -87,6 +88,8 @@ def _describe(o: Observation, hosts: list[str]) -> tuple[str, str, str] | None:
     is_age = ns == "rdap.domain_age_days" and isinstance(value, int | float)
     if is_age and 0 <= value < YOUNG_DOMAIN_DAYS:
         return "domain", "C1", f"domain registered {int(value)} days before capture"
+    if ns == "ct.prior_life_days" and isinstance(value, int | float) and value > 0:
+        return "domain", "C9", _prior_life(o, int(value))
     if ns.startswith("warning.") and isinstance(value, dict):
         result = value.get("result")
         source = ns.removeprefix("warning.")
@@ -123,6 +126,21 @@ def _describe(o: Observation, hosts: list[str]) -> tuple[str, str, str] | None:
     if ns == "pattern.score" and isinstance(value, dict) and value.get("score", 0) >= 0.5:
         return "persuasion", "H", f"technique pattern: {value.get('pattern')}"
     return None
+
+
+def _prior_life(o: Observation, days: int) -> str:
+    try:
+        raw = json.loads(o.raw or "{}")
+    except ValueError:
+        raw = {}
+    first = str(raw.get("first_cert_at") or "")[:10]
+    registered = str(raw.get("registered_at") or "")[:10]
+    if first and registered:
+        return (
+            f"certificates since {first}, {days} days before the current registration "
+            f"({registered}): the domain had an earlier life"
+        )
+    return f"certificates {days} days older than the current registration"
 
 
 def _checked(kind: str, observations: list[Observation]) -> bool:
