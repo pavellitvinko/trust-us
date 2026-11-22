@@ -332,7 +332,7 @@ def cmd_demo(args) -> None:
     def show(step) -> None:
         print(f"[{step.status.upper():7}] {step.name}: {step.detail}", flush=True)
 
-    print("mode: shipped settings, local text vectors, no model calls, no DNS or RDAP")
+    print("mode: shipped settings, local text vectors, no model calls, no DNS, RDAP or crt.sh")
     steps = run_demo(
         Path(args.sample), live_url=args.live_url, capture=not args.no_capture, on_step=show
     )
@@ -369,6 +369,30 @@ def cmd_ground(args) -> None:
             print(f"  {row['decision']:10} false alarms {shown:4} {key}")
         for key in entry.get("added", {}):
             print(f"  added      {key}")
+
+
+def cmd_narrate(args) -> None:
+    """Write a narrative for a pair or a campaign from the evidence table (model)."""
+    from .narrative import campaign_narrative, pair_narrative, render_narrative
+
+    store = _store()
+    try:
+        if args.campaign and args.views:
+            raise ValueError("give two view ids or --campaign, not both")
+        if args.campaign:
+            result = campaign_narrative(store, args.campaign)
+        elif len(args.views) == 2:
+            result = pair_narrative(store, *args.views)
+        else:
+            raise ValueError("give two view ids, or --campaign")
+    except (KeyError, ValueError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
+    print(render_narrative(result))
+    if result["status"] != "available":
+        raise SystemExit(1)
+    if result["rejected"]:
+        print(f"\n({result['rejected']} unsupported sentence(s) removed)")
 
 
 def cmd_views(args) -> None:
@@ -607,7 +631,7 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--ingest", action="store_true", help="ingest the bundle and run everything")
     p.add_argument("--incident", help="incident id for --ingest (default: the folder name)")
     p.add_argument("--candidates", action="store_true", help="compare candidate pairs only")
-    p.add_argument("--no-enrich", action="store_true", help="skip DNS and RDAP lookups")
+    p.add_argument("--no-enrich", action="store_true", help="skip DNS, RDAP and crt.sh lookups")
     p.add_argument(
         "--cloaking",
         action="store_true",
@@ -622,7 +646,7 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("path")
     p.add_argument("--no-run", action="store_true", help="only ingest; do not extract and compare")
     p.add_argument("--candidates", action="store_true", help="compare candidate pairs only")
-    p.add_argument("--no-enrich", action="store_true", help="skip DNS and RDAP lookups")
+    p.add_argument("--no-enrich", action="store_true", help="skip DNS, RDAP and crt.sh lookups")
     p.add_argument(
         "--replace-known", action="store_true", help="let this folder replace shipped incidents"
     )
@@ -630,14 +654,14 @@ def main(argv: list[str] | None = None) -> None:
 
     p = sub.add_parser("run", help="extract, enrich, fingerprint and compare everything stored")
     p.add_argument("--candidates", action="store_true", help="compare candidate pairs only")
-    p.add_argument("--no-enrich", action="store_true", help="skip DNS and RDAP lookups")
+    p.add_argument("--no-enrich", action="store_true", help="skip DNS, RDAP and crt.sh lookups")
     p.set_defaults(func=cmd_run)
 
     p = sub.add_parser("perceive", help="read images and pages, and observe techniques")
     p.add_argument("--view", action="append", help="only this view id; may be repeated")
     p.set_defaults(func=cmd_perceive)
 
-    p = sub.add_parser("enrich", help="DNS/RDAP enrichment plus CERT/KNF refresh and local checks")
+    p = sub.add_parser("enrich", help="DNS/RDAP/crt.sh enrichment plus CERT/KNF refresh and local checks")
     p.add_argument("--view", action="append", help="only this view id; repeatable")
     p.add_argument("--offline", action="store_true", help="use cached/bundled snapshots only")
     p.add_argument(
@@ -669,6 +693,11 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--kind", action="append", help="only this kind of page; may be repeated")
     p.add_argument("--show", action="store_true", help="show stored results; run nothing")
     p.set_defaults(func=cmd_ground)
+
+    p = sub.add_parser("narrate", help="model-written narrative from the evidence table")
+    p.add_argument("views", nargs="*", help="two view ids")
+    p.add_argument("--campaign", help="a campaign id, instead of two views")
+    p.set_defaults(func=cmd_narrate)
 
     sub.add_parser("views", help="list views").set_defaults(func=cmd_views)
 

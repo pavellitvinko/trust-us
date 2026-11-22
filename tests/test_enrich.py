@@ -45,7 +45,7 @@ class FakeCache(_cache.Cache):
         self.routes = routes
         self.calls: list[str] = []
 
-    def http_json(self, url: str, accept: str = "application/json"):
+    def http_json(self, url: str, accept: str = "application/json", timeout: float = 0):
         self.calls.append(url)
         if url == rdap.BOOTSTRAP_URL:
             return BOOTSTRAP

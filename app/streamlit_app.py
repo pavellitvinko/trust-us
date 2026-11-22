@@ -30,6 +30,7 @@ from ftf.intake import (
 )
 from ftf.material import expectation_profiles, material_summary
 from ftf.method_settings import apply_saved, current_values, reset, save
+from ftf.narrative import pair_narrative, render_narrative
 from ftf.patterns.analyst import (
     LibraryEditError,
     merge_patterns,
@@ -70,7 +71,7 @@ def add_material() -> None:
         disabled=not root,
         help=f"Inside {root}" if root else "Off until FTF_UI_FOLDER_ROOT is set.",
     )
-    enrich = st.checkbox("Look up DNS and RDAP (network)", value=True)
+    enrich = st.checkbox("Look up DNS, RDAP and crt.sh (network)", value=True)
     st.text_input(
         "URL", disabled=True, help="Available once the live capture service (HAC-14) is connected."
     )
@@ -387,6 +388,7 @@ with tab_match:
                 st.session_state["comparison_report"] = build_pair_report(
                     store, view.view_id, other.view_id
                 )
+            st.session_state.pop("narrative", None)
         report = st.session_state.get("comparison_report")
         if (
             report
@@ -404,6 +406,23 @@ with tab_match:
                 "Download Markdown", markdown, file_name="comparison.md", mime="text/markdown"
             )
             st.markdown(markdown)
+            st.subheader("Narrative")
+            st.caption("Written by the model from the table above. Each sentence cites its facts.")
+            pair_key = (view.view_id, other.view_id)
+            if st.button("Write narrative"):
+                with st.spinner("Writing from the evidence table"):
+                    st.session_state["narrative"] = {
+                        "pair": pair_key,
+                        "result": pair_narrative(
+                            store, view.view_id, other.view_id, report=report
+                        ),
+                    }
+            written = st.session_state.get("narrative")
+            if written and written["pair"] == pair_key:
+                # Plain text: model output can repeat hostile links from the page.
+                st.text(render_narrative(written["result"]))
+                with st.expander("Facts given to the model"):
+                    st.json(written["result"]["facts"])
 
 with tab_material:
     summary = material_summary(store, view.view_id)

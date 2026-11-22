@@ -38,6 +38,7 @@ on the account.
 | --- | --- | --- |
 | IANA RDAP bootstrap and registry RDAP servers | domain registration data | <https://data.iana.org/rdap/dns.json> |
 | DNS resolvers | DNS records | system or configured resolver |
+| crt.sh (Sectigo), certificate transparency logs | certificate history | <https://crt.sh/>; public CT log data, queried politely (one request per second, cached 7 days) |
 | CERT Polska warning list | listed domains | <https://hole.cert.pl/domains/v2/domains.txt> |
 | KNF public warnings | listed entities | <https://www.knf.gov.pl/dla_konsumenta/ostrzezenia_publiczne> |
 | Ministry of Finance gambling register | prohibited gambling domains | <https://hazard.mf.gov.pl/> |
