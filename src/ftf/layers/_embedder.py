@@ -16,11 +16,12 @@ import hashlib
 import math
 import os
 import re
+from collections import Counter
 from collections.abc import Sequence
 from itertools import pairwise
-from typing import Protocol
+from typing import Any, Protocol
 
-from ..config import get_settings
+from ..config import Settings, get_settings
 
 _WORD = re.compile(r"\w+", re.UNICODE)
 
@@ -58,22 +59,41 @@ class GatewayEmbedder:
     """Gemini embeddings through the Perception track's gateway (`ftf.models.embed`), which
     chunks long text, mean-pools the chunks and caches by content hash. A text the gateway
     cannot embed (no key, refusal, timeout) yields None, and the layer is left out for that
-    view: a missing layer never counts against a link."""
+    view: a missing layer never counts against a link.
 
-    def __init__(self, model: str):
+    The embedder counts what it did (texts, chunks, failures by reason) so a run record can
+    say how many calls a result rests on. `settings` and `client` are for tests and for a run
+    that must not read the environment; by default the gateway reads both itself."""
+
+    def __init__(self, model: str, settings: Settings | None = None, client: Any = None):
         self.model = model
+        self.settings = settings
+        self.client = client
+        self.texts = 0
+        self.chunks = 0
+        self.failures: Counter[str] = Counter()
 
     def embed(self, texts: Sequence[str]) -> list[list[float] | None]:
         from ..models import embed
 
         out: list[list[float] | None] = []
-        for result in embed(list(texts)):
+        for result in embed(list(texts), settings=self.settings, client=self.client):
+            self.texts += 1
             if result.value is None:
+                self.failures[result.reason or "error"] += 1
                 out.append(None)
             else:
+                self.chunks += len(result.value.chunks)
                 out.append(result.value.vector)
                 self.model = result.value.model
         return out
+
+    def describe(self) -> str:
+        failed = "; ".join(f"{n} {reason}" for reason, n in sorted(self.failures.items())) or "none"
+        return (
+            f"{self.texts} texts embedded as {self.chunks} chunk calls; "
+            f"texts left without a vector: {failed}"
+        )
 
 
 _embedder: Embedder | None = None

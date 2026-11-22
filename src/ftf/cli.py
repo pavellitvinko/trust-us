@@ -561,7 +561,12 @@ def cmd_validate(args) -> None:
 
     parts = [p for p in ("candidates", "degrade", "ablate", "loio") if p not in (args.skip or [])]
     workdir = get_settings().data_dir / "tmp"
-    text = sample.validation_report(Path(args.path), workdir=workdir, parts=parts)
+    try:
+        text = sample.validation_report(
+            Path(args.path), workdir=workdir, parts=parts, model=args.model
+        )
+    except sample.MissingKeyError as exc:  # refuse; never fall back to model-off silently
+        raise SystemExit(f"error: {exc}") from exc
     if args.out:
         Path(args.out).write_text(text, encoding="utf-8")
         print(f"wrote {args.out}")
@@ -734,6 +739,13 @@ def main(argv: list[str] | None = None) -> None:
     )
     p.add_argument("path", help="a folder of incident folders")
     p.add_argument("--out", help="write the Markdown report here instead of printing it")
+    p.add_argument(
+        "--model",
+        choices=["off", "gateway"],
+        default="off",
+        help="off: local hashed-word embedder, no model call (default); gateway: real Gemini "
+        "embeddings through the cache, needs GEMINI_API_KEY (HAC-32)",
+    )
     p.add_argument(
         "--skip",
         action="append",

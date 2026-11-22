@@ -2,9 +2,12 @@
 
 Everything here starts from files on disk and a fresh in-memory store, never from the
 hand-made fixtures (`ablation.py` and `loio.py` do that and stay credited separately).
-All runs are model-off: no gateway call is made, and the vector layers use the local
-hashed-word embedder. Paths that need a model reading (text in screenshots, video
-transcripts, patterns, expected elements) are reported as unavailable, not as failures.
+By default every run is model-off: no gateway call is made, and the vector layers use the
+local hashed-word embedder. `embedding_mode(GatewayEmbedder(...))` switches every run in the
+module to real embeddings (HAC-32); the run record then names the model, prompt version,
+cache state and the fitted calibration, so neither mode can be mistaken for the other. Paths
+that need a model reading (text in screenshots, video transcripts, patterns, expected
+elements) are reported as unavailable, not as failures.
 
     base = extracted(sample_dir)          # ingest + extract once
     run = run_sample("baseline", base)    # fingerprint, fuse, group, evaluate, checkpoint
@@ -21,28 +24,55 @@ import subprocess
 import tempfile
 from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable, Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
 from .. import pipeline
+from ..compare.vector import Calibration, cosine, get_calibration
 from ..compare.weights import weights
-from ..contracts import Observation, Relation, RelationType, Tier, ViewKind
+from ..config import Settings, get_settings
+from ..contracts import FingerprintKind, Observation, Relation, RelationType, Tier, ViewKind
 from ..fusion import DEFAULT, FusionConfig, run_method
 from ..fusion.fuse import summarise
 from ..grouping.assign import Assignment, assign_incident
 from ..grouping.levels import Groups
-from ..layers._embedder import FakeEmbedder, get_embedder, set_embedder
-from ..registry import layers, load_plugins
+from ..layers._embedder import Embedder, FakeEmbedder, GatewayEmbedder, get_embedder, set_embedder
+from ..layers._text import body_text
+from ..layers.vectors import mask
+from ..registry import comparators, layers, load_plugins
 from ..store import Store
 from .ablation import MODEL_LAYERS, disabled_layers
 from .harness import Report, evaluate, format_report
 from .reference import resolve_view
 
-MODE = (
+MODEL_OFF = (
     "model-off: no gateway call; vector layers use the local hashed-word embedder; "
     "no screenshot, video, pattern or expected-element reading"
+)
+NO_READING = "no screenshot, video, pattern or expected-element reading"
+VECTOR_LAYERS = ("text.semantic", "narrative.skeleton")
+
+# The acceptance pairs of HAC-32: the same story told about a different celebrity must sit
+# closer on the masked skeleton than on the name-keeping text, below the same text, above
+# unrelated material. Aliases resolve through `reference.resolve_view`.
+SAME_STORY: tuple[tuple[str, str, str], ...] = (
+    ("1:page", "3:page", "Brzoska / Olejnik"),
+    ("1:page", "48:page", "Brzoska / Lis"),
+    ("3:page", "48:page", "Olejnik / Lis"),
+)
+SAME_TEXT: tuple[tuple[str, str, str], ...] = (
+    ("1:page", "2:page", "Brzoska, two domains"),
+    ("2:healthlinkq", "3:page", "Olejnik, two captures"),
+    ("48:page", "61:article", "Lis, two domains"),
+)
+UNRELATED: tuple[tuple[str, str, str], ...] = (
+    ("1:page", "10:page", "news story / casino app"),
+    ("3:page", "36:page", "news story / investment summit"),
+    ("48:page", "14:page", "news story / diet lander"),
+    ("1:page", "47:page", "news story / prostate lander"),
+    ("3:page", "61:chat", "news story / investment chat"),
 )
 
 LINKED = (
@@ -69,15 +99,74 @@ REVIEW_PAIRS: tuple[tuple[str, str, str], ...] = (
 # -- stores ----------------------------------------------------------------------------------
 
 
+_run_embedder: Callable[[], Embedder] = FakeEmbedder
+
+
 @contextmanager
-def model_off() -> Iterator[None]:
-    """Force the local embedder for the duration, whatever keys the environment holds."""
+def embedding_mode(embedder: Embedder) -> Iterator[None]:
+    """Make every run in this module (baseline, degradation, ablation, leave-one-out,
+    candidate parity) embed with `embedder` instead of the local hashed-word one."""
+    global _run_embedder
+    previous = _run_embedder
+    _run_embedder = lambda: embedder
+    try:
+        yield
+    finally:
+        _run_embedder = previous
+
+
+@contextmanager
+def run_embedder() -> Iterator[None]:
+    """Install the run's embedder for the duration, whatever keys the environment holds:
+    the local hashed-word embedder unless `embedding_mode` chose another."""
     previous = get_embedder()
-    set_embedder(FakeEmbedder())
+    set_embedder(_run_embedder())
     try:
         yield
     finally:
         set_embedder(previous)
+
+
+class MissingKeyError(RuntimeError):
+    """A gateway run was asked for without a key. Never answered by a silent fallback."""
+
+
+def gateway_embedder(settings: Settings | None = None, client: object = None) -> GatewayEmbedder:
+    """The real embedder for a validation run. Refuses to start without a key rather than
+    falling back to the local embedder under a gateway label."""
+    settings = settings or get_settings()
+    if not settings.gemini_api_key and client is None:
+        raise MissingKeyError(
+            "gateway embeddings need GEMINI_API_KEY (set it in .env); "
+            "the model-off run is `ftf validate` without --model gateway"
+        )
+    return GatewayEmbedder(settings.embedding_model, settings=settings, client=client)
+
+
+def mode_line() -> str:
+    """What the vector layers ran on, from the embedder actually installed."""
+    emb = get_embedder()
+    if isinstance(emb, GatewayEmbedder):
+        from ..models.gemini import (
+            CHUNK_TOKENS,
+            EMBED_PROMPT_VERSION,
+            EMBEDDING_DIMENSIONS,
+            EmbedTask,
+        )
+
+        return (
+            f"gateway embeddings: model `{emb.model}` through `ftf.models.embed` "
+            f"(task '{EmbedTask.SIMILARITY.value}', prompt {EMBED_PROMPT_VERSION}, "
+            f"{EMBEDDING_DIMENSIONS} dimensions, chunks of {CHUNK_TOKENS} tokens mean-pooled, "
+            f"content-hash cache); {emb.describe()}; {NO_READING}"
+        )
+    return MODEL_OFF
+
+
+def cache_entries(settings: Settings | None = None) -> int:
+    """Cached embedding chunks on disk, so a run can say how many calls it reused."""
+    folder = (settings or get_settings()).model_cache_dir / "embed"
+    return sum(1 for p in folder.glob("*.json")) if folder.is_dir() else 0
 
 
 def extracted(sample_dir: Path) -> Store:
@@ -155,6 +244,33 @@ class Manifest:
     layers: int
     mode: str
     config: dict
+    cache: str = ""
+    calibrations: dict[str, Calibration | None] = field(default_factory=dict)
+
+    def calibration_lines(self) -> list[str]:
+        """Per vector layer: the model and the background constants `fusion.prepare` fitted.
+        `raw cosine` means the comparator fell back to clip(cos, 0, 1), which is model-dependent."""
+        rows = []
+        for layer_id, cal in sorted(self.calibrations.items()):
+            if cal is None:
+                rows.append([f"`{layer_id}`", "—", "raw cosine", "—", "—", "—", "—", "—"])
+                continue
+            rows.append(
+                [
+                    f"`{layer_id}`",
+                    f"`{cal.model}`",
+                    "calibrated",
+                    f"{cal.mu:.3f}",
+                    f"{cal.sigma:.3f}",
+                    f"{cal.k:g}",
+                    f"{cal.mu + cal.k * cal.sigma:.3f}",
+                    f"{cal.pairs}" + (f" ({cal.stale} stale ignored)" if cal.stale else ""),
+                ]
+            )
+        return _table(
+            ["Vector layer", "Model", "Scoring", "μ", "σ", "k", "floor μ+kσ", "Background pairs"],
+            rows,
+        )
 
     def lines(self) -> list[str]:
         kinds = ", ".join(f"{n} {k}" for k, n in sorted(self.views.items()))
@@ -167,6 +283,7 @@ class Manifest:
                 f"{self.views_without_evidence} views carry no fingerprint at all"
             ),
             f"- Execution mode: {self.mode}",
+            *([f"- Embedding cache: {self.cache}"] if self.cache else []),
             f"- Layers registered: {self.layers}",
             "- Store: fresh in-memory store per run",
             "- Configuration: `FusionConfig` defaults: thresholds "
@@ -176,12 +293,19 @@ class Manifest:
             )
             + f"; minimum coverage {self.config['min_coverage']}; "
             f"solo identity groups {list(self.config['identity_solo_groups'])}",
+            "- Vector calibration (background = cross-incident pairs with no identity-tier",
+            "  link at 0.5 or more; the same-story pairs are in it, so μ is an upper bound):",
+            "",
+            *self.calibration_lines(),
         ]
 
 
-def manifest(base: Store, sample_dir: Path, fingerprinted: Store, config: FusionConfig) -> Manifest:
+def manifest(
+    base: Store, sample_dir: Path, fingerprinted: Store, config: FusionConfig, cache: str = ""
+) -> Manifest:
     views = base.views()
     with_fp = {f.view_id for f in fingerprinted.fingerprints()}
+    vector_layers = [layer.name for layer in layers.all() if layer.kind is FingerprintKind.VECTOR]
     return Manifest(
         commit=git_commit(),
         run_date=date.today().isoformat(),
@@ -191,8 +315,10 @@ def manifest(base: Store, sample_dir: Path, fingerprinted: Store, config: Fusion
         views_without_evidence=sum(v.view_id not in with_fp for v in views),
         observations=sum(len(base.observations(v.view_id)) for v in views),
         layers=len(layers.all()),
-        mode=MODE,
+        mode=mode_line(),
         config=config.to_dict(),
+        cache=cache,
+        calibrations={name: get_calibration(name) for name in vector_layers},
     )
 
 
@@ -323,7 +449,7 @@ def run_sample(
 ) -> SampleRun:
     load_plugins()
     off = list(off)
-    with model_off(), disabled_layers(off):
+    with run_embedder(), disabled_layers(off):
         store, groups = method_store(base, config)
         run = SampleRun(
             name=name,
@@ -674,7 +800,7 @@ def ablate_sample(base: Store, config: FusionConfig = DEFAULT) -> list[SampleRun
     """One layer off per run. Only layers that built a fingerprint on this corpus are
     ablated: switching off a layer nothing feeds cannot change anything."""
     load_plugins()
-    with model_off():
+    with run_embedder():
         probe = clone(base)
         pipeline.run_fingerprint(probe)
         built = sorted({f.layer_id for f in probe.fingerprints()})
@@ -686,7 +812,7 @@ def ablate_sample(base: Store, config: FusionConfig = DEFAULT) -> list[SampleRun
 
 def unbuilt_layers(base: Store) -> list[str]:
     load_plugins()
-    with model_off():
+    with run_embedder():
         probe = clone(base)
         pipeline.run_fingerprint(probe)
         built = {f.layer_id for f in probe.fingerprints()}
@@ -719,7 +845,7 @@ def loio_sample(
     wanted = list(incidents) if incidents else [i.incident_id for i in base.incidents()]
     out = []
     for iid in sorted(wanted, key=lambda x: (len(x), x)):
-        with model_off():
+        with run_embedder():
             store = clone(base, exclude_incidents=[iid])
             pipeline.run_fingerprint(store)
             groups = run_method(store, config)
@@ -794,7 +920,7 @@ def candidate_parity(base: Store, config: FusionConfig = DEFAULT) -> CandidatePa
     load_plugins()
     full = cand = None
     try:
-        with model_off():
+        with run_embedder():
             full = clone(base)
             pipeline.run_fingerprint(full)
             groups_full = run_method(full, config)
@@ -1215,19 +1341,202 @@ def format_review(store: Store) -> list[str]:
     return _table(["A", "B", "Why reviewed", "Relation", "Confidence", "Coverage", "Reasons"], rows)
 
 
+# -- the narrative acceptance pairs (HAC-32) ---------------------------------------------------
+
+
+@dataclass
+class VectorPair:
+    a: str
+    b: str
+    why: str
+    group: str  # same text | same story | unrelated
+    raw: dict[str, float | None] = field(default_factory=dict)  # layer -> cosine
+    score: dict[str, float | None] = field(default_factory=dict)  # layer -> calibrated score
+
+
+def vector_pairs(store: Store) -> list[VectorPair]:
+    """Raw cosine and calibrated score of both vector layers for the acceptance pairs, read
+    from the stored fingerprints with the comparator itself. None: a side has no vector, or
+    the two vectors are not comparable."""
+    cmp = comparators.get("calibrated_cosine")
+    out = []
+    for group, pairs in (
+        ("same text", SAME_TEXT),
+        ("same story", SAME_STORY),
+        ("unrelated", UNRELATED),
+    ):
+        for a, b, why in pairs:
+            pair = VectorPair(a, b, why, group)
+            va, vb = resolve_view(store, a), resolve_view(store, b)
+            for layer_id in VECTOR_LAYERS:
+                fa = fb = None
+                if va and vb:
+                    fa = next(iter(store.fingerprints(view_id=va, layer_id=layer_id)), None)
+                    fb = next(iter(store.fingerprints(view_id=vb, layer_id=layer_id)), None)
+                if fa is None or fb is None or not cmp.compatible(fa, fb):
+                    pair.raw[layer_id] = pair.score[layer_id] = None
+                    continue
+                e = cmp.compare(fa, fb)
+                pair.raw[layer_id] = cosine(fa.payload["values"], fb.payload["values"])
+                pair.score[layer_id] = e.score if e.comparable else None
+            out.append(pair)
+    return out
+
+
+def narrative_checks(pairs: list[VectorPair]) -> dict[str, bool | None]:
+    """The ordering the design claims for the masked layer. None: a pair is missing."""
+    sem, ske = VECTOR_LAYERS
+    story = [p for p in pairs if p.group == "same story"]
+    text = [p for p in pairs if p.group == "same text"]
+    other = [p for p in pairs if p.group == "unrelated"]
+    needed = (
+        [p.raw[ske] for p in story + other]
+        + [p.raw[sem] for p in story]
+        + [p.score[ske] for p in story + other]
+    )
+    keys = ("skeleton_above_text", "story_above_unrelated_raw", "story_scored", "same_text_on_top")
+    if any(v is None for v in needed) or not (story and text and other):
+        return dict.fromkeys(keys)
+    text_raw = [p.raw[ske] for p in text if p.raw[ske] is not None]
+    return {
+        # masking brings the same story closer than the name-keeping text does
+        "skeleton_above_text": all(p.raw[ske] >= p.raw[sem] - 0.02 for p in story),
+        # ...and above every unrelated pair on raw cosine
+        "story_above_unrelated_raw": min(p.raw[ske] for p in story)
+        > max(p.raw[ske] for p in other),
+        # ...and after calibration the story still scores, strictly above every unrelated pair
+        # (all-zero scores would pass a >= check while separating nothing)
+        "story_scored": min(p.score[ske] for p in story) > max(p.score[ske] for p in other),
+        # the same text stays the closest of all
+        "same_text_on_top": bool(text_raw) and min(text_raw) >= max(p.raw[ske] for p in story),
+    }
+
+
+def masked_heads(store: Store, width: int = 150) -> list[tuple[str, str]]:
+    """The start of each story's masked body, so masking misses can be read off."""
+    out = []
+    for alias in ("1:page", "3:page", "48:page"):
+        vid = resolve_view(store, alias)
+        if vid is None:
+            continue
+        obs = store.observations(vid)
+        out.append((alias, mask(body_text(obs), obs)[:width]))
+    return out
+
+
+def format_narrative(store: Store) -> list[str]:
+    pairs = vector_pairs(store)
+    checks = narrative_checks(pairs)
+    sem, ske = VECTOR_LAYERS
+
+    def num(v: float | None) -> str:
+        return "—" if v is None else f"{v:.3f}"
+
+    rows = [
+        [
+            p.group,
+            p.a,
+            p.b,
+            p.why,
+            num(p.raw[sem]),
+            num(p.score[sem]),
+            num(p.raw[ske]),
+            num(p.score[ske]),
+        ]
+        for p in pairs
+    ]
+    verdict = {True: "holds", False: "**lost**", None: "not measurable (a vector is missing)"}
+    return [
+        *_table(
+            [
+                "Group",
+                "A",
+                "B",
+                "Why",
+                "semantic cos",
+                "semantic score",
+                "skeleton cos",
+                "skeleton score",
+            ],
+            rows,
+        ),
+        "",
+        "Ordering the design claims (architecture §8):",
+        "",
+        *_table(
+            ["Check", "Result"],
+            [
+                [
+                    "same story sits closer on the masked skeleton than on the name-keeping text",
+                    verdict[checks["skeleton_above_text"]],
+                ],
+                [
+                    "same story sits above every unrelated pair on raw cosine",
+                    verdict[checks["story_above_unrelated_raw"]],
+                ],
+                [
+                    "same story keeps a calibrated skeleton score above every unrelated pair",
+                    verdict[checks["story_scored"]],
+                ],
+                ["the same text stays closest of all", verdict[checks["same_text_on_top"]]],
+            ],
+        ),
+        "",
+        "Masked text as embedded (first characters), to read the masking misses off:",
+        "",
+        *_table(["View", "Masked head"], [[a, f"`{h}`"] for a, h in masked_heads(store)]),
+    ]
+
+
 def validation_report(
     sample_dir: Path,
     config: FusionConfig = DEFAULT,
     workdir: Path | None = None,
     parts: Iterable[str] = ("candidates", "degrade", "ablate", "loio"),
+    model: str = "off",
+    embedder: Embedder | None = None,
 ) -> str:
-    """The whole real-sample validation as one Markdown document."""
-    parts = set(parts)
+    """The whole real-sample validation as one Markdown document. `model` is "off" (the local
+    hashed-word embedder, no gateway call) or "gateway" (real embeddings, needs a key, or the
+    `embedder` a test injects). In gateway mode every part of the report, degradation,
+    ablation and leave-one-out included, embeds with that embedder."""
+    if model not in ("off", "gateway"):
+        raise ValueError(f"model must be 'off' or 'gateway', not {model!r}")
+    gateway = model == "gateway"
+    if embedder is not None and not gateway:
+        raise ValueError("an injected embedder needs model='gateway'; model-off ignores it")
+    settings = get_settings()
+    if gateway and embedder is None:
+        embedder = gateway_embedder(settings)
+    with embedding_mode(embedder) if gateway else nullcontext():
+        return _validation_report(Path(sample_dir), config, workdir, set(parts), gateway, settings)
+
+
+def _validation_report(
+    sample_dir: Path,
+    config: FusionConfig,
+    workdir: Path | None,
+    parts: set[str],
+    gateway: bool,
+    settings: Settings,
+) -> str:
     load_plugins()
-    base = extracted(Path(sample_dir))
-    with model_off():
+    cached_before = cache_entries(settings) if gateway else 0
+    base = extracted(sample_dir)
+    with run_embedder():
         store, groups = method_store(base, config)
-        info = manifest(base, Path(sample_dir), store, config)
+        cache = ""
+        if gateway:
+            new = cache_entries(settings) - cached_before
+            calls = getattr(get_embedder(), "chunks", 0)
+            state = "cold" if cached_before == 0 else ("warm" if new == 0 else "partly warm")
+            cache = (
+                f"{state}: {cached_before} chunk entries before the run, {new} written by it, "
+                f"{max(calls - new, 0)} of {calls} chunk calls served from the cache "
+                f"(`{settings.model_cache_dir / 'embed'}`)"
+            )
+        info = manifest(base, Path(sample_dir), store, config, cache=cache)
+        narrative = format_narrative(store)
         report = evaluate(store)
         checks = checkpoint(store, groups)
         review = format_review(store)
@@ -1250,13 +1559,31 @@ def validation_report(
     weights.reset()
     missing_layers = unbuilt_layers(base)
 
+    if gateway:
+        head = [
+            "# Method validation on the organiser sample with gateway embeddings (HAC-32)",
+            "",
+            "Generated by `uv run ftf validate testing_sample --model gateway",
+            "--out docs/method-results-real-sample-gateway.md`. Every number is from real",
+            "organiser files; the two text vector layers ran on the embedding model named in the",
+            "run record, every other model-fed layer is still off. The model-off run",
+            "(docs/method-results-real-sample.md) is the deterministic reference; read the two",
+            "side by side. A result whose run record does not name a gateway model is not",
+            "semantic validation.",
+        ]
+    else:
+        head = [
+            "# Method validation on the organiser sample (HAC-54)",
+            "",
+            "Generated by `uv run ftf validate testing_sample --out docs/method-results-real-sample.md`.",
+            "Every number is from real organiser files, model off. The fixture tables of HAC-35",
+            "(architecture §13a) are a separate, earlier measurement and are not repeated here.",
+            "Results with real gateway embeddings belong to HAC-32 and are not in this file:",
+            "the vector numbers below measure shared wording under a hashed-word embedder and",
+            "are mechanics evidence only.",
+        ]
     out = [
-        "# Method validation on the organiser sample (HAC-54)",
-        "",
-        "Generated by `uv run ftf validate testing_sample --out docs/method-results-real-sample.md`.",
-        "Every number is from real organiser files, model off. The fixture tables of HAC-35",
-        "(architecture §13a) are a separate, earlier measurement and are not repeated here.",
-        "Results with real gateway embeddings belong to HAC-32 and are not in this file.",
+        *head,
         "",
         "## Run record",
         "",
@@ -1313,12 +1640,36 @@ def validation_report(
         "- Layers that built no fingerprint on this corpus: "
         + ", ".join(f"`{n}`" for n in missing_layers)
         + ".",
-        "- Model-dependent layers (" + ", ".join(f"`{n}`" for n in MODEL_LAYERS) + "): the two",
-        "  text vector layers ran on the local hashed-word embedder, which measures shared",
-        "  wording only; the others need `ftf perceive` with a key and produced nothing.",
+        "- Model-dependent layers ("
+        + ", ".join(f"`{n}`" for n in MODEL_LAYERS)
+        + "): "
+        + (
+            "the two text vector layers ran on the gateway embedding model named in the run"
+            " record; the others need `ftf perceive` with a key and produced nothing."
+            if gateway
+            else "the two text vector layers ran on the local hashed-word embedder, which"
+            " measures shared wording only; the others need `ftf perceive` with a key and"
+            " produced nothing."
+        ),
         *by_kind,
         "- Reading what a screenshot or a video shows, and so an ad-to-page funnel edge,",
         "  needs the vision model: unavailable in this mode.",
+        "",
+        "## Same story, different cast: the two vector layers (HAC-32)",
+        "",
+        (
+            "Raw cosine and calibrated score for the three stories (Brzoska, Olejnik, Lis), their"
+            " duplicates and unrelated pairs. "
+            + (
+                "Vectors come from the gateway model in the run record."
+                if gateway
+                else "**Model off:** these vectors come from the hashed-word embedder and"
+                " measure shared wording, so the ordering is a mechanics check, not semantic"
+                " closeness."
+            )
+        ),
+        "",
+        *narrative,
     ]
     if "candidates" in parts:
         out += [
