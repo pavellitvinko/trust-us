@@ -11,16 +11,23 @@ import itertools
 import json
 import re
 import string
+from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from math import prod
 from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import urlsplit
 
-from .contracts import RelationType, View, ViewKind
+from .campaign_map import TOGGLES, _shared_values, link_tiers
+from .compare.weights import WeightTable
+from .contracts import RelationType, Tier, View, ViewKind
+from .fusion import DEFAULT
+from .fusion.demotion import find_demotions
 from .grouping.funnel import AD_ID
 from .grouping.levels import Groups
 from .grouping.suspicion import reason_summary_for_view
+from .registry import layers, load_plugins
 from .store import Store
 
 KIND_NAMES = {ViewKind.PAGE: "Page", ViewKind.IMAGE: "Image", ViewKind.VIDEO: "Video"}
@@ -96,6 +103,29 @@ class Item:
     thumbnail: str | None = None  # absolute path of an image to show
     library_id: str | None = None  # Meta Ad Library ID, when the item is a Library ad
     note: str | None = None  # what the latest add changed for this item
+    matches: list[Match] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class Match:
+    view_id: str
+    same_case: bool
+    verdict: str
+    tiers: tuple[str, ...]
+    confidence: str
+    observed_groups: int
+    total_groups: int
+    clue: str
+
+    @property
+    def strength(self) -> str:
+        return {"high": "Strong", "medium": "Moderate", "low": "Weak"}.get(
+            self.confidence, "Not assessed"
+        )
+
+    @property
+    def coverage(self) -> str:
+        return f"{self.observed_groups} of {self.total_groups} evidence groups observed"
 
 
 @dataclass
@@ -111,6 +141,7 @@ class Library:
     cases: list[Case]
     journeys: dict[str, Journey]  # view_id -> the journey it is on
     links: dict[str, set[str]]  # view_id -> views it is linked with (campaign or duplicate)
+    playbook_run: bool = False
 
     def items(self) -> list[Item]:
         return [i for c in self.cases for i in c.items]
@@ -294,6 +325,195 @@ def _chains(edges) -> list[list[str]]:
 # -- the whole screen --------------------------------------------------------------------
 
 
+_VERDICTS = {
+    RelationType.DUPLICATE: "Duplicate",
+    RelationType.SAME_CAMPAIGN: "Same campaign",
+    RelationType.SAME_FAMILY: "Shared kit",
+}
+_VERDICT_ORDER = {name: n for n, name in enumerate([*_VERDICTS.values(), "Clue only"])}
+_STRENGTH_ORDER = {"high": 0, "medium": 1, "low": 2, "": 3}
+LAYER_NAMES = {
+    "ids.domain": "Page addresses",
+    "ids.campaign": "Campaign records",
+    "ids.tracking": "Tracking accounts",
+    "ids.conversion": "Contact and conversion accounts",
+    "brand.offer": "Brands and offers",
+    "asset.exact": "Identical files",
+    "asset.perceptual": "Similar images",
+    "media.video": "Video frames",
+    "ad.creative": "Ad images",
+    "text.shingle": "Matching text",
+    "text.semantic": "Text meaning",
+    "kit.config": "Template settings",
+    "kit.url": "Address patterns",
+    "kit.form": "Form structure",
+    "kit.code": "Code patterns",
+    "kit.dom": "Page structure",
+    "infra.host": "Hosting",
+    "pattern.mo": "Persuasion patterns",
+    "kit.absence": "Missing page elements",
+    "expected-elements.mo": "Expected page elements",
+    "entity.cast": "People and roles",
+    "entity.roles": "Persuasion roles",
+    "visual.layout": "Visual layout",
+    "narrative.skeleton": "Story structure",
+}
+
+
+def match_sort_key(match: Match) -> tuple:
+    return (_VERDICT_ORDER[match.verdict], _STRENGTH_ORDER.get(match.confidence, 3), match.view_id)
+
+
+def filter_matches(item: Item, enabled: list[str] | None = None) -> list[Match]:
+    wanted = set(TOGGLES if enabled is None else enabled)
+    return sorted((m for m in item.matches if wanted.intersection(m.tiers)), key=match_sort_key)
+
+
+def match_help(item: Item) -> str:
+    tiers = [name for name in TOGGLES if any(name in m.tiers for m in item.matches)]
+    return f"{len(item.matches)} items · {', '.join(tiers)}" if tiers else "No matches yet"
+
+
+def playbook_status(store: Store) -> bool:
+    """A missing model output is not a negative match result."""
+    load_plugins()
+    playbook = {layer.name for layer in layers.all() if layer.tier is Tier.PLAYBOOK}
+    return any(fp.layer_id in playbook for fp in store.fingerprints())
+
+
+def deciding_clue(shared: list[dict], tier: str) -> str:
+    names = {
+        "fb_pixel": "pixel",
+        "gtm_id": "tag manager account",
+        "ga_id": "analytics account",
+        "aio.campaign_uuid": "campaign record",
+        "aio.owner_uuid": "owner record",
+        "url.host_path": "page address",
+        "contact.phone": "phone number",
+        "contact.email": "email address",
+        "aio.template_uuid": "template",
+        "api_key_id": "conversion account",
+        "brand.offer": "brand or offer",
+    }
+    literal = [s for s in shared if s.get("ns") in names]
+    if literal:
+        s = literal[0]
+        value = str(s["value"])
+        if len(value) > 26:
+            value = value[:12] + "…" + value[-6:]
+        return f"Same {names[s['ns']]} {value}"
+    images = {str(s["value"]) for s in shared if s.get("ns", "").startswith("asset.sha256")}
+    if images:
+        return f"{len(images)} identical file{'s' if len(images) != 1 else ''}"
+    return {
+        "identity": "Shared account or record",
+        "artifact": "Matching content",
+        "kit": "Shared template or code",
+        "playbook": "Similar persuasion pattern",
+    }[tier]
+
+
+def build_matches(store: Store, groups: Groups, config=DEFAULT) -> dict[str, list[Match]]:
+    """Direct matches only; no writes and no mutation of the global method weight table.
+
+    Stored typed links retain their verdict. Additional threshold-passing layers are
+    clues, never promoted to a campaign. Demoted and stoplisted values cannot create
+    these additional matches or supply their deciding clue.
+    """
+    load_plugins()
+    meta = {layer.name: layer for layer in layers.all()}
+    views = {v.view_id: v for v in store.views()}
+    table = WeightTable(update_coverage=False)
+    table.fit(store, groups.campaign_of)
+    demoted, _ = find_demotions(store, config)
+    shared_by_tier = _shared_values(store, config)
+    evidence = defaultdict(list)
+    for e in store.evidence():
+        evidence[tuple(sorted((e.view_a, e.view_b)))].append(e)
+    relations = {tuple(sorted((r.view_a, r.view_b))): r for r in store.relations()}
+    fingerprints = defaultdict(set)
+    for fp in store.fingerprints():
+        if fp.layer_id in meta:
+            fingerprints[fp.view_id].add(fp.layer_id)
+    active = {meta[lid].group for ids in fingerprints.values() for lid in ids}
+    out = {vid: [] for vid in views}
+    for a, b in sorted(evidence.keys() | relations.keys()):
+        if a == b or a not in views or b not in views:
+            continue
+        rows = evidence.get((a, b), [])
+        relation = relations.get((a, b))
+        typed = relation is not None and relation.type in _VERDICTS
+        supported = set(link_tiers(relation, config)) if typed else set()
+        allowed = (
+            set(link_tiers(relation, config))
+            if relation and (typed or relation.type is RelationType.SAME_PLAYBOOK)
+            else set(TOGGLES)
+        )
+        clues = defaultdict(list)
+        for e in rows:
+            layer = meta.get(e.layer_id)
+            if not e.comparable or layer is None or layer.tier not in TOGGLES.values():
+                continue
+            name = next(name for name, tier in TOGGLES.items() if tier is layer.tier)
+            kept = [
+                s
+                for s in e.shared
+                if "value" in s
+                and s.get("weight", 1) > 0
+                and (s.get("ns"), str(s["value"])) not in demoted
+                and not table.is_stoplisted(s.get("ns", ""), str(s["value"]))
+            ]
+            # For set/hash evidence, an excluded sole value invalidates a stale score.
+            score = e.score
+            if len(kept) != len(e.shared):
+                score = min(score, 1 - prod(1 - float(s.get("weight", 0)) for s in kept))
+            if (
+                not typed
+                and name in allowed
+                and score >= getattr(config, name)
+                and (kept or not e.shared)
+            ):
+                supported.add(name)
+                clues[name].extend(kept)
+            elif typed:
+                clues[name].extend(kept)
+        if not supported:
+            continue
+        tiers = tuple(name for name in TOGGLES if name in supported)
+        # Reuse the campaign map's value routing, but do not advertise a demoted value
+        # or a stoplisted identifier as the clue that decided a match.
+        values = []
+        for name in tiers:
+            mapped = set(
+                shared_by_tier.get((a, b, TOGGLES[name]), [])
+                + shared_by_tier.get((b, a, TOGGLES[name]), [])
+            )
+            values.extend(s for s in clues[name] if f"{s.get('ns')}={s['value']}" in mapped)
+        # Zero-score comparable layers are not persisted as evidence.
+        rejected = {e.layer_id for e in rows if not e.comparable}
+        observed = {meta[lid].group for lid in (fingerprints[a] & fingerprints[b]) - rejected}
+        verdict = _VERDICTS[relation.type] if typed else "Clue only"
+        confidence = (
+            relation.confidence
+            if relation and (typed or relation.type is RelationType.SAME_PLAYBOOK)
+            else ""
+        )
+        for anchor, other in ((a, b), (b, a)):
+            out[anchor].append(
+                Match(
+                    view_id=other,
+                    same_case=views[a].incident_id == views[b].incident_id,
+                    verdict=verdict,
+                    tiers=tiers,
+                    confidence=confidence,
+                    observed_groups=len(observed),
+                    total_groups=len(active),
+                    clue=deciding_clue(values, tiers[0]),
+                )
+            )
+    return {vid: sorted(matches, key=match_sort_key) for vid, matches in out.items()}
+
+
 def build_library(
     store: Store, groups: Groups, data_dir: Path, previous: Library | None = None
 ) -> Library:
@@ -302,6 +522,7 @@ def build_library(
     views = {v.view_id: v for v in store.views()}
     added = {iid: _added_at(meta, iid, inc.root) for iid, inc in incidents.items()}
     titles = {vid: view_title(v) for vid, v in views.items()}
+    matches = build_matches(store, groups)
 
     # Name only groups that link more than one item, in the order they were first added.
     multi = {cid: m for cid, m in groups.campaigns.items() if len(m) > 1}
@@ -398,6 +619,7 @@ def build_library(
                     thumbnail=thumbnail,
                     library_id=library_id(view, incident.root),
                     note=note,
+                    matches=matches[vid],
                 )
             )
         # Steps of one journey sit together, in order; everything else keeps its place.
@@ -419,4 +641,4 @@ def build_library(
     # Newest first; cases added at the same moment (or with no known time) keep ID order.
     cases.sort(key=lambda c: c.case_id)
     cases.sort(key=lambda c: c.added_at, reverse=True)
-    return Library(cases=cases, journeys=journeys, links=links)
+    return Library(cases=cases, journeys=journeys, links=links, playbook_run=playbook_status(store))

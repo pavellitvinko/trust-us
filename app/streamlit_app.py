@@ -25,7 +25,16 @@ from ftf.fusion import run_method
 from ftf.grouping import build_groups
 from ftf.intake import ANALYSIS_LOCK, IntakeError
 from ftf.jobs import link_case, save_files, worker_for
-from ftf.library import KIND_NAMES, Item, Library, build_library, case_title
+from ftf.library import (
+    KIND_NAMES,
+    LAYER_NAMES,
+    Item,
+    Library,
+    build_library,
+    case_title,
+    filter_matches,
+    match_help,
+)
 from ftf.material import expectation_profiles
 from ftf.method_settings import apply_saved, current_values, reset, save
 from ftf.narrative import pair_narrative, render_narrative
@@ -70,6 +79,24 @@ DISCOVERY = importlib.util.find_spec("ftf.discovery") is not None
 ICONS = {"Page": ":material/language:", "Image": ":material/image:", "Video": ":material/movie:"}
 BADGES = {"campaign": "red", "kit": "orange", "duplicate": "blue", "none": "gray"}
 BUSY = "Available when the current analysis finishes."
+TIER_HINTS = {
+    "identity": (
+        "Shared operator-controlled identifiers, such as a tracking pixel ID or campaign record. "
+        "Helps connect items to the same campaign."
+    ),
+    "artifact": (
+        "Same or near-identical material, such as images, text or ad creatives. "
+        "Shows content reuse; the verdict tells you whether the items are duplicates."
+    ),
+    "kit": (
+        "Shared templates, code, forms or tracking software. "
+        "Different campaigns can use the same kit."
+    ),
+    "playbook": (
+        "Similar persuasion methods, such as story structure, roles or page layout. "
+        "Shows a similar approach, which alone does not establish a shared campaign."
+    ),
+}
 # Meta's mark, from the Tabler icon set ("brand-meta", MIT licence).
 META = (
     '<svg class="ftf-meta" viewBox="0 0 24 24" fill="none" stroke="#0866ff" stroke-width="2"'
@@ -284,8 +311,13 @@ def page_add() -> None:
 
 # -- Library -------------------------------------------------------------------------------
 
-_CACHE: dict[str, dict] = {}
-_CACHE_LOCK = threading.Lock()
+
+@st.cache_resource
+def library_cache():
+    return {}, threading.Lock()
+
+
+_CACHE, _CACHE_LOCK = library_cache()
 
 
 def current_library() -> Library | None:
@@ -303,11 +335,12 @@ def current_library() -> Library | None:
                 groups = build_groups(reader, persist_funnel=False)
                 previous = cached["library"] if cached else None
                 library = build_library(reader, groups, settings.data_dir, previous)
+                snapshot = reader.db.serialize()
             finally:
                 reader.close()
         finally:
             ANALYSIS_LOCK.release()
-        _CACHE[key] = {"generation": worker.generation, "library": library}
+        _CACHE[key] = {"generation": worker.generation, "library": library, "snapshot": snapshot}
         return library
 
 
@@ -329,6 +362,21 @@ def label_badges(item: Item) -> str:
 
 def select(view_id: str) -> None:
     st.session_state["selected"] = view_id
+    st.session_state.pop("library_compare", None)
+
+
+def show_matches(view_id: str) -> None:
+    st.session_state.setdefault("library_previous_selected", st.session_state.get("selected"))
+    st.session_state["library_filter"] = {"matches_of": view_id}
+    select(view_id)
+
+
+def close_matches() -> None:
+    st.session_state.pop("library_filter", None)
+    st.session_state.pop("library_compare", None)
+    previous = st.session_state.pop("library_previous_selected", None)
+    if previous:
+        st.session_state["selected"] = previous
 
 
 def item_row(item: Item, show_case: bool, selected: bool) -> None:
@@ -360,6 +408,16 @@ def item_row(item: Item, show_case: bool, selected: bool) -> None:
             note = f" · :blue[{item.note}]" if item.note else ""
             st.caption(f"{label_badges(item)} {sub}{note}")
         st.markdown(risk_badge(item) or "&nbsp;", width=44)
+        st.button(
+            str(len(item.matches)) if item.matches else "",
+            icon=":material/fingerprint:",
+            key=f"matches-{item.view_id}",
+            type="tertiary",
+            disabled=not item.matches,
+            help=match_help(item),
+            on_click=show_matches,
+            args=(item.view_id,),
+        )
 
 
 def pending_rows(library: Library | None, show: bool) -> None:
@@ -554,10 +612,9 @@ def compare_section(library: Library, item: Item) -> None:
         )
         busy = bool(worker.active())
         if st.button("Explain comparison", disabled=busy, help=BUSY if busy else None):
-            with ANALYSIS_LOCK:
-                st.session_state["comparison_report"] = build_pair_report(
-                    db(), item.view_id, other.view_id
-                )
+            report = library_pair_report(item.view_id, other.view_id)
+            if report:
+                st.session_state["comparison_report"] = report
             st.session_state.pop("narrative", None)
         report = st.session_state.get("comparison_report")
         if (
@@ -643,6 +700,162 @@ def warning_section(item: Item) -> None:
             )
 
 
+def library_pair_report(a: str, b: str) -> dict | None:
+    """Read the complete Library snapshot; never wait on background analysis."""
+    if not ANALYSIS_LOCK.acquire(blocking=False):
+        st.info(BUSY)
+        return None
+    try:
+        snapshot = _CACHE[str(settings.db_path)]["snapshot"]
+        reader = Store(":memory:")
+        try:
+            reader.db.deserialize(snapshot)
+            return build_pair_report(reader, a, b)
+        finally:
+            reader.close()
+    finally:
+        ANALYSIS_LOCK.release()
+
+
+def open_library_comparison(a: str, b: str) -> None:
+    report = library_pair_report(a, b)
+    if report:
+        st.session_state["library_compare"] = report
+
+
+def layer_breakdown(report: dict) -> None:
+    with st.expander("Layer breakdown"):
+        for row in report["layers"]:
+            st.markdown(f"**{LAYER_NAMES.get(row['layer_id'], 'Evidence layer')}**")
+            st.caption(f"`{row['layer_id']}` · Score: {row['score']} · {row['status']}")
+            for shared in row["shared"]:
+                st.text(str(shared["value"]))
+                if shared["demoted_to_kit"]:
+                    st.caption("Demoted to kit evidence")
+                for side, refs in shared["sources"].items():
+                    for ref in refs:
+                        obs = report["sources"][ref]
+                        source = obs["source"]
+                        st.caption(
+                            f"{side.upper()}: {obs['namespace']} · "
+                            f"{source['file'] or 'File not recorded'} · "
+                            f"{source['locator'] or 'Location not recorded'}"
+                        )
+                if not any(shared["sources"].values()):
+                    st.caption("Source observation unavailable; derived comparison value")
+
+
+def comparison_panel(report: dict) -> None:
+    with st.container(border=True):
+        with st.container(horizontal=True, vertical_alignment="center"):
+            st.markdown("##### Comparison", width="stretch")
+            if st.button("Close comparison", icon=":material/close:", type="tertiary"):
+                st.session_state.pop("library_compare", None)
+                st.rerun()
+        st.write(" · ".join(obj["label"] for obj in report["objects"].values()))
+        markdown = render_pair_report(report)
+        with st.container(horizontal=True):
+            st.download_button(
+                "Download JSON",
+                json.dumps(report, ensure_ascii=False, indent=2),
+                file_name="comparison.json",
+                mime="application/json",
+            )
+            st.download_button(
+                "Download Markdown", markdown, file_name="comparison.md", mime="text/markdown"
+            )
+        layer_breakdown(report)
+        with st.expander("Full comparison report", expanded=True):
+            st.markdown(markdown)
+
+
+def match_table(library: Library, anchor: Item, selected: str, kinds: set[str]) -> None:
+    heading, close = st.columns([20, 1], vertical_alignment="top")
+    heading.markdown(f"#### Matches for {anchor.title}")
+    with close:
+        st.button(
+            "",
+            icon=":material/close:",
+            help="Close matches",
+            key="close-matches",
+            on_click=close_matches,
+            type="tertiary",
+        )
+    item_row(anchor, True, anchor.view_id == selected)
+    if not library.playbook_run:
+        st.caption("Playbook: not run")
+    rows = [
+        m
+        for m in filter_matches(anchor)
+        if KIND_NAMES[library.get(m.view_id).kind] in kinds
+    ]
+    st.caption("Scroll sideways for coverage, clues and Compare.")
+    st.html(
+        """<style>
+        .st-key-match-scroll {overflow-x: auto; padding-bottom: 12px}
+        .st-key-match-table {min-width: 1120px}
+        .ftf-tier {display: inline-block; padding: 2px 6px; border-radius: 4px;
+            background: rgba(28, 131, 225, .12); font-size: .875em;
+            white-space: nowrap; cursor: help}
+        </style>"""
+    )
+    with st.container(key="match-scroll"), st.container(key="match-table", width=1120):
+        widths = [2.2, 1, 1.2, 1, 1, 1.5, 1.5, 0.9]
+        cols = st.columns(widths, gap="small")
+        for col, title in zip(
+            cols,
+            [
+                "Matched item",
+                "Case",
+                "Verdict",
+                "Tiers",
+                "Strength",
+                "Coverage",
+                "Deciding clue",
+                "Compare",
+            ],
+            strict=True,
+        ):
+            col.caption(title)
+        for match in rows:
+            item = library.get(match.view_id)
+            cols = st.columns(widths, gap="small", vertical_alignment="center")
+            with cols[0]:
+                if item.thumbnail:
+                    st.image(item.thumbnail, width=36)
+                st.button(
+                    item.title,
+                    key=f"match-title-{item.view_id}",
+                    help=item.title,
+                    type="tertiary",
+                    on_click=select,
+                    args=(item.view_id,),
+                )
+            cols[1].write(case_title(item.case_id) + (" · same case" if match.same_case else ""))
+            cols[2].write(match.verdict)
+            for tier in match.tiers:
+                cols[3].markdown(
+                    f'<span class="ftf-tier" title="{html.escape(TIER_HINTS[tier], quote=True)}">'
+                    f'{html.escape(tier)}</span>',
+                    unsafe_allow_html=True,
+                )
+            cols[4].markdown(
+                match.strength, help=f"Stored confidence: {match.confidence or 'not assessed'}"
+            )
+            cols[5].write(match.coverage)
+            cols[6].write(match.clue)
+            cols[7].button(
+                "Compare",
+                key=f"match-compare-{item.view_id}",
+                disabled=bool(worker.active()),
+                help=BUSY if worker.active() else None,
+                on_click=open_library_comparison,
+                args=(anchor.view_id, item.view_id),
+            )
+    if not rows:
+        st.caption("No matches for the selected material types.")
+
+
 def library_body() -> None:
     library = current_library()
     active = worker.active()
@@ -682,10 +895,16 @@ def library_body() -> None:
     if library.get(selected or "") is None:
         selected = items[0].view_id
         st.session_state["selected"] = selected
+    matches_of = st.session_state.get("library_filter", {}).get("matches_of")
+    anchor = library.get(matches_of) if matches_of else None
+    if anchor:
+        st.html('<style>[data-testid="stMainBlockContainer"] {max-width: 1800px}</style>')
     left, right = st.columns([3, 2], gap="medium")
     with left:
         pending_rows(library, True)
-        if mode == "By case":
+        if anchor:
+            match_table(library, anchor, selected, kinds)
+        elif mode == "By case":
             for case in library.cases:
                 case_block(case, selected, kinds)
         else:
@@ -693,7 +912,11 @@ def library_body() -> None:
                 if KIND_NAMES[item.kind] in kinds:
                     item_row(item, True, item.view_id == selected)
     with right:
-        panel(library, library.get(selected))
+        report = st.session_state.get("library_compare")
+        if report:
+            comparison_panel(report)
+        else:
+            panel(library, library.get(selected))
     st.session_state["seen_generation"] = generation
 
 

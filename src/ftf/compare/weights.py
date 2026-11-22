@@ -165,17 +165,21 @@ class WeightTable:
         base: Mapping[str, float] | None = None,
         curve: RarityCurve | None = None,
         bootstrap_namespaces: tuple[str, ...] = BOOTSTRAP_NAMESPACES,
+        *,
+        update_coverage: bool = True,
     ):
         self.base: dict[str, float] = dict(BASE_WEIGHTS if base is None else base)
         self.curve = curve or RarityCurve()
         self.bootstrap_namespaces = bootstrap_namespaces
+        self.update_coverage = update_coverage
         self.reset()
 
     def reset(self) -> None:
         try:  # coverage denominators follow the corpus the weights were fitted on
             from ..fusion.fuse import set_active_groups
 
-            set_active_groups(None)
+            if self.update_coverage:
+                set_active_groups(None)
         except ImportError:  # pragma: no cover - import order during package init
             pass
         self.holders: dict[Key, int] = {}
