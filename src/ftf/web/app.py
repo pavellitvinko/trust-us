@@ -128,7 +128,18 @@ def create_app() -> FastAPI:
         payload = (
             views.library_payload(lib)
             if lib
-            else {"items": [], "cases": 0, "linked": 0, "map": {"nodes": [], "edges": []}}
+            else {
+                "items": [],
+                "cases": 0,
+                "linked": 0,
+                "map": {
+                    "nodes": [],
+                    "edges": [],
+                    "campaignWhy": {},
+                    "repeats": [],
+                    "journeys": {},
+                },
+            }
         )
         jobs = [job_payload(j) for j in reversed(list(worker.jobs.values()))]
         tracked = worker.item_checks_snapshot()

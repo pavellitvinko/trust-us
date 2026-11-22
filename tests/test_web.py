@@ -533,3 +533,9 @@ def test_table_and_item_detail_share_live_per_item_check_state(client):
     assert detail["processing"]["state"] == "running"
     assert rows["7:page"]["processing"]["state"] == "not_run"
     assert detail["processing"]["checks"][0]["runId"] == "live"
+
+
+def test_library_map_says_why_campaigns_hold_together(client):
+    library_map = client.get("/api/library").json()["map"]
+    assert isinstance(library_map["campaignWhy"], dict)
+    assert library_map["repeats"] == [] and library_map["journeys"] == {}

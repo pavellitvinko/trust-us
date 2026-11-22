@@ -200,6 +200,7 @@ class Library:
     playbook_run: bool = False
     campaigns: dict[str, Campaign] = field(default_factory=dict)  # linked ones only
     kits: dict[str, Kit] = field(default_factory=dict)
+    view_cache: dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
 
     def items(self) -> list[Item]:
         return [i for c in self.cases for i in c.items]
