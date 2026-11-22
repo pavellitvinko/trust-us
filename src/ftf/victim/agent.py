@@ -23,11 +23,11 @@ from ..config import Settings, get_settings
 from . import rules
 from .browser import VictimBrowser, launch, referrer_for
 from .contacts import (
-    TEST_EMAIL_DOMAIN,
+    ContactBook,
     allowed_values,
+    contacts_for,
+    load_contacts,
     plan_form,
-    run_email,
-    test_phone,
     value_allowed,
 )
 from .control import PanelServer, RunControl
@@ -138,7 +138,7 @@ class VictimRun:
         control: RunControl | None = None,
         notify: Any = print,
         replay: bool = False,
-        test_contacts: bool = False,
+        contacts: ContactBook | None = None,
     ):
         self.url = url
         self.persona = persona
@@ -154,15 +154,11 @@ class VictimRun:
         self.rec = Recorder(out_dir, self.run_id)
         self.control = control or RunControl(self.rec.files)
         self.control.run_dir = self.rec.files
-        self.email = run_email(persona, self.run_id, self.settings.victim_email_domain)
-        self.phone: str | None = None
-        self.test_contacts = test_contacts
-        if test_contacts:
-            # Generated contacts only where nothing leaves the machine (replay, fixtures).
-            if not rules.is_local(url):
-                raise ValueError("generated test contacts are for local runs only (VV-31)")
-            self.email = self.email or run_email(persona, self.run_id, TEST_EMAIL_DOMAIN)
-            self.phone = test_phone(self.run_id)
+        # Every address and number comes from the contacts file (docs/victim-contacts.md).
+        book = contacts or load_contacts(self.settings.victim_contacts)
+        self.contacts = contacts_for(book, persona, self.run_id, local=rules.is_local(url))
+        self.email = self.contacts.email
+        self.phone = self.contacts.phone
         self.history = History()
         self.stage: Stage | None = None
         self.step = 0
@@ -839,20 +835,8 @@ class VictimRun:
             "steps": self.step,
             "decider": getattr(self.decider, "name", type(self.decider).__name__),
             "email": self.email,
-            "email_policy": (
-                f"generated test address on {TEST_EMAIL_DOMAIN} (local run)"
-                if self.test_contacts and not self.settings.victim_email_domain
-                else "per-run address on FTF_VICTIM_EMAIL_DOMAIN"
-                if self.email
-                else "FTF_VICTIM_EMAIL_DOMAIN not set: forms needing an e-mail are not sent"
-            ),
             "phone": self.phone,
-            "phone_policy": (
-                "generated test number, local run only (nothing leaves the machine)"
-                if self.phone
-                else "no safe range confirmed (VV-31): optional phone left empty, "
-                "required phone stops the form"
-            ),
+            "contacts": self.contacts.to_json(),
             "answers": self.history.answers,
             "blocked_requests": self.vb.events.blocked_requests[:500] if self.vb else [],
             "dialogs": self.vb.events.dialogs if self.vb else [],

@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from ..config import get_settings
+from .contacts import contacts_for, load_contacts
 from .persona import get_persona, load_personas, suggest_persona
 
 DEFAULT_CASE_61 = Path("testing_sample/61")
@@ -45,9 +46,14 @@ def _resolve_case(arg: str | None) -> Path:
 
 
 def cmd_personas(args: argparse.Namespace) -> None:
+    book = load_contacts(get_settings().victim_contacts)
     for persona in load_personas().values():
         print(f"{persona.ref:22} {persona.summary}")
         print(f"{'':22} matches: {persona.matches}")
+        for scope in ("local", "live"):
+            c = contacts_for(book, persona, "run-id", local=scope == "local")
+            print(f"{'':22} {scope:5} e-mail {c.email or '-'}, phone {c.phone or '-'}")
+    print(f"\nContacts from {book.path} (version {book.version}); see docs/victim-contacts.md.")
 
 
 def cmd_run(args: argparse.Namespace) -> None:
@@ -83,12 +89,11 @@ def cmd_run(args: argparse.Namespace) -> None:
         decider = RuleDecider()
         if args.decider == "auto":
             print("No OPENAI_API_KEY: actions are chosen by the persona rules, not the model.")
-    if args.test_contacts and not rules.is_local(url):
-        raise SystemExit("--test-contacts is for local runs only (the safe phone range is open).")
-    if not settings.victim_email_domain and not args.test_contacts:
-        print(
-            "FTF_VICTIM_EMAIL_DOMAIN is not set: forms that need an e-mail will be filled but not sent."
-        )
+    book = load_contacts(args.contacts or settings.victim_contacts)
+    preview = contacts_for(book, persona, "run-id", local=rules.is_local(url))
+    print(f"Contacts ({preview.scope} scope of {book.path}, version {book.version}):")
+    print(f"  e-mail: {preview.email or '-'} ({preview.email_policy})")
+    print(f"  phone:  {preview.phone or '-'} ({preview.phone_policy})")
     options = RunOptions(
         max_steps=args.max_steps,
         pace=args.pace,
@@ -106,7 +111,7 @@ def cmd_run(args: argparse.Namespace) -> None:
             options=options,
             fallback=replay.case.fallback if replay else None,
             replay=replay is not None,
-            test_contacts=args.test_contacts,
+            contacts=book,
         ).run()
     finally:
         if replay is not None:
@@ -238,9 +243,8 @@ def add_parser(sub: Any) -> None:
     p.add_argument("--out", help="where to write the run (default: FTF_VICTIM_DIR or data/victim)")
     p.add_argument("--live", action="store_true", help="allow a URL that is not on this machine")
     p.add_argument(
-        "--test-contacts",
-        action="store_true",
-        help="local runs only: a generated <persona>.<run>@victim.test address and phone number",
+        "--contacts",
+        help="contacts file (default: FTF_VICTIM_CONTACTS, else src/ftf/victim/contacts.json)",
     )
     p.add_argument("--no-perceive", action="store_true")
     p.add_argument("--no-ingest", action="store_true")

@@ -1,20 +1,28 @@
 """Contact details the victim gives (VV-30…VV-32), and how it fills a lead form.
 
-- E-mail: one address per run on the team's catch-all domain, `FTF_VICTIM_EMAIL_DOMAIN`.
-  When the setting is empty, a form that needs an e-mail is filled but not sent, and the run
-  records why.
-- Phone: the safe unassignable range is not confirmed yet (VV-31, open question 1), so
-  optional phone fields stay empty and a form that requires one is not sent: "phone required".
-- Every value comes from the persona or the run, never from the model, and every value is
-  read back from the page before sending (VV-21: no data that is not the persona's).
+Every e-mail address and phone number comes from one versioned file, `contacts.json` next to
+this module, or the file `FTF_VICTIM_CONTACTS` names (docs/victim-contacts.md). It has two
+scopes, chosen by where the run goes:
+
+- `local`: runs on this machine (the case-61 replay, fixture pages). Nothing leaves the
+  machine, so a reserved `victim.test` address and a fixed fictional number per persona are used.
+- `live`: real sites. The team mailbox domain, and phone numbers that are used only once the
+  file names who confirmed the range cannot be assigned (VV-31). With no domain, a form that
+  needs an e-mail is filled but not sent; with no usable number, a form that requires a phone
+  stops the run ("phone required"). Optional phone fields stay empty.
+
+Every other value comes from the persona, never from the model, and every value is read back
+from the page before sending (VV-21: no data that is not the persona's).
 """
 
 from __future__ import annotations
 
-import hashlib
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .persona import Persona, fold
 
@@ -72,14 +80,6 @@ def classify_field(f: dict[str, Any]) -> str:
     return "other"
 
 
-def run_email(persona: Persona, run_id: str, domain: str) -> str | None:
-    """`<persona>.<run-id>@<team-domain>`, or None when no team domain is set (VV-30)."""
-    domain = domain.strip().lstrip("@").lower()
-    if not domain:
-        return None
-    return f"{persona.id}.{run_id}@{domain}".lower()
-
-
 @dataclass
 class FillPlan:
     """What to type into one form, and whether it may be sent."""
@@ -99,19 +99,120 @@ class FillPlan:
             self.submit, self.stop_reason, self.stop_detail = False, reason, detail
 
 
-TEST_EMAIL_DOMAIN = "victim.test"  # reserved TLD (RFC 2606): can never receive mail
+CONTACTS_FILE = Path(__file__).with_name("contacts.json")
+LOCAL, LIVE = "local", "live"
+_PHONE = re.compile(r"^\+?[\d\s-]{9,16}$")
+_ADDRESS = re.compile(r"^[a-z0-9._+-]+@[a-z0-9-]+(\.[a-z0-9-]+)+$")
 
 
-def test_phone(run_id: str) -> str:
-    """A generated Polish-format mobile number for local test runs only, e.g. `512 345 678`.
+class _M(BaseModel):
+    model_config = ConfigDict(extra="forbid")
 
-    It has the shape of a real number, so it is used only where nothing leaves the machine
-    (the case-61 replay, fixture pages). Live runs keep the VV-31 rule until a range that
-    cannot be assigned is confirmed.
-    """
-    digits = str(int(hashlib.sha256(run_id.encode()).hexdigest(), 16))[-8:]
-    number = "5" + digits
-    return f"{number[:3]} {number[3:6]} {number[6:]}"
+
+class EmailRule(_M):
+    domain: str = ""
+    pattern: str = "{persona}.{run_id}@{domain}"
+
+    @field_validator("pattern")
+    @classmethod
+    def _unique_per_run(cls, value: str) -> str:
+        if "{run_id}" not in value or "{domain}" not in value:
+            raise ValueError("the pattern needs {run_id} and {domain}: one address per run (VV-30)")
+        return value
+
+
+class Scope(_M):
+    about: str = ""
+    email: EmailRule = Field(default_factory=EmailRule)
+    phones: dict[str, str] = Field(default_factory=dict)  # persona id -> number
+    phones_confirmed_by: str = ""  # who confirmed the numbers cannot be assigned (VV-31)
+
+    @field_validator("phones")
+    @classmethod
+    def _numbers(cls, value: dict[str, str]) -> dict[str, str]:
+        for persona, number in value.items():
+            if not _PHONE.match(number) or len(digits_of(number).removeprefix("48")) != 9:
+                raise ValueError(f"{persona}: {number!r} is not a 9-digit Polish number")
+        return value
+
+
+class ContactBook(_M):
+    version: str
+    about: str = ""
+    local: Scope
+    live: Scope
+    path: str = ""  # where it was read from (filled by the loader)
+
+
+def load_contacts(path: Path | str | None = None) -> ContactBook:
+    """The contacts file: `path`, else the packaged `contacts.json`."""
+    path = Path(path) if path else CONTACTS_FILE
+    book = ContactBook.model_validate_json(path.read_text(encoding="utf-8"))
+    return book.model_copy(update={"path": str(path)})
+
+
+@dataclass(frozen=True)
+class RunContacts:
+    """What one run gives, and why (recorded in run.json)."""
+
+    scope: str
+    email: str | None
+    phone: str | None
+    email_policy: str
+    phone_policy: str
+    book_version: str
+    book_path: str
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "scope": self.scope,
+            "email": self.email,
+            "phone": self.phone,
+            "email_policy": self.email_policy,
+            "phone_policy": self.phone_policy,
+            "file": self.book_path,
+            "version": self.book_version,
+        }
+
+
+def contacts_for(book: ContactBook, persona: Persona, run_id: str, local: bool) -> RunContacts:
+    """The run's address and number from the file, for the scope its URL is in."""
+    scope_name = LOCAL if local else LIVE
+    scope: Scope = getattr(book, scope_name)
+    domain = scope.email.domain.strip().lstrip("@").lower()
+    email = None
+    if domain:
+        email = scope.email.pattern.format(persona=persona.id, run_id=run_id, domain=domain).lower()
+        if not _ADDRESS.match(email):
+            raise ValueError(f"contacts {scope_name}.email gives an invalid address: {email!r}")
+        email_policy = f"{scope_name}: per-run address on {domain}"
+    else:
+        email_policy = f"{scope_name}: no e-mail domain set; forms needing an e-mail are not sent"
+    number = scope.phones.get(persona.id)
+    if number and (local or scope.phones_confirmed_by.strip()):
+        phone = number
+        phone_policy = f"{scope_name}: number for {persona.id}" + (
+            "" if local else f" (range confirmed by {scope.phones_confirmed_by.strip()})"
+        )
+    else:
+        phone = None
+        why = (
+            "live numbers are listed but nobody confirmed the range (VV-31)"
+            if number
+            else f"no {scope_name} number for {persona.id}"
+        )
+        phone_policy = (
+            f"{scope_name}: {why}; optional phone left empty, required phone stops the form"
+        )
+    return RunContacts(
+        scope_name, email, phone, email_policy, phone_policy, book.version, book.path
+    )
+
+
+def national(phone: str) -> str:
+    """`+48 500 000 101` -> `500 000 101`."""
+    d = digits_of(phone)[-9:]
+    return f"{d[:3]} {d[3:6]} {d[6:]}"
 
 
 def digits_of(value: str) -> str:
@@ -151,8 +252,8 @@ def plan_form(
             else:
                 plan.values[xpath] = email
         elif kind == "phone":
-            if phone:  # a generated test number, local runs only
-                plan.values[xpath] = phone
+            if phone:  # from the contacts file; the national part, the form adds +48
+                plan.values[xpath] = national(phone)
             # VV-31: no safe number yet. Optional phone fields stay empty.
             elif required:
                 plan.refuse("phone_required", "the form requires a phone number (VV-31 open)")
@@ -202,14 +303,18 @@ def allowed_values(persona: Persona, email: str | None, phone: str | None = None
         values.add(email)
     if phone:
         # Phone widgets reformat what was typed; the digits are what must match.
-        values |= {phone, digits_of(phone), f"+48{digits_of(phone)}", f"+48 {phone}"}
+        values |= {phone, national(phone), digits_of(phone), digits_of(phone)[-9:]}
     return values
 
 
 def value_allowed(value: str, allowed: set[str], phone: str | None) -> bool:
     if value in allowed:
         return True
-    return bool(phone) and digits_of(value).removeprefix("48") == digits_of(phone)
+    return (
+        bool(phone)
+        and digits_of(value)[-9:] == digits_of(phone)[-9:]
+        and len(digits_of(value)) in (9, 11)
+    )
 
 
 _DIGITS = re.compile(r"\d[\d\s-]{7,}\d")

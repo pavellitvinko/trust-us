@@ -18,6 +18,7 @@ import pytest
 from ftf.config import Settings
 from ftf.victim import rules
 from ftf.victim.agent import RunOptions, VictimRun
+from ftf.victim.contacts import load_contacts
 from ftf.victim.control import write_command
 from ftf.victim.persona import get_persona
 
@@ -84,7 +85,7 @@ def site():
     server.shutdown()
 
 
-def settings(tmp_path, domain=""):
+def settings(tmp_path):
     return Settings(
         data_dir=tmp_path / "data",
         openai_api_key="",
@@ -92,20 +93,34 @@ def settings(tmp_path, domain=""):
         openai_model="m",
         embedding_model="e",
         video_model="v",
-        victim_email_domain=domain,
     )
 
 
-def walk(url, tmp_path, domain="", **options):
+def book(email=True, phone=False):
+    """The packaged contacts file, with its local e-mail domain or numbers taken out."""
+    packaged = load_contacts()
+    local = packaged.local.model_copy(
+        update={
+            "email": packaged.local.email.model_copy(
+                update={"domain": "victim.test" if email else ""}
+            ),
+            "phones": packaged.local.phones if phone else {},
+        }
+    )
+    return packaged.model_copy(update={"local": local})
+
+
+def walk(url, tmp_path, email=True, phone=False, **options):
     opts = RunOptions(pace=0, panel=False, max_steps=20, human_wait_s=0, **options)
     run = VictimRun(
         url,
         PERSONA,
         tmp_path / "runs",
-        settings=settings(tmp_path, domain),
+        settings=settings(tmp_path),
         options=opts,
         launcher=_headless,
         notify=None,
+        contacts=book(email, phone),
     )
     return run, run.run()
 
@@ -118,9 +133,7 @@ def log(result, name):
 def test_full_funnel_to_a_callback_handoff(chromium, site, tmp_path):
     origin, posts = site
     posts.clear()
-    run, result = walk(
-        f"{origin}/index.html?utm_source=fb&fbclid=abc", tmp_path, domain="victim.test"
-    )
+    run, result = walk(f"{origin}/index.html?utm_source=fb&fbclid=abc", tmp_path)
     assert result.stop_reason == rules.OFFSITE_HANDOFF, result.stop_detail
     assert "konsultant zadzwoni" in result.stop_detail
     assert [s.url.split("/")[-1].split("?")[0] for s in result.stages] == [
@@ -158,7 +171,7 @@ def test_full_funnel_to_a_callback_handoff(chromium, site, tmp_path):
 def test_form_that_needs_an_email_is_not_sent_without_a_domain(chromium, site, tmp_path):
     origin, posts = site
     posts.clear()
-    _, result = walk(f"{origin}/index.html", tmp_path)
+    _, result = walk(f"{origin}/index.html", tmp_path, email=False)
     assert result.stop_reason == rules.FORM_NOT_SENT and "email_domain_unset" in result.stop_detail
     assert posts == []
     form = log(result, "forms")[0]
@@ -171,7 +184,7 @@ def test_form_that_needs_an_email_is_not_sent_without_a_domain(chromium, site, t
 def test_required_phone_stops_the_form(chromium, site, tmp_path):
     origin, posts = site
     posts.clear()
-    _, result = walk(f"{origin}/phone.html", tmp_path, domain="victim.test")
+    _, result = walk(f"{origin}/phone.html", tmp_path)
     assert result.stop_reason == rules.FORM_NOT_SENT and "phone_required" in result.stop_detail
     assert posts == []
 
@@ -191,7 +204,7 @@ def test_required_phone_stops_the_form(chromium, site, tmp_path):
 def test_forbidden_steps_stop_the_run(chromium, site, tmp_path, page, reason):
     origin, posts = site
     posts.clear()
-    _, result = walk(f"{origin}/{page}", tmp_path, domain="victim.test")
+    _, result = walk(f"{origin}/{page}", tmp_path, phone=True)
     assert result.stop_reason == reason, result.stop_detail
     assert posts == []  # nothing was ever sent
     blocks = log(result, "blocks")
@@ -221,7 +234,7 @@ def test_stop_from_another_process_keeps_the_record(chromium, site, tmp_path):
     assert (result.root / "run_files" / "session.har").is_file()
 
 
-def test_generated_test_contacts_send_the_required_phone_form(chromium, site, tmp_path):
+def test_contacts_file_numbers_send_the_required_phone_form(chromium, site, tmp_path):
     origin, posts = site
     posts.clear()
     opts = RunOptions(pace=0, panel=False, max_steps=10, human_wait_s=0)
@@ -233,11 +246,12 @@ def test_generated_test_contacts_send_the_required_phone_form(chromium, site, tm
         options=opts,
         launcher=_headless,
         notify=None,
-        test_contacts=True,
-    )
+    )  # no contacts given: the packaged contacts.json, local scope
     result = run.run()
     assert result.stop_reason == rules.OFFSITE_HANDOFF, result.stop_detail
     form = posts[0]["form"]
     assert form["email"] == [f"retiree-income.{run.run_id}@victim.test"]
-    assert form["phone"] == [run.phone]
-    assert result.manifest["phone"] == run.phone and "local run" in result.manifest["phone_policy"]
+    assert form["phone"] == ["500 000 101"]  # national part of +48 500 000 101
+    contacts = result.manifest["contacts"]
+    assert contacts["scope"] == "local" and contacts["phone"] == "+48 500 000 101"
+    assert contacts["version"] == "1" and contacts["file"].endswith("contacts.json")

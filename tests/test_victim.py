@@ -17,7 +17,7 @@ from ftf.config import Settings
 from ftf.ingest import ingest_folder
 from ftf.registry import comparators, layers, load_plugins
 from ftf.victim import rules
-from ftf.victim.contacts import classify_field, plan_form, run_email, safe_free_text
+from ftf.victim.contacts import classify_field, plan_form, safe_free_text
 from ftf.victim.decide import History, RuleDecider
 from ftf.victim.observe import build_state
 from ftf.victim.perceive import Perception, perceive_run, verify
@@ -154,14 +154,6 @@ def test_field_classification():
     assert classify_field(field("cardnumber", autocomplete="cc-number")) == "forbidden"
     assert classify_field(field("iban", label="Numer konta")) == "forbidden"
     assert classify_field(field("pass", type_="password")) == "forbidden"
-
-
-def test_run_email_needs_the_team_domain():
-    assert run_email(PERSONA, "20261121-1200-ab12", "") is None
-    assert (
-        run_email(PERSONA, "20261121-1200-ab12", "@Victim.Test")
-        == "retiree-income.20261121-1200-ab12@victim.test"
-    )
 
 
 def test_form_needing_email_is_filled_but_not_sent_without_domain():
@@ -661,30 +653,81 @@ def test_model_decider_picks_from_the_allowed_list_or_falls_back(settings):
     assert d.by.startswith("rules (model:") and d.n == 2
 
 
-def test_generated_test_phone_fills_phone_fields_and_survives_reformatting():
-    from ftf.victim.contacts import allowed_values, test_phone, value_allowed
+def test_packaged_contacts_file_gives_local_contacts_and_nothing_live():
+    from ftf.victim.contacts import contacts_for, load_contacts
 
-    phone = test_phone("20261122-1000-ab12")
-    assert phone == test_phone("20261122-1000-ab12") and len(phone.replace(" ", "")) == 9
-    assert phone.startswith("5")
+    book = load_contacts()
+    local = contacts_for(book, PERSONA, "20261122-1000-ab12", local=True)
+    assert local.email == "retiree-income.20261122-1000-ab12@victim.test"
+    assert local.phone == "+48 500 000 101" and local.scope == "local"
+    live = contacts_for(book, PERSONA, "20261122-1000-ab12", local=False)
+    assert live.email is None and live.phone is None
+    assert "not sent" in live.email_policy and "stops the form" in live.phone_policy
+    assert set(book.local.phones) == set(load_personas())  # one number per persona
+
+
+def test_live_numbers_need_a_confirmed_range():
+    from ftf.victim.contacts import ContactBook, contacts_for
+
+    def make(confirmed):
+        return ContactBook.model_validate(
+            {
+                "version": "9",
+                "local": {},
+                "live": {
+                    "email": {"domain": "team-mail.example"},
+                    "phones": {"retiree-income": "+48 700 000 001"},
+                    "phones_confirmed_by": confirmed,
+                },
+            }
+        )
+
+    unconfirmed = contacts_for(make(""), PERSONA, "r1", local=False)
+    assert unconfirmed.phone is None and "nobody confirmed" in unconfirmed.phone_policy
+    assert unconfirmed.email == "retiree-income.r1@team-mail.example"
+    confirmed = contacts_for(
+        make("UKE plan, checked by A. on 2026-11-22"), PERSONA, "r1", local=False
+    )
+    assert confirmed.phone == "+48 700 000 001" and "UKE plan" in confirmed.phone_policy
+
+
+def test_contacts_file_is_validated():
+    from pydantic import ValidationError
+
+    from ftf.victim.contacts import ContactBook
+
+    with pytest.raises(ValidationError, match="run_id"):
+        ContactBook.model_validate(
+            {"version": "1", "local": {"email": {"pattern": "fixed@{domain}"}}, "live": {}}
+        )
+    with pytest.raises(ValidationError, match="9-digit"):
+        ContactBook.model_validate(
+            {"version": "1", "local": {"phones": {"retiree-income": "12345"}}, "live": {}}
+        )
+
+
+def test_phone_is_typed_national_and_read_back_whatever_the_widget_does():
+    from ftf.victim.contacts import allowed_values, national, value_allowed
+
+    phone = "+48 500 000 101"
     form = lead_form(
         field("email", type_="email", required=True), field("phone", type_="tel", required=True)
     )
     plan = plan_form(form, PERSONA, "a@victim.test", phone)
-    assert plan.submit and plan.values["//input[@name='phone']"] == phone
+    assert plan.submit and plan.values["//input[@name='phone']"] == national(phone) == "500 000 101"
     allowed = allowed_values(PERSONA, "a@victim.test", phone)
-    digits = phone.replace(" ", "")
-    assert value_allowed(f"+48 {digits[:3]}-{digits[3:6]}-{digits[6:]}", allowed, phone)
+    for shown in ("500 000 101", "500-000-101", "+48 500 000 101", "+48500000101"):
+        assert value_allowed(shown, allowed, phone)
     assert not value_allowed("600 000 000", allowed, phone)
 
 
-def test_generated_contacts_are_refused_for_live_urls(tmp_path, settings):
+def test_a_live_url_gets_the_live_scope(tmp_path, settings):
     from ftf.victim.agent import VictimRun
 
-    with pytest.raises(ValueError, match="local runs only"):
-        VictimRun(
-            "https://glowpixel.org/?x=1", PERSONA, tmp_path, settings=settings, test_contacts=True
-        )
+    run = VictimRun("https://glowpixel.org/?x=1", PERSONA, tmp_path, settings=settings)
+    assert run.contacts.scope == "live" and run.email is None and run.phone is None
+    local = VictimRun("http://glowpixel.localhost:1/?x=1", PERSONA, tmp_path, settings=settings)
+    assert local.contacts.scope == "local" and local.phone == "+48 500 000 101"
 
 
 def test_quotes_survive_dropped_guillemets_and_ranges_are_kept():
