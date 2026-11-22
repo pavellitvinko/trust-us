@@ -343,6 +343,34 @@ def cmd_demo(args) -> None:
         raise SystemExit(1)
 
 
+def cmd_ground(args) -> None:
+    """Check expectation profiles against genuine pages (model and live capture)."""
+    from .perception.grounding import load_grounding, run_grounding
+
+    try:
+        kinds = load_grounding() if args.show else run_grounding(args.kind or None)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
+    if args.kind:
+        kinds = {kind: entry for kind, entry in kinds.items() if kind in args.kind}
+    if not kinds:
+        print("no grounding results yet")
+        return
+    for kind, entry in sorted(kinds.items()):
+        print(f"{kind}: {entry['status']}")
+        for page in entry.get("pages", []):
+            share = page.get("control_present_share")
+            control = "" if share is None else f", control present {share:.0%}"
+            print(f"  page {page.get('status', '-')}{control}: {page['url']}")
+        for key, row in entry.get("elements", {}).items():
+            rate = row["false_alarm_rate"]
+            shown = "n/a" if rate is None else f"{rate:.0%}"
+            print(f"  {row['decision']:10} false alarms {shown:4} {key}")
+        for key in entry.get("added", {}):
+            print(f"  added      {key}")
+
+
 def cmd_views(args) -> None:
     for v in _store().views():
         print(f"{v.view_id}  {v.kind.value:5}  {v.label}")
@@ -631,6 +659,11 @@ def main(argv: list[str] | None = None) -> None:
     browser.add_argument("--live-url", help="URL for the live capture step")
     browser.add_argument("--no-capture", action="store_true", help="skip the browser steps")
     p.set_defaults(func=cmd_demo)
+
+    p = sub.add_parser("ground", help="check expectation profiles against genuine pages")
+    p.add_argument("--kind", action="append", help="only this kind of page; may be repeated")
+    p.add_argument("--show", action="store_true", help="show stored results; run nothing")
+    p.set_defaults(func=cmd_ground)
 
     sub.add_parser("views", help="list views").set_defaults(func=cmd_views)
 
