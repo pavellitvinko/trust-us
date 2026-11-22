@@ -165,6 +165,46 @@ def _confidence(score: float, coverage: float, agreeing: int, threshold: float) 
     return "low"
 
 
+def separation(
+    coverage: float,
+    comparable: int,
+    total: int,
+    identity_seen: bool,
+    artifact_seen: bool,
+    config: FusionConfig = DEFAULT,
+    weak: list[str] = (),
+) -> tuple[RelationType, str, list[str]]:
+    """The last rule: nothing links the pair, so is it unrelated or is the evidence missing?
+
+    A separation is a claim too. It needs the identity tier seen on both sides: without it
+    the evidence that defines a campaign is unavailable, and unavailable is not absent (two
+    screenshots whose hashes differ are not thereby unrelated). Shared with the candidate
+    fallback (`grouping/candidates.py`) so both paths word and decide it the same way."""
+    counts = f"{comparable} of {total} groups comparable"
+    if coverage >= config.min_coverage and identity_seen:
+        reasons = [f"no tier reached its threshold; coverage {coverage:.2f} ({counts})", *weak]
+        if not artifact_seen:
+            reasons.append("not comparable: artifact tier; separation is low confidence")
+        high = coverage >= config.unrelated_high_coverage and artifact_seen
+        return RelationType.UNRELATED, "high" if high else "low", reasons
+    if coverage >= config.min_coverage:
+        return (
+            RelationType.INSUFFICIENT,
+            "",
+            [
+                (
+                    "identity tier not comparable on both sides: the pair cannot be called "
+                    f"unrelated; coverage {coverage:.2f} ({counts})"
+                )
+            ],
+        )
+    return (
+        RelationType.INSUFFICIENT,
+        "",
+        [f"too few comparable layers: coverage {coverage:.2f} ({counts})"],
+    )
+
+
 def decide(f: Fused, config: FusionConfig = DEFAULT) -> tuple[RelationType, str, list[str]]:
     """The ordered decision table. Returns (type, confidence label, reasons)."""
     t1, t2, t3, t4 = (f.tiers[t] for t in (Tier.IDENTITY, Tier.ARTIFACT, Tier.KIT, Tier.PLAYBOOK))
@@ -249,27 +289,21 @@ def decide(f: Fused, config: FusionConfig = DEFAULT) -> tuple[RelationType, str,
         )
 
     # 5. nothing above: unrelated if we saw enough, else insufficient
-    counts = f"{f.comparable_groups} of {f.total_groups} groups comparable"
-    # A separation is a claim too. It needs the identity tier seen on both sides: without
-    # it, the evidence that defines a campaign is unavailable, and unavailable is not absent
-    # (two screenshots whose hashes differ are not thereby unrelated).
-    if f.coverage >= config.min_coverage and t1.groups:
-        reasons.append(f"no tier reached its threshold; coverage {f.coverage:.2f} ({counts})")
-        for tier, label in ((t1, "identity"), (t2, "artifact"), (t3, "kit"), (t4, "playbook")):
-            if tier.score >= 0.1:
-                reasons.append("below threshold, not used: " + agree(tier, label))
-        if not t2.groups:
-            reasons.append("not comparable: artifact tier; separation is low confidence")
-        high = f.coverage >= config.unrelated_high_coverage and bool(t2.groups)
-        return RelationType.UNRELATED, "high" if high else "low", reasons
-    if f.coverage >= config.min_coverage:
-        reasons.append(
-            f"identity tier not comparable on both sides: the pair cannot be called unrelated; "
-            f"coverage {f.coverage:.2f} ({counts})"
-        )
-    else:
-        reasons.append(f"too few comparable layers: coverage {f.coverage:.2f} ({counts})")
-    return RelationType.INSUFFICIENT, "", reasons
+    weak = [
+        "below threshold, not used: " + agree(tier, label)
+        for tier, label in ((t1, "identity"), (t2, "artifact"), (t3, "kit"), (t4, "playbook"))
+        if tier.score >= 0.1
+    ]
+    rtype, confidence, why = separation(
+        f.coverage,
+        f.comparable_groups,
+        f.total_groups,
+        identity_seen=bool(t1.groups),
+        artifact_seen=bool(t2.groups),
+        config=config,
+        weak=weak,
+    )
+    return rtype, confidence, reasons + why
 
 
 def fuse(

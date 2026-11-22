@@ -7,7 +7,7 @@ Results with real gateway embeddings belong to HAC-32 and are not in this file.
 
 ## Run record
 
-- Commit: `fa9ab12`
+- Commit: `451b892+changes`
 - Date: 2026-11-22
 - Corpus: `testing_sample`: 10 incident folders, 37 views (21 image, 13 page, 3 video), 1316 observations; 3 views carry no fingerprint at all
 - Execution mode: model-off: no gateway call; vector layers use the local hashed-word embedder; no screenshot, video, pattern or expected-element reading
@@ -129,6 +129,50 @@ Rule check (confidence labels the evidence does not carry): none found.
 - video views: 3; 0 carry a fingerprint; layers built: none.
 - Reading what a screenshot or a video shows, and so an ad-to-page funnel edge,
   needs the vision model: unavailable in this mode.
+
+## Candidate generation against all pairs (HAC-36)
+
+Parity with the all-pairs run: **holds**. Both runs store 666 relations for 37 views. Relation type, confidence label and coverage are equal for every pair, tier scores for every compared pair, and campaigns, families, playbooks and funnel edges are identical. Every skipped pair carries the same reasons as in the all-pairs run plus one line saying it was not compared in full.
+
+Pairs compared in full: 288 of 666. This is **not a saving on this corpus**: within a view kind the index proposes either every pair or none (image-image 210 of 210, page-page 78 of 78, video-video 0 of 3), because the perceptual and vector layers put every view that holds them into one bucket. No pair across view kinds is compared. No skipped pair reaches a tier score of 0.1 in the all-pairs run. All 378 skipped pairs are unrelated or insufficient evidence in the all-pairs run.
+
+| View kinds | Compared in full | All pairs |
+| --- | --- | --- |
+| image-image | 210 | 210 |
+| image-page | 0 | 273 |
+| image-video | 0 | 63 |
+| page-page | 78 | 78 |
+| page-video | 0 | 39 |
+| video-video | 0 | 3 |
+
+| Index key family (layer) | Distinct pairs it proposes |
+| --- | --- |
+| ad.creative (every holder) | 210 |
+| asset.perceptual (every holder) | 78 |
+| narrative.skeleton (every holder) | 78 |
+| text.semantic (every holder) | 78 |
+| kit.code | 25 |
+| kit.url | 19 |
+| kit.config | 10 |
+| kit.dom | 6 |
+| kit.form | 6 |
+| asset.exact | 5 |
+| ids.domain | 5 |
+| ids.conversion | 4 |
+| ids.tracking | 3 |
+| ids.campaign | 2 |
+| text.shingle | 2 |
+| brand.offer | 1 |
+| infra.host | 1 |
+
+What the index would propose under two key choices, measured against the all-pairs relations (a measurement only; the first row is what the code does):
+
+| Index keys | Pairs proposed | Page pairs | Linked pairs found | Pairs with a non-zero score not proposed |
+| --- | --- | --- | --- | --- |
+| as built: all index keys | 288 | 78 of 78 | 8 of 8 | 0 |
+| identifier, set and MinHash keys only | 36 | 36 of 78 | 8 of 8 | 8 (highest tier score 0.30) |
+
+The identifier, set and MinHash keys alone find every linked pair here (8 of 8) while proposing 36 pairs instead of 288; the 8 scored pairs they miss reach a tier score of at most 0.30. Scaling is therefore not demonstrated: at this size the catch-all buckets make candidate generation equal to all pairs within a view kind. The buckets stay because a link that rests only on vector similarity (a playbook link from real embeddings) has no identifier key to propose it.
 
 ## Degradation on real files
 
