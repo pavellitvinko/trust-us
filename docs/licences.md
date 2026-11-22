@@ -32,6 +32,18 @@ on the account.
 | OpenAI | `FTF_OPENAI_MODEL=gpt-6-luna` | reading, patterns, expectation profiles | <https://openai.com/policies/> |
 | Google Gemini | `FTF_EMBEDDING_MODEL=gemini-embedding-2`, `FTF_VIDEO_MODEL=gemini-4-hydrogen` | embeddings, video | <https://ai.google.dev/gemini-api/terms> |
 
+## Face matching
+
+| Component | Licence | Note |
+| --- | --- | --- |
+| CompreFace 1.2.0 | Apache-2.0 | <https://github.com/exadel-inc/CompreFace> |
+| FaceNet code | MIT | <https://github.com/davidsandberg/facenet> |
+| FaceNet weights (VGGFace2) | **Not stated** | The MIT licence names the software only. The VGGFace2 page states no terms and no longer offers downloads. Confirm before any use beyond this private, non-commercial prototype. |
+| Reference photos | CC0, public domain, CC BY, CC BY-SA | Author, licence and source for each are in `src/ftf/faces/reference_people.json`. |
+
+InsightFace-based CompreFace builds are not used: their models are for non-commercial research only.
+Use of face recognition has not been confirmed by the organiser.
+
 ## Public data sources
 
 | Source | Used for | Address |

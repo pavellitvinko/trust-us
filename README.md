@@ -167,6 +167,17 @@ The model writes two or three paragraphs from the evidence table only. Each sent
 facts, and code removes any sentence with a number, identifier or name those facts do not contain.
 The Match screen has the same action under the evidence table. Without a key, it says it is unavailable.
 
+## Face reference matching
+
+`docker compose up` also starts a private CompreFace service with no published port and loads a
+closed list of public figures from `src/ftf/faces/reference_people.json`. `ftf perceive` then
+reports "possible face match, verify" as risk evidence.
+
+- Matching runs only against that list. Unmatched faces are not stored, and a match cannot link campaigns.
+- Photos come from Wikimedia Commons under free licences, are not stored in the repository, and
+  CompreFace is set not to keep them. Face templates are biometric data: keep the volume private.
+- If the service is down, faces are `not_observable` and the rest of the app works.
+
 ## Rehearse the demo
 
 ```bash

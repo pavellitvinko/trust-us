@@ -19,7 +19,7 @@ YOUNG_DOMAIN_DAYS = 365
 # A kind counts as checked when one of these inputs was observed.
 _INPUTS = {
     "domain": ("rdap.", "warning."),  # the host alone does not show age or listing
-    "impersonation": ("page.read_text", "image.text"),
+    "impersonation": ("page.read_text", "image.text", "face.reference"),
     "absent_elements": ("expect.element",),
     "evasion": ("page.clean_text", "page.body_text", "cloak."),
     "persuasion": ("pattern.score", "markup."),
@@ -101,6 +101,9 @@ def _describe(o: Observation, hosts: list[str]) -> tuple[str, str, str] | None:
     is_org = ns == "page.entity.organisation" and isinstance(value, dict)
     if is_org and value.get("role") == "regulator_invoked":
         return "impersonation", "G3", f"invokes institution: {value.get('name')}"
+    if ns == "face.reference" and isinstance(value, dict):
+        person, score = value.get("person"), float(value.get("similarity", 0))
+        return "impersonation", "G1", f"possible face match to {person} ({score:.0%}), verify"
     if ns == "dom.evasion_filter":
         return "evasion", "E13", f"visual-evasion filter: {value}"
     if ns == "kit.cloaker":

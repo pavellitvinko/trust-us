@@ -8,6 +8,7 @@ services:
         required: false
     environment:
       FTF_DATA_DIR: /data
+      FTF_COMPREFACE_URL: http://compreface
     volumes:
       - ./data:/data
       # Material to ingest, read-only. Point FTF_SAMPLE_DIR at your copy of the sample.
@@ -19,3 +20,42 @@ services:
       timeout: 5s
       start_period: 20s
       retries: 3
+
+  # Private face service: no published port, so only the containers here can reach it.
+  compreface:
+    image: exadel/compreface:1.2.0-facenet
+    restart: unless-stopped
+    mem_limit: 5g
+    environment:
+      save_images_to_db: "false"
+      enable_email_server: "false"
+      API_JAVA_OPTS: "-Xmx1g"
+      ADMIN_JAVA_OPTS: "-Xmx512m"
+    volumes:
+      - compreface-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost/ >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      start_period: 120s
+      retries: 8
+
+  # Loads the closed reference list once the service is up. Safe to run again.
+  faces-setup:
+    build: .
+    command: ["ftf", "faces", "setup"]
+    restart: on-failure:5
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      FTF_DATA_DIR: /data
+      FTF_COMPREFACE_URL: http://compreface
+    volumes:
+      - ./data:/data
+    depends_on:
+      compreface:
+        condition: service_healthy
+
+volumes:
+  compreface-db:
