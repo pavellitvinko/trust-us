@@ -56,13 +56,9 @@ def cmd_ingest(args) -> None:
 
 
 def _capture_dir(url: str | None, replay: Path | None) -> Path:
-    from datetime import UTC, datetime
-    from urllib.parse import urlsplit
+    from .intake import capture_dir
 
-    host = urlsplit(url if url and "//" in url else f"//{url or ''}").hostname
-    name = host or (replay.stem if replay else "capture")
-    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    return get_settings().data_dir / "captures" / f"{name}-{stamp}"
+    return capture_dir(url, replay)
 
 
 def cmd_capture(args) -> None:
