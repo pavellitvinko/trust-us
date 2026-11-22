@@ -8,7 +8,7 @@ HackNation challenge "Kolekcjoner fejków", set by NASK.
 - **NEW**: [Pattern Library](PATTERN_LIBRARY.md) — Pattern discovery, library versioning, novelty tracking
 
 **Status: Method track built; identifier, kit, asset and perception extractors landing.**
-Twenty-three fingerprint layers, five comparator families with rarity weighting and a stoplist,
+Twenty-four fingerprint layers, five comparator families with rarity weighting and a stoplist,
 typed fusion with the contradiction and demotion rules, three-level grouping, funnel edges,
 open-set assignment, candidate generation and the evaluation harness run on
 `tests/fixtures/observations.json` with no model call (architecture §8a, §9a, §10a, §13a). The
@@ -24,6 +24,41 @@ and the basic interface are available below; broader enrichment remains to be bu
 Pattern discovery (architecture §6) includes a versioned library with stable IDs and
 merge/split history, embedding and clustering, pattern induction and matching, novelty
 tracking, and pattern-based playbook evidence. See [Pattern Library](PATTERN_LIBRARY.md).
+
+## Methodology
+
+The method is documented in one place, [docs/architecture.md](docs/architecture.md): the
+design (§1–§17, written before the build) and the as-built account that is authoritative where
+they differ: §8a layers and namespaces, §9a comparators, weights, thresholds, coverage and the
+decision table, §10a grouping and open-set assignment, §11a the pair and corpus reports, §13a
+measurements. The status banner at its top says which commit it describes. The signals it
+consumes are in [docs/signal-catalogue.md](docs/signal-catalogue.md); the observation
+namespaces each layer reads, with the aliases accepted from the other tracks, are in
+[docs/method-namespaces.md](docs/method-namespaces.md).
+
+Measurements are kept in three kinds and never mixed: fixture runs, real-sample runs with no
+model call, and real-model runs. The real-sample tables are generated, not typed,
+into [docs/method-results-real-sample.md](docs/method-results-real-sample.md); its run record
+names the commit. No gateway-embedding run exists yet; `ftf validate --model gateway` produces it
+with a key (architecture §13a, HAC-32). Agreement figures
+are agreement with one analyst's reading of the sample, not classifier accuracy.
+
+To reproduce the account with the organiser sample in `testing_sample/` and no key:
+
+```bash
+FTF_EMBEDDER=fake OPENAI_API_KEY= GEMINI_API_KEY= uv run pytest -q          # the suite, model off
+uv run ftf ingest testing_sample                                             # observations, fingerprints, relations, groups
+uv run ftf explain <view_a> <view_b>                                         # one pair: decision path, evidence, ignored and missing items
+uv run ftf report --out export                                               # corpus report, pair reports, JSON/CSV
+uv run ftf eval                                                              # agreement with docs/baseline-report.md
+uv run ftf validate testing_sample --out docs/method-results-real-sample.md  # every real-sample table, fresh store, about a minute
+uv run ftf load-fixtures && uv run ftf eval --fixtures                       # the fixture numbers of architecture §13a
+uv run ftf demo testing_sample                                               # the jury sequence on a temporary store, no model calls
+```
+
+The **Method** tab in the interface shows the same layer registry, group and tier weights and
+thresholds as architecture §9a, loaded from `FusionConfig`; edits there recompute the stored
+relations and can be restored to the shipped values.
 
 ## Run locally
 
