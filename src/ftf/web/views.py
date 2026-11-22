@@ -145,13 +145,28 @@ def map_payload(library: Library) -> dict[str, Any]:
             {"a": a, "b": b, "kind": m.kind, "reason": m.reason, "label": m.label}
             for (a, b), m in edges.items()
         ],
-        # Why each campaign holds together; some are joined by a journey, not by a link.
-        "campaignWhy": {
-            cid: why.label
-            for cid, campaign in library.campaigns.items()
-            if (why := campaign_why(library, campaign)).label
-        },
+        **_map_groups(library),
     }
+
+
+def _map_groups(library: Library) -> dict[str, Any]:
+    """What the map's tree needs from the grouping. Worked out once per built Library."""
+    if "map_groups" not in library.view_cache:
+        library.view_cache["map_groups"] = {
+            # Some campaigns are joined by a journey, not by a link.
+            "campaignWhy": {
+                cid: why.label
+                for cid, campaign in library.campaigns.items()
+                if (why := campaign_why(library, campaign)).label
+            },
+            "repeats": [list(c.members) for c in library.campaigns.values() if c.repeat],
+            "journeys": {
+                vid: [step for step, _ in journey.steps if step != vid]
+                for vid, journey in library.journeys.items()
+                if len(journey.steps) > 1
+            },
+        }
+    return library.view_cache["map_groups"]
 
 
 def library_payload(library: Library) -> dict[str, Any]:

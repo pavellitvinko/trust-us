@@ -1,10 +1,12 @@
 // Turns the Library's rows and links into one tree: template > campaign > case > item.
-// Every row appears exactly once.
+// Every row appears exactly once. Grouping follows the backend: a link is never treated as
+// transitive, because the backend can refuse to merge A-B-C.
 
-import type { MapEdge, Row } from "../api";
+import type { LibraryData, MapEdge, Row } from "../api";
 import { campaignUrl, kitUrl } from "../hooks";
 
 export type TreeKind = "kit" | "campaign" | "loose" | "links" | "unlinked" | "case";
+type MapData = LibraryData["map"];
 
 export interface TreeNode {
   key: string;
@@ -18,8 +20,10 @@ export interface TreeNode {
   reasons: string[];
   children: TreeNode[];
   rows: Row[];
+  /** Distinct items: a page found in several cases counts once. */
   count: number;
-  /** For items linked one to one: what each is linked to. */
+  copies: number;
+  /** On a case: what each item is linked to outside its own group. */
   linkNotes?: Record<string, string>;
 }
 
@@ -27,6 +31,8 @@ const compare = new Intl.Collator("pl", { numeric: true, sensitivity: "base" }).
 
 /** A case named by a long run id reads better shortened. */
 export const shortCase = (name: string) => (/^[0-9a-f]{32}$/.test(name) ? `Case ${name.slice(0, 8)}` : name);
+
+const linkLabel = (e: MapEdge) => (e.kind === "duplicate" ? "same page" : e.label);
 
 /** Where a group was seen: its sites when known, otherwise its cases. */
 function place(rows: Row[]) {
@@ -40,17 +46,17 @@ function place(rows: Row[]) {
 
 function reasons(rows: Row[], edges: MapEdge[], kind: MapEdge["kind"]) {
   const ids = new Set(rows.map((r) => r.id));
-  const labels = edges.filter((e) => e.kind === kind && ids.has(e.a) && ids.has(e.b)).map((e) => e.label);
+  const labels = edges.filter((e) => e.kind === kind && ids.has(e.a) && ids.has(e.b)).map(linkLabel);
   return [...new Set(labels)].sort(compare);
 }
 
-function caseNodes(parent: string, rows: Row[], linkNotes?: Record<string, string>): TreeNode[] {
+function caseNodes(parent: string, rows: Row[]): TreeNode[] {
   const cases = new Map<string, Row[]>();
   for (const r of rows) cases.set(r.caseId, [...(cases.get(r.caseId) ?? []), r]);
   return [...cases.entries()]
-    .map(([id, members]) => ({
+    .map(([id, members]): TreeNode => ({
       key: `${parent}/case:${id}`,
-      kind: "case" as const,
+      kind: "case",
       title: shortCase(members[0].case),
       name: "",
       note: "",
@@ -58,31 +64,15 @@ function caseNodes(parent: string, rows: Row[], linkNotes?: Record<string, strin
       children: [],
       rows: members,
       count: members.length,
-      linkNotes,
+      copies: 0,
     }))
     .sort((a, b) => compare(a.title, b.title));
 }
 
-function campaignNode(id: string, rows: Row[], edges: MapEdge[], why: Record<string, string>): TreeNode {
-  const key = `campaign:${id}`;
-  return {
-    key,
-    kind: "campaign",
-    title: `Campaign ${place(rows)}`,
-    name: rows[0].campaign,
-    note: "Likely run by the same people.",
-    href: campaignUrl(id),
-    reasons: why[id] ? [why[id]] : reasons(rows, edges, "campaign"),
-    children: caseNodes(key, rows),
-    rows: [],
-    count: rows.length,
-  };
-}
-
 const biggestFirst = (a: TreeNode, b: TreeNode) => b.count - a.count || compare(a.title, b.title);
 
-/** Items that are all directly linked to each other, without a campaign or template. */
-function linkedGroups(rows: Row[], edges: MapEdge[]): Row[][] {
+/** Sets of items that are all directly linked to each other. */
+function fullyLinked(rows: Row[], edges: MapEdge[]): Row[][] {
   const parent = new Map(rows.map((r) => [r.id, r.id]));
   const find = (x: string): string => {
     while (parent.get(x) !== x) x = parent.get(x)!;
@@ -90,18 +80,40 @@ function linkedGroups(rows: Row[], edges: MapEdge[]): Row[][] {
   };
   const direct = new Set<string>();
   for (const e of edges) {
-    if (e.kind === "possible" || !parent.has(e.a) || !parent.has(e.b)) continue;
+    if (!parent.has(e.a) || !parent.has(e.b)) continue;
     parent.set(find(e.a), find(e.b));
     direct.add(`${e.a}\n${e.b}`).add(`${e.b}\n${e.a}`);
   }
   const groups = new Map<string, Row[]>();
   for (const r of rows) groups.set(find(r.id), [...(groups.get(find(r.id)) ?? []), r]);
-  return [...groups.values()].filter((g) =>
-    g.every((a) => g.every((b) => a.id === b.id || direct.has(`${a.id}\n${b.id}`))),
+  return [...groups.values()].filter(
+    (g) => g.length > 1 && g.every((a) => g.every((b) => a.id === b.id || direct.has(`${a.id}\n${b.id}`))),
   );
 }
 
-export function buildTree(rows: Row[], edges: MapEdge[], campaignWhy: Record<string, string> = {}): TreeNode[] {
+export function buildTree(rows: Row[], map: MapData): TreeNode[] {
+  const edges = map.edges.filter((e) => e.kind !== "possible");
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const repeatOf = new Map(map.repeats.flatMap((ids) => ids.map((id) => [id, ids[0]] as const)));
+  const distinctCount = (members: Row[]) => new Set(members.map((r) => repeatOf.get(r.id) ?? r.id)).size;
+
+  const campaignNode = (id: string, members: Row[]): TreeNode => {
+    const key = `campaign:${id}`;
+    return {
+      key,
+      kind: "campaign",
+      title: `Campaign ${place(members)}`,
+      name: members[0].campaign,
+      note: "Likely run by the same people.",
+      href: campaignUrl(id),
+      reasons: map.campaignWhy[id] ? [map.campaignWhy[id]] : reasons(members, edges, "campaign"),
+      children: caseNodes(key, members),
+      rows: [],
+      count: members.length,
+      copies: 0,
+    };
+  };
+
   const campaigns = new Map<string, Row[]>();
   for (const r of rows) {
     if (r.campaignId) campaigns.set(r.campaignId, [...(campaigns.get(r.campaignId) ?? []), r]);
@@ -124,7 +136,8 @@ export function buildTree(rows: Row[], edges: MapEdge[], campaignWhy: Record<str
 
   const kits = [...kitRows.entries()].map(([id, members]): TreeNode => {
     const key = `kit:${id}`;
-    const own = (kitCampaigns.get(id) ?? []).map((c) => campaignNode(c, campaigns.get(c)!, edges, campaignWhy)).sort(biggestFirst);
+    const ownIds = kitCampaigns.get(id) ?? [];
+    const own = ownIds.map((c) => campaignNode(c, campaigns.get(c)!)).sort(biggestFirst);
     const loose = members.filter((r) => !r.campaignId);
     const children = [...own];
     if (loose.length) {
@@ -138,10 +151,12 @@ export function buildTree(rows: Row[], edges: MapEdge[], campaignWhy: Record<str
         reasons: [],
         children: caseNodes(looseKey, loose),
         rows: [],
-        count: loose.length,
+        count: distinctCount(loose),
+        copies: loose.length - distinctCount(loose),
       });
     }
-    const all = [...own.flatMap((c) => campaigns.get(c.key.slice("campaign:".length))!), ...loose];
+    const all = [...ownIds.flatMap((c) => campaigns.get(c)!), ...loose];
+    const distinct = distinctCount(all);
     return {
       key,
       kind: "kit",
@@ -152,50 +167,57 @@ export function buildTree(rows: Row[], edges: MapEdge[], campaignWhy: Record<str
       reasons: reasons(all, edges, "kit"),
       children,
       rows: [],
-      count: all.length,
+      count: distinct,
+      copies: all.length - distinct,
     };
   });
 
-  const placed = new Set(rows.filter((r) => r.campaignId || r.kitId).map((r) => r.id));
-  const rest = rows.filter((r) => !placed.has(r.id));
-  const linked = linkedGroups(rest, edges).filter((g) => g.length > 1);
-  const inLinked = new Set(linked.flat().map((r) => r.id));
-  const links = linked.map((members): TreeNode => {
+  const rest = rows.filter((r) => !r.campaignId && !r.kitId);
+  const restIds = new Set(rest.map((r) => r.id));
+  const repeats = map.repeats
+    .filter((ids) => ids.length > 1 && ids.every((id) => restIds.has(id)))
+    .map((ids) => ids.map((id) => byId.get(id)!));
+  const inRepeat = new Set(repeats.flat().map((r) => r.id));
+  const linked = fullyLinked(
+    rest.filter((r) => !inRepeat.has(r.id)),
+    edges,
+  );
+  const grouped = new Set([...inRepeat, ...linked.flat().map((r) => r.id)]);
+
+  const groupNode = (members: Row[], copiesOnly: boolean): TreeNode => {
     const key = `links:${members.map((r) => r.id).sort()[0]}`;
     const ids = new Set(members.map((r) => r.id));
-    const between = edges.filter((e) => e.kind !== "possible" && ids.has(e.a) && ids.has(e.b));
-    const onlyCopies = between.every((e) => e.kind === "duplicate");
+    const between = edges.filter((e) => ids.has(e.a) && ids.has(e.b));
     return {
       key,
       kind: "links",
-      title: onlyCopies ? `Same page added ${members.length} times ${place(members)}` : `Linked items ${place(members)}`,
+      title: copiesOnly ? `Same page added ${members.length} times ${place(members)}` : `Linked items ${place(members)}`,
       name: "",
-      note: onlyCopies ? "Copies of one page, not separate findings." : "",
-      reasons: onlyCopies ? [] : [...new Set(between.map((e) => e.label))].sort(compare),
+      note: copiesOnly ? "Copies of one page, not separate findings." : "",
+      reasons: copiesOnly ? [] : [...new Set(between.map(linkLabel))].sort(compare),
       children: caseNodes(key, members),
       rows: [],
-      count: members.length,
+      count: copiesOnly ? 1 : members.length,
+      copies: copiesOnly ? members.length - 1 : 0,
     };
-  });
+  };
+  const links = [
+    ...repeats.map((g) => groupNode(g, true)),
+    ...linked.map((g) => {
+      const ids = new Set(g.map((r) => r.id));
+      return groupNode(g, edges.filter((e) => ids.has(e.a) && ids.has(e.b)).every((e) => e.kind === "duplicate"));
+    }),
+  ];
 
   const tree = [
     // A template whose only items sit in a campaign shown under another template has nothing left.
     ...kits.filter((k) => k.count > 0).sort(biggestFirst),
-    ...standalone.map((c) => campaignNode(c, campaigns.get(c)!, edges, campaignWhy)).sort(biggestFirst),
+    ...standalone.map((c) => campaignNode(c, campaigns.get(c)!)).sort(biggestFirst),
     ...links.sort(biggestFirst),
   ];
 
-  // A link is not transitive: the backend can refuse to merge A-B-C, so these stay one to one.
-  const titles = new Map(rows.map((r) => [r.id, r.title]));
-  const linkNotes: Record<string, string> = {};
-  for (const r of rest) {
-    if (inLinked.has(r.id)) continue;
-    const links = edges
-      .filter((e) => e.kind !== "possible" && (e.a === r.id || e.b === r.id))
-      .map((e) => `${titles.get(e.a === r.id ? e.b : e.a) ?? "another item"} (${e.label})`);
-    if (links.length) linkNotes[r.id] = `linked to ${[...new Set(links)].join(", ")}`;
-  }
-  const oneToOne = rest.filter((r) => linkNotes[r.id]);
+  const hasLink = (r: Row) => edges.some((e) => e.a === r.id || e.b === r.id) || !!map.journeys[r.id]?.length;
+  const oneToOne = rest.filter((r) => !grouped.has(r.id) && hasLink(r));
   if (oneToOne.length) {
     tree.push({
       key: "one-to-one",
@@ -204,12 +226,13 @@ export function buildTree(rows: Row[], edges: MapEdge[], campaignWhy: Record<str
       name: "",
       note: "Each item shares evidence with the item named, but that doesn't put them all in one group.",
       reasons: [],
-      children: caseNodes("one-to-one", oneToOne, linkNotes),
+      children: caseNodes("one-to-one", oneToOne),
       rows: [],
       count: oneToOne.length,
+      copies: 0,
     });
   }
-  const unlinked = rest.filter((r) => !inLinked.has(r.id) && !linkNotes[r.id]);
+  const unlinked = rest.filter((r) => !grouped.has(r.id) && !hasLink(r));
   if (unlinked.length) {
     tree.push({
       key: "unlinked",
@@ -221,9 +244,50 @@ export function buildTree(rows: Row[], edges: MapEdge[], campaignWhy: Record<str
       children: caseNodes("unlinked", unlinked),
       rows: [],
       count: unlinked.length,
+      copies: 0,
     });
   }
+
+  attachLinkNotes(tree, rows, edges, map.journeys);
   return tree;
+}
+
+/** Tell each item about firm links that its own group doesn't already show. */
+function attachLinkNotes(tree: TreeNode[], rows: Row[], edges: MapEdge[], journeys: MapData["journeys"]) {
+  const home = new Map<string, string>();
+  const cases: TreeNode[] = [];
+  const walk = (node: TreeNode, parent: string) => {
+    if (node.kind !== "case") return node.children.forEach((c) => walk(c, node.key));
+    cases.push(node);
+    for (const r of node.rows) home.set(r.id, parent === "one-to-one" ? `one:${r.id}` : parent);
+  };
+  tree.forEach((n) => walk(n, n.key));
+
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const others = new Map<string, Map<string, Set<string>>>();
+  const add = (from: string, to: string, label: string) => {
+    if (!byId.has(from) || !byId.has(to) || home.get(from) === home.get(to)) return;
+    const mine = others.get(from) ?? new Map<string, Set<string>>();
+    mine.set(to, (mine.get(to) ?? new Set<string>()).add(label));
+    others.set(from, mine);
+  };
+  for (const e of edges) {
+    // Items of one template are already shown together under it.
+    if (e.kind === "kit" && byId.get(e.a)?.kitId && byId.get(e.a)?.kitId === byId.get(e.b)?.kitId) continue;
+    add(e.a, e.b, linkLabel(e));
+    add(e.b, e.a, linkLabel(e));
+  }
+  for (const [id, path] of Object.entries(journeys)) for (const to of path) add(id, to, "same visitor path");
+
+  const notes: Record<string, string> = {};
+  for (const [id, targets] of others) {
+    const parts = [...targets.entries()].map(([to, labels]) => {
+      const target = byId.get(to)!;
+      return `${target.title} in ${shortCase(target.case)} (${[...labels].sort(compare).join(", ")})`;
+    });
+    notes[id] = `linked to ${parts.sort(compare).join("; ")}`;
+  }
+  for (const node of cases) node.linkNotes = notes;
 }
 
 /** Lower case with Polish letters flattened, so "lodz" finds "Łódź". */
@@ -240,7 +304,7 @@ export function filterTree(nodes: TreeNode[], query: string): TreeNode[] {
     const rows = node.rows.filter((r) => rowText(r).includes(q));
     const children = node.children.map(prune).filter((c): c is TreeNode => c !== null);
     if (!rows.length && !children.length) return null;
-    return { ...node, rows, children, count: rows.length + children.reduce((sum, c) => sum + c.count, 0) };
+    return { ...node, rows, children, count: rows.length + children.reduce((sum, c) => sum + c.count, 0), copies: 0 };
   };
   return nodes.map(prune).filter((n): n is TreeNode => n !== null);
 }

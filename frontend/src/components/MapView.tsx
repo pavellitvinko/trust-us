@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import type { MapEdge, Row } from "../api";
+import type { LibraryData, Row } from "../api";
 import { Picture, plural } from "./bits";
 import { buildTree, filterTree, groupKeys, shortCase, type TreeNode } from "./mapTree";
 import { VideoThumbnail } from "./video";
@@ -61,7 +61,10 @@ function Branch({
             {open ? "▾" : "▸"}
           </span>
           <span className="tree-title">{node.title}</span>
-          <span className="tree-count">{plural(node.count, "item")}</span>
+          <span className="tree-count">
+            {plural(node.count, "item")}
+            {node.copies > 0 && ` + ${node.copies} ${node.copies === 1 ? "copy" : "copies"}`}
+          </span>
         </button>
         {node.href && (
           <Link className="tree-open" to={node.href} aria-label={`Open ${node.title}`}>
@@ -88,19 +91,11 @@ function Branch({
 }
 
 /** The Library as a tree: template, campaign, case, item. */
-export default function MapView({
-  rows,
-  edges,
-  campaignWhy,
-}: {
-  rows: Row[];
-  edges: MapEdge[];
-  campaignWhy: Record<string, string>;
-}) {
+export default function MapView({ rows, map }: { rows: Row[]; map: LibraryData["map"] }) {
   const [query, setQuery] = useState("");
   // Stored as a difference from the default, so groups that arrive later open normally.
   const [flipped, setFlipped] = useState<Set<string>>(new Set());
-  const tree = useMemo(() => buildTree(rows, edges, campaignWhy), [rows, edges, campaignWhy]);
+  const tree = useMemo(() => buildTree(rows, map), [rows, map]);
   const shown = useMemo(() => filterTree(tree, query), [tree, query]);
   const searching = query.trim().length > 0;
   const keys = useMemo(() => groupKeys(tree), [tree]);
@@ -116,7 +111,7 @@ export default function MapView({
   const setAll = (open: boolean) =>
     setFlipped(new Set(keys.filter((key) => closedByDefault(key) === open)));
   const found = shown.reduce((sum, n) => sum + n.count, 0);
-  if (!rows.length) return <div className="empty card">Items appear here once the analysis finishes.</div>;
+  if (!rows.length) return <div className="empty card">No items to show yet.</div>;
 
   return (
     <div className="tree-page">

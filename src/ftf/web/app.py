@@ -132,7 +132,13 @@ def create_app() -> FastAPI:
                 "items": [],
                 "cases": 0,
                 "linked": 0,
-                "map": {"nodes": [], "edges": [], "campaignWhy": {}},
+                "map": {
+                    "nodes": [],
+                    "edges": [],
+                    "campaignWhy": {},
+                    "repeats": [],
+                    "journeys": {},
+                },
             }
         )
         jobs = [job_payload(j) for j in reversed(list(worker.jobs.values()))]

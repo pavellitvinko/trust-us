@@ -83,7 +83,16 @@ export interface LibraryData {
   items: Row[];
   cases: number;
   linked: number;
-  map: { nodes: MapNode[]; edges: MapEdge[]; campaignWhy: Record<string, string> };
+  map: {
+    nodes: MapNode[];
+    edges: MapEdge[];
+    /** Why each campaign holds together. */
+    campaignWhy: Record<string, string>;
+    /** Groups of items that are one page found in several cases. */
+    repeats: string[][];
+    /** Each item on a visitor journey, with the other items on it. */
+    journeys: Record<string, string[]>;
+  };
   generation: number;
   busy: boolean;
   jobs: Job[];
