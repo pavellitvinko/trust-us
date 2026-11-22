@@ -10,6 +10,7 @@ import streamlit as st
 from ftf.campaign_map import TOGGLES, map_data, to_dot
 from ftf.config import get_settings
 from ftf.corpus import ensure_seeded
+from ftf.corpus_report import export_files, export_zip
 from ftf.enrich.warning_lists import (
     related_listed_views,
     run_warning_lists,
@@ -102,6 +103,7 @@ def add_material() -> None:
     st.session_state.pop("comparison_report", None)
     st.session_state.pop("assignments", None)
     st.session_state.pop("map_cache", None)
+    st.session_state.pop("corpus_export", None)
     st.success(
         f"Added {result['views']} views in {len(result['incidents'])} incident(s). "
         f"Campaigns: {result['campaigns']}, families: {result['families']}."
@@ -123,8 +125,36 @@ def number_rows(values: dict) -> list[dict]:
 def recompute() -> None:
     with ANALYSIS_LOCK:
         run_method(store)
-    for key in ("assignments", "comparison_report", "map_cache"):
+    for key in ("assignments", "comparison_report", "map_cache", "corpus_export"):
         st.session_state.pop(key, None)
+
+
+def show_export() -> None:
+    st.subheader("Corpus report and export")
+    st.caption("Private project material: do not publish or redistribute.")
+    if st.button("Build report"):
+        with ANALYSIS_LOCK, st.spinner("Building the report from stored results"):
+            files = export_files(store)
+        st.session_state["corpus_export"] = {
+            "report": files["report.md"],
+            "zip": export_zip(files),
+        }
+    built = st.session_state.get("corpus_export")
+    if built:
+        st.download_button(
+            "Download all (zip)",
+            built["zip"],
+            file_name="follow-the-fake-export.zip",
+            mime="application/zip",
+        )
+        st.download_button(
+            "Download report (Markdown)",
+            built["report"],
+            file_name="corpus-report.md",
+            mime="text/markdown",
+        )
+        with st.expander("Preview report"):
+            st.markdown(built["report"])
 
 
 def show_map() -> None:
@@ -205,14 +235,17 @@ def show_pattern_library() -> None:
         if rename.button("Rename"):
             with ANALYSIS_LOCK:
                 rename_pattern(library, chosen, name)
+            st.session_state.pop("corpus_export", None)
             st.rerun()
         if retire.button("Retire"):
             with ANALYSIS_LOCK:
                 retire_pattern(library, chosen)
+            st.session_state.pop("corpus_export", None)
             st.rerun()
         if merge.button("Merge", disabled=target is None):
             with ANALYSIS_LOCK:
                 merge_patterns(library, target, chosen)
+            st.session_state.pop("corpus_export", None)
             st.rerun()
     except LibraryEditError as exc:
         st.error(str(exc))
@@ -280,8 +313,8 @@ def show_method() -> None:
             st.dataframe(rows, width="stretch")
 
 
-tab_match, tab_material, tab_add, tab_map, tab_method = st.tabs(
-    ["Match", "Material", "Add material", "Campaign map", "Method"]
+tab_match, tab_material, tab_add, tab_map, tab_method, tab_export = st.tabs(
+    ["Match", "Material", "Add material", "Campaign map", "Method", "Export"]
 )
 with tab_add:
     add_material()
@@ -296,8 +329,12 @@ if not incidents:
         st.info("Nothing ingested yet. Use Add material.")
     with tab_method:
         st.info("Nothing ingested yet. Use Add material.")
+    with tab_export:
+        st.info("Nothing ingested yet. Use Add material.")
     st.stop()
 
+with tab_export:
+    show_export()
 with tab_map:
     show_map()
 with tab_method:
@@ -425,6 +462,7 @@ with tab_material:
                 refresh=not offline,
             )
         st.session_state.pop("comparison_report", None)
+        st.session_state.pop("corpus_export", None)
         st.rerun()
     warnings = warning_observations(store, view.view_id)
     if warnings:

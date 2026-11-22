@@ -17,14 +17,18 @@ from pathlib import Path
 from typing import Any
 
 from .contracts import Evidence, Fingerprint, Incident, Observation, Relation, View
+from .corpus_report import (
+    MIN_GLOBAL_SECRET_CHARS,
+    TEXT_NAMESPACES,
+    _cleaner,
+    _hash,
+    _secret_name,
+)
 from .store import Store
 
 SCHEMA = 1
 DATA_FILE = "corpus.jsonl.gz"
 MANIFEST_FILE = "manifest.json"
-DROPPED_NAMESPACES = frozenset(
-    {"page.clean_text", "page.body_text", "page.read_text", "expect.read_text"}
-)
 MAX_VALUE_CHARS = 2000
 MAX_RAW_CHARS = 300
 
@@ -68,12 +72,10 @@ def _strings(value: Any):
 
 
 def _secret_values(rows: list[Observation]) -> list[str]:
-    from .models.redact import is_secret_name
-
     found = set()
     for o in rows:
-        if is_secret_name(o.namespace.rsplit(".", 1)[-1]):
-            found.update(s for s in _strings([o.value, o.raw]) if s)
+        if _secret_name(o.namespace.rsplit(".", 1)[-1]):
+            found.update(v for v in _strings(o.value) if len(v) >= MIN_GLOBAL_SECRET_CHARS)
     return sorted(found, key=len, reverse=True)
 
 
@@ -92,17 +94,11 @@ def _input_hash(store: Store) -> str:
 
 def export_corpus(store: Store, out_dir: Path, mode: str) -> dict[str, Any]:
     """Write the sanitised corpus and its manifest, and check the result before returning."""
-    from .models.redact import hash_secret, redact_text
-
     views = store.views()
     observations = {v.view_id: store.observations(v.view_id) for v in views}
     secrets = _secret_values([o for rows in observations.values() for o in rows])
 
-    def clean(text: str) -> str:
-        for secret in secrets:
-            text = text.replace(secret, hash_secret(secret))
-        return redact_text(text)
-
+    clean = _cleaner(store)
     records: list[dict[str, Any]] = []
 
     def add(kind: str, model) -> None:
@@ -113,10 +109,16 @@ def export_corpus(store: Store, out_dir: Path, mode: str) -> dict[str, Any]:
     for view in views:
         add("view", view.model_copy(update={"meta": {**view.meta, "shipped": True}}))
         for o in observations[view.view_id]:
-            if o.namespace in DROPPED_NAMESPACES or _too_long(o.value):
+            if o.namespace in TEXT_NAMESPACES or _too_long(o.value):
                 continue
             raw = o.raw[:MAX_RAW_CHARS] if isinstance(o.raw, str) else o.raw
-            add("observation", o.model_copy(update={"raw": raw}))
+            value = o.value
+            if _secret_name(o.namespace.rsplit(".", 1)[-1]) and isinstance(value, str):
+                value = _hash(value)
+            add(
+                "observation",
+                o.model_copy(update={"raw": clean(raw) if raw else raw, "value": value}),
+            )
         for fingerprint in store.fingerprints(view_id=view.view_id):
             add("fingerprint", fingerprint)
     for evidence in store.evidence():

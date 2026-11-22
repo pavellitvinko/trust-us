@@ -84,6 +84,16 @@ That check covers report completeness on the real sample with model/network acce
 source resolution, missing/incompatible inputs, ignored matches, reversed object order,
 and the Streamlit report view. The real-sample check skips if the sample is absent.
 
+## Corpus report and export
+
+```bash
+uv run ftf report --out export    # report.md, pairs.md, and JSON/CSV of everything stored
+```
+
+The **Export** tab builds the same files. The report works without keys, models or network.
+Model-based sections say when they have not been run. Exports leave out whole-page text and hash
+secrets, but they still describe private organiser material: do not publish or redistribute them.
+
 ## Live capture
 
 ```bash
