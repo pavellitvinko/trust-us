@@ -391,7 +391,7 @@ def create_app() -> FastAPI:
         )
 
     app.include_router(probe_router(settings.data_dir, settings.db_path, worker.invalidate))
-    app.include_router(victim_router(settings.victim_dir, settings.db_path))
+    app.include_router(victim_router(settings.victim_dir, settings.db_path, worker.invalidate))
 
     dist = Path(os.environ.get("FTF_WEB_DIST", "frontend/dist"))
     if not (dist / "index.html").is_file():

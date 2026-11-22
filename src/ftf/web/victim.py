@@ -14,6 +14,7 @@ import re
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -25,7 +26,7 @@ from pydantic import BaseModel
 from ..store import Store
 from ..victim.control import write_command
 from ..victim.persona import load_personas
-from ..victim.rules import STOP_WORDS
+from ..victim.rules import STOP_WORDS, is_local
 
 RUN_ID = re.compile(r"^victim-\d{8}-\d{6}-[0-9a-f]{4}$")
 # Files the screen may fetch from a run folder: the video, its captions and the screenshots.
@@ -34,12 +35,16 @@ SERVABLE = re.compile(
     r"|stage-\d{2}/screenshot\.png)$"
 )
 MEDIA_TYPES = {".webm": "video/webm", ".vtt": "text/vtt; charset=utf-8", ".png": "image/png"}
-DEMO_COMMAND = "uv run ftf victim demo"
+RUN_COMMAND = "uv run ftf victim run <link> --live"
+FINISHED = {"finished", "ended without a record"}
 LIVE_FRESH_S = 30  # a live.json older than this, with no run.json, is a run that died
 
 
 class StartRequest(BaseModel):
-    persona: str = "retiree-income"
+    url: str
+    persona: str = ""  # empty: suggested from the link
+    approved: bool = False  # the person confirms the site may get a lead with fake details
+    quick: bool = False  # shorter reading waits, for a watchable video
 
 
 def in_container() -> bool:
@@ -77,13 +82,31 @@ def _status(files: Path, run: dict[str, Any]) -> str:
     state = _json(live).get("status", "starting")
     try:
         stale = time.time() - live.stat().st_mtime > LIVE_FRESH_S
-    except OSError:
-        return "starting"
+    except OSError:  # no live state yet: starting, unless the folder is old (it died early)
+        try:
+            old = time.time() - files.stat().st_mtime > 2 * LIVE_FRESH_S
+        except OSError:
+            old = True
+        return "ended without a record" if old else "starting"
     # The agent writes live.json at every step; a long-silent one without run.json is dead,
     # unless it is waiting for a person or paused.
     if stale and state not in {"paused", "waiting_for_person"}:
         return "ended without a record"
     return str(state)
+
+
+def _started_from_id(run_id: str) -> str:
+    """victim-20261122-091947-39d4 -> 2026-11-22T09:19:47 (local time), for runs still going."""
+    m = re.match(r"victim-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})", run_id)
+    return f"{m[1]}-{m[2]}-{m[3]}T{m[4]}:{m[5]}:{m[6]}" if m else ""
+
+
+def _tail(path: Path, lines: int = 12) -> str:
+    """The end of the last run's terminal output: why a run that never started failed."""
+    try:
+        return "\n".join(path.read_text(encoding="utf-8", errors="replace").splitlines()[-lines:])
+    except OSError:
+        return ""
 
 
 def _host(url: str) -> str:
@@ -105,9 +128,9 @@ def run_summary(root: Path) -> dict[str, Any]:
         "id": root.name,
         "status": _status(files, run),
         "persona": persona.get("id") or str(live.get("persona", "")).split("@")[0],
-        "startedAt": run.get("started_at") or "",
+        "startedAt": run.get("started_at") or _started_from_id(root.name),
         "endedAt": run.get("ended_at") or "",
-        "startHost": _host(run.get("start_url", "")),
+        "startHost": _host(run.get("start_url", "") or str(live.get("url") or "")),
         "replay": bool(run.get("replay")),
         "steps": int(run.get("steps") or live.get("step") or 0),
         "pages": len(run.get("stages") or []),
@@ -223,8 +246,24 @@ def run_detail(root: Path, store: Store | None) -> dict[str, Any]:
     return out
 
 
-def victim_router(victim_dir: Path, db_path: Path) -> APIRouter:
+def victim_router(
+    victim_dir: Path, db_path: Path, on_change: Callable[[], None] = lambda: None
+) -> APIRouter:
     router = APIRouter(prefix="/api/victim")
+    started: set[str] = set()  # runs this server started and has not yet seen finish
+
+    def note_finished(summary: dict[str, Any]) -> None:
+        """A run ingests itself when it ends; the Library then has to reload."""
+        if summary["id"] in started and summary["status"] in FINISHED:
+            started.discard(summary["id"])
+            on_change()
+
+    def recent_runs() -> list[Path]:
+        if not victim_dir.is_dir():
+            return []
+        return sorted(
+            (p for p in victim_dir.glob("victim-*") if RUN_ID.match(p.name)), reverse=True
+        )[:5]
 
     def run_root(run_id: str) -> Path:
         if not RUN_ID.match(run_id):
@@ -245,11 +284,15 @@ def victim_router(victim_dir: Path, db_path: Path) -> APIRouter:
             {"id": p.id, "summary": p.summary, "matches": p.matches}
             for p in load_personas().values()
         ]
+        summaries = [run_summary(p) for p in runs[:50]]
+        for summary in summaries:
+            note_finished(summary)
         return {
-            "runs": [run_summary(p) for p in runs[:50]],
+            "runs": summaries,
             "personas": personas,
             "canStart": not in_container(),
-            "command": DEMO_COMMAND,
+            "lastLog": _tail(victim_dir / "last-run.log"),
+            "command": RUN_COMMAND,
         }
 
     @router.get("/{run_id}")
@@ -257,7 +300,9 @@ def victim_router(victim_dir: Path, db_path: Path) -> APIRouter:
         root = run_root(run_id)
         store = Store(db_path) if db_path.exists() else None
         try:
-            return run_detail(root, store)
+            out = run_detail(root, store)
+            note_finished(out)
+            return out
         finally:
             if store is not None:
                 store.close()
@@ -278,30 +323,47 @@ def victim_router(victim_dir: Path, db_path: Path) -> APIRouter:
             raise HTTPException(
                 409,
                 "The agent opens a browser window, so it runs on the host, not in Docker. "
-                f"Run: {DEMO_COMMAND}",
+                f"Run: {RUN_COMMAND}",
             )
-        if request.persona not in load_personas():
+        url = request.url.strip()
+        if not re.match(r"^https?://", url):
+            url = f"https://{url}" if url and " " not in url else ""
+        if not url:
+            raise HTTPException(400, "Paste a full link or a domain first.")
+        if request.persona and request.persona not in load_personas():
             raise HTTPException(400, "Unknown persona")
+        if not is_local(url) and not request.approved:
+            raise HTTPException(
+                400,
+                "The agent sends the site's lead form with fake details. Confirm the site is "
+                "approved for that first.",
+            )
+        if any(s["status"] not in FINISHED for s in map(run_summary, recent_runs())):
+            raise HTTPException(409, "A run is still going. Stop it or wait for it to end.")
         victim_dir.mkdir(parents=True, exist_ok=True)
         before = {p.name for p in victim_dir.glob("victim-*")}
         log = open(victim_dir / "last-run.log", "w", encoding="utf-8")  # noqa: SIM115
         cmd = [
             sys.executable,
+            "-u",
             "-m",
             "ftf.cli",
             "victim",
-            "demo",
-            "--persona",
-            request.persona,
+            "run",
+            url,
             "--out",
             str(victim_dir),
         ]
+        cmd += ["--persona", request.persona] if request.persona else []
+        cmd += [] if is_local(url) else ["--live"]
+        cmd += ["--demo"] if request.quick else []
         subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
         # The run folder appears within a second or two; tell the screen which one it is.
         deadline = time.monotonic() + 8
         while time.monotonic() < deadline:
             new = sorted({p.name for p in victim_dir.glob("victim-*")} - before)
             if new:
+                started.add(new[-1])
                 return {"id": new[-1]}
             time.sleep(0.25)
         return {"id": None}

@@ -388,3 +388,80 @@ export function addMaterial(
     xhr.send(form);
   });
 }
+
+// Victim visitor (src/ftf/web/victim.py).
+export interface VictimRunSummary {
+  id: string;
+  status: string;
+  persona: string;
+  startedAt: string;
+  endedAt: string;
+  startHost: string;
+  replay: boolean;
+  steps: number;
+  pages: number;
+  shape: string[];
+  stop: string;
+  stopWords: string;
+  stopDetail: string;
+  video: boolean;
+}
+
+export interface VictimStep {
+  step: number | null;
+  actor: string;
+  page?: number | null;
+  action: string;
+  kind?: string;
+  reason: string;
+  typed?: string | Record<string, string> | null;
+  outcome?: string;
+  at: string;
+  screenshot?: string | null;
+  screenshotAfter?: string | null;
+}
+
+export interface VictimPage {
+  index: number;
+  url: string;
+  host: string;
+  kinds: string[];
+  how: string;
+  step: number | null;
+  redirects: string[];
+  screenshot: string | null;
+}
+
+export interface VictimRun extends Omit<VictimRunSummary, "pages" | "steps"> {
+  steps: VictimStep[];
+  pages: VictimPage[];
+  pageCount: number;
+  forms: { page: number; step: number; values: Record<string, string>; sent: boolean;
+    sentTo: { method: string; host: string; path: string }[]; stop: string }[];
+  chat: { who: string; text: string; improvised: boolean }[];
+  clips: { video: string; captions: string | null }[];
+  size: { width: number; height: number } | null;
+  email: string;
+  phone: string;
+  startUrl: string;
+  items: { id: string; label: string }[];
+  live: Record<string, string>;
+}
+
+export interface VictimData {
+  runs: VictimRunSummary[];
+  personas: { id: string; summary: string; matches: string }[];
+  canStart: boolean;
+  command: string;
+  lastLog: string;
+}
+
+const victimRun = (id: string) => `/api/victim/${encodeURIComponent(id)}`;
+export const victim = {
+  overview: () => get<VictimData>("/api/victim"),
+  run: (id: string) => get<VictimRun>(victimRun(id)),
+  file: (id: string, rel: string) => `${victimRun(id)}/file/${rel}`,
+  start: (request: { url: string; persona: string; approved: boolean; quick: boolean }) =>
+    post<{ id: string | null }>("/api/victim/start", request),
+  control: (id: string, command: "pause" | "resume" | "stop") => post<{ ok: boolean }>(`${victimRun(id)}/${command}`),
+};

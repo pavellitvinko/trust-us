@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { addMaterial } from "../api";
 import { plural } from "../components/bits";
 import { ProbeLinkPanel, ProbeRun, ProbeTools, useProbe } from "../components/ProbeAgent";
+import { useVictim, VictimLinkPanel, VictimRunView } from "../components/VictimAgent";
 
 type Staged = { file: File; path: string };
 
@@ -61,6 +62,7 @@ export default function AddMaterial() {
   const folderInput = useRef<HTMLInputElement>(null);
   const kind = linkKind(link);
   const agent = useProbe();
+  const victimAgent = useVictim();
   // The agent walks websites, so a Meta Ad Library link is not a target for it.
   const probeTargets = [...new Set([...(kind ? [link.trim()] : []), ...links])].filter((l) => !AD_LIBRARY.test(l));
 
@@ -220,6 +222,8 @@ export default function AddMaterial() {
       </div>
       <ProbeLinkPanel agent={agent} targets={probeTargets} />
       <ProbeRun agent={agent} />
+      <VictimLinkPanel agent={victimAgent} targets={probeTargets} />
+      <VictimRunView agent={victimAgent} />
 
       <h2>Or find material with a tool</h2>
       <div className="card">
