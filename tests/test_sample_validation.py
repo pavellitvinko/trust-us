@@ -342,3 +342,60 @@ def test_reencoded_folders_keep_no_original_content_hash(base, tmp_path):
     store.close()
     assert before and after
     assert before & after == set(), sorted(before & after)[:5]
+
+
+def test_candidate_report_wording_follows_the_measurement():
+    """HAC-36 review: the prose must change with the record, not restate the sample's result."""
+    broken = sample.CandidateParity(
+        views=20,
+        all_pairs=190,
+        compared=120,
+        by_kind={"image-image": (45, 45), "image-page": (0, 100), "page-page": (40, 45)},
+        by_key=[("perceptual (every holder)", 45), ("identity", 30)],
+        differences=["a ~ b: same_campaign/high vs insufficient_evidence/-"],
+        reasons_differ=2,
+        groups_equal=False,
+        variants=[
+            sample.IndexVariant("as built: all index keys", 120, 40, 8, 8, []),
+            sample.IndexVariant(
+                "identifier, set and MinHash keys only", 30, 12, 6, 8, [("a", "b", 0.62)]
+            ),
+        ],
+        skipped_types={"insufficient_evidence": 60, "same_campaign": 1, "unrelated": 9},
+    )
+    text = "\n".join(sample.format_candidates(broken))
+    assert "**BROKEN**" in text and "equal for every pair" not in text
+    assert "1 pairs differ in type" in text and "funnel edges differ" in text
+    assert "2 pairs carry different reasons" in text
+    assert "not a saving" not in text
+    assert "5 of 90 pairs are skipped (image-image 45 of 45, page-page 40 of 45)" in text
+    assert "No pair across view kinds is compared." in text
+    assert "**1 skipped pairs are linked in the all-pairs run** (same_campaign 1)" in text
+    assert "would miss 2 of 8 linked pairs" in text
+    assert (
+        "finds every linked pair" not in text
+        and "Scaling is therefore not demonstrated" not in text
+    )
+
+    clean = sample.CandidateParity(
+        views=5,
+        all_pairs=7,
+        compared=3,
+        by_kind={"image-image": (3, 3), "image-page": (0, 3), "video-video": (0, 1)},
+        by_key=[("perceptual (every holder)", 3)],
+        differences=[],
+        reasons_differ=0,
+        groups_equal=True,
+        variants=[
+            sample.IndexVariant("as built: all index keys", 3, 0, 1, 1, []),
+            sample.IndexVariant("identifier, set and MinHash keys only", 1, 0, 1, 1, []),
+        ],
+        skipped_types={"insufficient_evidence": 4},
+    )
+    text = "\n".join(sample.format_candidates(clean))
+    assert "**holds**" in text and "equal for every pair" in text
+    assert "not a saving" in text and "(image-image 3 of 3, video-video 0 of 1)" in text
+    assert "No pair across view kinds is compared." in text
+    assert "All 4 skipped pairs are unrelated or insufficient evidence" in text
+    assert "find every linked pair here (1 of 1) while proposing 1 pairs instead of 3." in text
+    assert "Scaling is therefore not demonstrated" in text

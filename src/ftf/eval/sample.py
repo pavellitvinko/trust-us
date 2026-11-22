@@ -760,6 +760,7 @@ class CandidateParity:
     reasons_differ: int  # skipped pairs whose reasons differ beyond the marker
     groups_equal: bool
     variants: list[IndexVariant]
+    skipped_types: dict[str, int]  # relation type (all-pairs run) -> skipped pairs of that type
 
     @property
     def holds(self) -> bool:
@@ -838,6 +839,7 @@ def candidate_parity(base: Store, config: FusionConfig = DEFAULT) -> CandidatePa
 
     linked = {k for k, r in rel_full.items() if r.type in LINKED}
     scored = {k: max(r.tier_scores.values()) for k, r in rel_full.items()}
+    skipped_types = Counter(r.type.value for k, r in rel_full.items() if k not in proposed)
 
     def variant(name: str, keep: Callable[[tuple], bool]) -> IndexVariant:
         pairs: set[tuple[str, str]] = set()
@@ -886,26 +888,131 @@ def candidate_parity(base: Store, config: FusionConfig = DEFAULT) -> CandidatePa
             variant("as built: all index keys", lambda key: True),
             variant("identifier, set and MinHash keys only", lambda key: key[1] != "*"),
         ],
+        skipped_types=dict(sorted(skipped_types.items())),
     )
 
 
 def format_candidates(p: CandidateParity) -> list[str]:
+    """Every sentence here is chosen from the measurement; the tables carry the numbers."""
+    weak = {RelationType.UNRELATED.value, RelationType.INSUFFICIENT.value}
+    same_kind = {k: v for k, v in p.by_kind.items() if len(set(k.split("-"))) == 1}
+    cross_kind = {k: v for k, v in p.by_kind.items() if k not in same_kind}
+    same_total = sum(total for _, total in same_kind.values())
+    same_skipped = sum(total - got for got, total in same_kind.values())
+    cross_compared = sum(got for got, _ in cross_kind.values())
     page = p.by_kind.get("page-page", (0, 0))
-    out = [
+    index_only = next((v for v in p.variants if not v.name.startswith("as built")), None)
+
+    # 1. the verdict, and what it rests on or what breaks it
+    verdict = (
         f"Parity with the all-pairs run: **{'holds' if p.holds else 'BROKEN'}**. Both runs store "
-        f"{p.all_pairs} relations for {p.views} views. Relation type, confidence label and "
-        "coverage are equal for every pair, tier scores for every compared pair, and campaigns, "
-        "families, playbooks and funnel edges are identical. A skipped pair carries the same "
-        "reasons as in the all-pairs run plus one line saying it was not compared in full"
-        + (f" ({p.reasons_differ} pairs differ in their reasons)." if p.reasons_differ else "."),
+        f"{p.all_pairs} relations for {p.views} views. "
+    )
+    if p.holds:
+        verdict += (
+            "Relation type, confidence label and coverage are equal for every pair, tier scores "
+            "for every compared pair, and campaigns, families, playbooks and funnel edges are "
+            "identical. Every skipped pair carries the same reasons as in the all-pairs run plus "
+            "one line saying it was not compared in full."
+        )
+    else:
+        broken = []
+        if p.differences:
+            broken.append(
+                f"{len(p.differences)} pairs differ in type, confidence, coverage or tier score "
+                "(listed below)"
+            )
+        if not p.groups_equal:
+            broken.append("campaigns, families, playbooks or funnel edges differ")
+        if p.reasons_differ:
+            broken.append(
+                f"{p.reasons_differ} pairs carry different reasons (a skipped pair should carry "
+                "the all-pairs reasons plus the not-compared line)"
+            )
+        verdict += "What differs: " + "; ".join(broken) + "."
+
+    # 2. how much was skipped, where, and what the skipped pairs were in the full run
+    saving = f"Pairs compared in full: {p.compared} of {p.all_pairs}."
+    per_kind = ", ".join(f"{k} {got} of {total}" for k, (got, total) in same_kind.items())
+    partial = [k for k, (got, total) in same_kind.items() if 0 < got < total]
+    if same_total and not partial:
+        saving += (
+            " This is **not a saving on this corpus**: within a view kind the index proposes "
+            f"either every pair or none ({per_kind}), because the perceptual and vector layers "
+            "put every view that holds them into one bucket."
+        )
+    elif same_total:
+        saving += (
+            f" Within a view kind, {same_skipped} of {same_total} pairs are skipped ({per_kind}), "
+            "so the index is selective on this corpus."
+        )
+    if cross_kind and cross_compared == 0:
+        saving += " No pair across view kinds is compared."
+    elif cross_kind:
+        saving += (
+            f" Across view kinds, {cross_compared} of "
+            f"{sum(total for _, total in cross_kind.values())} pairs are compared."
+        )
+    skipped_n = sum(p.skipped_types.values())
+    if skipped_n and set(p.skipped_types) <= weak:
+        saving += (
+            f" All {skipped_n} skipped pairs are unrelated or insufficient evidence in the "
+            "all-pairs run."
+        )
+    elif skipped_n:
+        linked_skipped = {t: n for t, n in p.skipped_types.items() if t not in weak}
+        saving += (
+            f" **{sum(linked_skipped.values())} skipped pairs are linked in the all-pairs run** ("
+            + ", ".join(f"{t} {n}" for t, n in linked_skipped.items())
+            + ")."
+        )
+
+    # 3. what the identifier keys alone would do, and whether scaling was shown
+    tail = []
+    if index_only is not None and index_only.linked_total == 0:
+        tail.append(
+            "No pair is linked in the all-pairs run, so this corpus cannot show what the "
+            "identifier keys alone would lose."
+        )
+    elif index_only is not None and index_only.linked_found == index_only.linked_total:
+        tail.append(
+            f"The identifier, set and MinHash keys alone find every linked pair here "
+            f"({index_only.linked_found} of {index_only.linked_total}) while proposing "
+            f"{index_only.pairs} pairs instead of {p.compared}"
+            + (
+                f"; the {len(index_only.scored_missed)} scored pairs they miss reach a tier "
+                f"score of at most {index_only.scored_missed[0][2]:.2f}"
+                if index_only.scored_missed
+                else ""
+            )
+            + "."
+        )
+    elif index_only is not None:
+        tail.append(
+            f"The identifier, set and MinHash keys alone would miss "
+            f"{index_only.linked_total - index_only.linked_found} of {index_only.linked_total} "
+            "linked pairs here, so they cannot replace the buckets on this corpus."
+        )
+    if same_total and not partial:
+        tail.append(
+            "Scaling is therefore not demonstrated: at this size the catch-all buckets make "
+            "candidate generation equal to all pairs within a view kind."
+        )
+    elif same_total:
+        tail.append(
+            f"The buckets skip {same_skipped} of {same_total} pairs within a view kind on this "
+            "corpus; whether that holds at scale is not measured here."
+        )
+    tail.append(
+        "The buckets stay because a link that rests only on vector similarity (a playbook "
+        "link from real embeddings) has no identifier key to propose it."
+    )
+
+    return [
+        verdict,
         *[f"- {d}" for d in p.differences],
         "",
-        (
-            f"Pairs compared in full: {p.compared} of {p.all_pairs}. This is **not a saving on this "
-            f"corpus**: {page[0]} of {page[1]} page pairs are still compared, because the perceptual "
-            "and vector layers put every view that holds them into one bucket. Only pairs across "
-            "view kinds are skipped, and those are insufficient evidence in either run."
-        ),
+        saving,
         "",
         *_table(
             ["View kinds", "Compared in full", "All pairs"],
@@ -947,14 +1054,8 @@ def format_candidates(p: CandidateParity) -> list[str]:
             ],
         ),
         "",
-        (
-            "Scaling is therefore not demonstrated: at this size the catch-all buckets make "
-            "candidate generation equal to all pairs within a view kind. The identifier index "
-            "alone finds every linked pair here, but it would not find a link that rests only on "
-            "vector similarity (a playbook link from real embeddings), which is why the buckets stay."
-        ),
+        " ".join(tail),
     ]
-    return out
 
 
 # -- markdown ----------------------------------------------------------------------------------
