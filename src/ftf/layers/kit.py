@@ -81,8 +81,10 @@ set_layer(
         "http.via",
         "http.powered_by",
         "origin.asn",
+        "video.hls_host",
     ),
-    doc="C2, C3, C10, C11: hosting fingerprints. Weak: shared providers are common.",
+    doc="C2, C3, C10, C11, M7: hosting fingerprints and the host a page streams video from. "
+    "Weak: shared providers are common.",
 )
 
 # Classes added by frameworks, translators and browser extensions say nothing about the kit.

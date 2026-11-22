@@ -1,9 +1,14 @@
-"""Follow the Fake interface: match, material, add material, campaign map and method."""
+"""Follow the Fake interface: add material, the library of everything added, campaigns, method."""
 
 from __future__ import annotations
 
+import html
+import importlib.util
 import json
-import os
+import re
+import threading
+from datetime import datetime
+from urllib.parse import quote, urlsplit
 
 import streamlit as st
 
@@ -18,17 +23,22 @@ from ftf.enrich.warning_lists import (
     warning_risk_reasons,
 )
 from ftf.fusion import run_method
-from ftf.grouping import assign, build_groups
-from ftf.intake import (
-    ANALYSIS_LOCK,
-    STAGES,
-    IntakeError,
-    add_zip,
-    allowed_folder,
-    discard_upload,
-    run_stages,
+from ftf.grouping import build_groups
+from ftf.intake import ANALYSIS_LOCK, IntakeError
+from ftf.jobs import check_link, link_case, save_files, worker_for
+from ftf.library import (
+    KIND_NAMES,
+    LAYER_NAMES,
+    Item,
+    Library,
+    build_library,
+    campaign_tree,
+    case_title,
+    cases_text,
+    filter_matches,
+    match_help,
 )
-from ftf.material import expectation_profiles, material_summary
+from ftf.material import expectation_profiles
 from ftf.method_settings import apply_saved, current_values, reset, save
 from ftf.narrative import pair_narrative, render_narrative
 from ftf.patterns.analyst import (
@@ -42,17 +52,23 @@ from ftf.registry import layers, load_plugins
 from ftf.reporting import build_pair_report, render_pair_report
 from ftf.store import Store
 
-UNAVAILABLE = {
-    "not_run": "Not run for this view. Run `ftf perceive` or `ftf patterns discover`.",
-    "unavailable": "Unavailable: the model stage produced no verified result for this view.",
-}
-
-st.set_page_config(page_title="Follow the Fake", layout="wide")
-st.title("Follow the Fake")
+st.set_page_config(page_title="Follow the Fake", layout="wide", initial_sidebar_state="collapsed")
 
 settings = get_settings()
-store = Store(settings.db_path)
-ensure_seeded(store)
+_LOCAL = threading.local()
+
+
+def db() -> Store:
+    """This thread's store: a fragment rerun can run in another thread than the full run."""
+    stores = _LOCAL.__dict__.setdefault("stores", {})
+    key = str(settings.db_path)
+    if key not in stores:
+        stores[key] = Store(settings.db_path)
+    return stores[key]
+
+
+worker = worker_for(settings.db_path, settings.data_dir)
+ensure_seeded(db())  # with FTF_SEED_CORPUS=1, an empty store gets the shipped corpus
 load_plugins()
 # A running analysis already holds the current settings, so never wait for it here.
 if ANALYSIS_LOCK.acquire(blocking=False):
@@ -61,62 +77,939 @@ if ANALYSIS_LOCK.acquire(blocking=False):
     finally:
         ANALYSIS_LOCK.release()
 
+VICTIM = importlib.util.find_spec("ftf.victim") is not None
+DISCOVERY = importlib.util.find_spec("ftf.discovery") is not None
+ICONS = {"Page": ":material/language:", "Image": ":material/image:", "Video": ":material/movie:"}
+BADGES = {"campaign": "violet", "duplicate": "blue", "none": "gray"}
+BUSY = "Available when the current analysis finishes."
+TIER_HINTS = {
+    "identity": (
+        "Shared operator-controlled identifiers, such as a tracking pixel ID or campaign record. "
+        "Helps connect items to the same campaign."
+    ),
+    "artifact": (
+        "Same or near-identical material, such as images, text or ad creatives. "
+        "Shows content reuse; the verdict tells you whether the items are duplicates."
+    ),
+    "kit": (
+        "Shared templates, code, forms or tracking software. "
+        "Different campaigns can use the same kit."
+    ),
+    "playbook": (
+        "Similar persuasion methods, such as story structure, roles or page layout. "
+        "Shows a similar approach, which alone does not establish a shared campaign."
+    ),
+}
+# Meta's mark, from the Tabler icon set ("brand-meta", MIT licence).
+META = (
+    '<svg class="ftf-meta" viewBox="0 0 24 24" fill="none" stroke="#0866ff" stroke-width="2"'
+    ' stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+    '<path d="M12 10.174c1.766 -2.784 3.315 -4.174 4.648 -4.174c2 0 3.263 2.213 4 5.217'
+    "c.704 2.869 .5 6.783 -2 6.783c-1.114 0 -2.648 -1.565 -4.148 -3.652"
+    'a27.627 27.627 0 0 1 -2.5 -4.174z"/>'
+    '<path d="M12 10.174c-1.766 -2.784 -3.315 -4.174 -4.648 -4.174c-2 0 -3.263 2.213 -4 5.217'
+    "c-.704 2.869 -.5 6.783 2 6.783c1.114 0 2.648 -1.565 4.148 -3.652"
+    'c1 -1.391 1.833 -2.783 2.5 -4.174z"/></svg>'
+)
+_AD_LIBRARY = re.compile(r"facebook\.com/ads/library/?\?(?:.*&)?id=\d+")
+_DOMAIN = re.compile(r"^[a-z0-9-]+(\.[a-z0-9-]+)+$", re.IGNORECASE)
 
-def add_material() -> None:
-    st.subheader("Add material")
-    upload = st.file_uploader("Incident folder as a zip", type=["zip"])
-    root = os.environ.get("FTF_UI_FOLDER_ROOT")
-    folder = st.text_input(
-        "Or a folder on the server",
-        disabled=not root,
-        help=f"Inside {root}" if root else "Off until FTF_UI_FOLDER_ROOT is set.",
-    )
-    enrich = st.checkbox("Look up DNS, RDAP and crt.sh (network)", value=True)
-    st.text_input(
-        "URL", disabled=True, help="Available once the live capture service (HAC-14) is connected."
-    )
-    st.caption("URL capture is not connected yet.")
-    if not st.button("Analyse material"):
+st.html(
+    """<style>
+    [data-testid="stMainBlockContainer"] {padding-top: 3.5rem; max-width: 1180px}
+    [class*="st-key-row-"] {position: relative; padding: 2px 6px 2px 4px}
+    [class*="st-key-row-"] [data-testid="stMarkdownContainer"] p {margin-bottom: 0}
+    [class*="st-key-row-"][class*="-sel"] {background: rgba(28, 79, 156, 0.07); border-radius: 6px}
+    [class*="st-key-row-step"]::before {content: ""; position: absolute; left: 14.5px; width: 0;
+      border-left: 2px solid #1c4f9c; top: -0.75rem; bottom: -0.75rem; z-index: 0}
+    [class*="st-key-row-stepfirst"]::before {top: 50%}
+    [class*="st-key-row-steplast"]::before {bottom: 50%}
+    .ftf-dot {display: inline-flex; width: 1.15rem; height: 1.15rem; border-radius: 50%;
+      background: #dde6f3; color: #1c4f9c; font-size: .7rem; font-weight: 600;
+      align-items: center; justify-content: center; position: relative; z-index: 1}
+    [class*="st-key-title-"] button {padding: 0; min-height: 0; text-align: left;
+      justify-content: flex-start; font-weight: 500}
+    [class*="st-key-icon-"] p {font-size: 1.5rem; line-height: 1; text-align: center}
+    [class*="st-key-title-"] button p {font-size: 0.95rem; white-space: nowrap; overflow: hidden;
+      text-overflow: ellipsis; max-width: 28rem}
+    .ftf-j {display: grid; grid-template-columns: 1.3rem minmax(0, 1fr); column-gap: .7rem;
+      font-size: .9rem; line-height: 1.45}
+    .ftf-j .rail {display: flex; flex-direction: column; align-items: center}
+    .ftf-j .bar {flex: 1; min-height: .9rem; border-left: 2px solid #1c4f9c}
+    .ftf-j .bar.dash {border-left: 2px dashed #a9a69c}
+    .ftf-j .txt {padding-bottom: .55rem}
+    .ftf-j .proof {color: #6b6a65; font-size: .8rem; padding-bottom: .55rem}
+    .ftf-j .proof code {font-size: .75rem; background: #f1efe8; padding: 0 .3rem;
+      border-radius: 4px}
+    .ftf-j small {color: #6b6a65}
+    .ftf-j .me {font-weight: 600}
+    .ftf-j .muted {color: #6b6a65; font-size: .8rem}
+    .ftf-meta {width: 1.15rem; height: 1.15rem; vertical-align: -0.2rem; flex: none}
+    a.ftf-btn {display: inline-flex; align-items: center; gap: .45rem; min-height: 2.5rem;
+      padding: .25rem .75rem; border: 1px solid #d5d3cc; border-radius: .5rem;
+      color: inherit; text-decoration: none; font-size: .875rem; background: #fff}
+    a.ftf-btn:hover {border-color: #1c4f9c; color: #1c4f9c}
+    </style>"""
+)
+
+
+# -- Add material --------------------------------------------------------------------------
+
+
+def detect(text: str) -> tuple[str, bool] | None:
+    """What a pasted value is, and whether it is a URL that can be opened."""
+    text = text.strip()
+    if not text:
+        return None
+    if _AD_LIBRARY.search(text):
+        return "Meta ad · captured from the Ad Library", True
+    if text.startswith(("http://", "https://")) and urlsplit(text).hostname:
+        return "Webpage · captured live", True
+    if _DOMAIN.match(text):
+        return "Domain · captured live", True
+    return None
+
+
+def _form_key(name: str) -> str:
+    return f"{name}_{st.session_state.setdefault('form', 0)}"
+
+
+def add_link() -> None:
+    text = st.session_state.get(_form_key("link"), "").strip()
+    if not detect(text):
+        st.session_state["intake_error"] = "Paste a full link or a domain first."
         return
-    if not upload and not folder.strip():
-        st.warning("Choose a zip or enter a folder.")
+    links = st.session_state.setdefault("links", [])
+    if text not in links:
+        links.append(text)
+    st.session_state.pop("intake_error", None)
+    st.session_state["form"] += 1
+
+
+def remove_link(text: str) -> None:
+    st.session_state["links"] = [x for x in st.session_state.get("links", []) if x != text]
+
+
+def submit() -> None:
+    files = list(st.session_state.get(_form_key("files")) or [])
+    folder = list(st.session_state.get(_form_key("folder")) or [])
+    links = list(st.session_state.get("links", []))
+    if not (files or folder or links):
+        st.session_state["intake_error"] = "Add a link or choose files first."
         return
-    progress = st.progress(0.0, text="Starting")
-
-    def on_stage(name: str, index: int, total: int) -> None:
-        progress.progress(index / total, text=f"Stage {index + 1} of {len(STAGES)}: {name}")
-
-    path = None
     try:
-        path = (
-            add_zip(upload, upload.name, settings.data_dir / "uploads")
-            if upload
-            else allowed_folder(folder.strip(), root)
-        )
-        result = run_stages(store, path, on_stage, enrich=enrich)
+        links = [check_link(x) for x in links]  # never the server's own networks (HAC-45)
+        if folder and all("/" not in f.name for f in folder):
+            raise IntakeError("the folder arrived without its structure: use Browse to choose it")
+        uploads = folder + files
+        if uploads:
+            path = save_files(((f.name, f) for f in uploads), worker.uploads)
+        else:
+            path = link_case(links[0], worker.uploads)
     except IntakeError as exc:
-        if upload and path is not None:
-            discard_upload(path)
-        progress.empty()
-        st.error(str(exc))
+        st.session_state["intake_error"] = str(exc).capitalize() + "."
         return
-    progress.progress(1.0, text="Done")
-    st.session_state.pop("comparison_report", None)
-    st.session_state.pop("assignments", None)
-    st.session_state.pop("map_cache", None)
-    st.session_state.pop("corpus_export", None)
-    st.success(
-        f"Added {result['views']} views in {len(result['incidents'])} incident(s). "
-        f"Campaigns: {result['campaigns']}, families: {result['families']}."
+    names = links + [f.name.split("/")[-1] for f in uploads]
+    worker.submit(path, names, links)
+    st.session_state["links"] = []
+    st.session_state.pop("intake_error", None)
+    st.session_state["form"] += 1
+    st.session_state["go_library"] = True
+
+
+def page_add() -> None:
+    _, middle, _ = st.columns([1, 3, 1])
+    with middle:
+        st.markdown("### What did you find?")
+        with st.container(border=True):
+            with st.container(horizontal=True, vertical_alignment="bottom"):
+                st.text_input(
+                    "Link",
+                    key=_form_key("link"),
+                    placeholder="Paste a link to a webpage or a Meta Ad Library ad",
+                    label_visibility="collapsed",
+                )
+                st.button("Add", on_click=add_link)
+            found = detect(st.session_state.get(_form_key("link"), ""))
+            if found and found[0].startswith("Meta"):
+                st.markdown(
+                    f'{META} <small style="color:#6b6a65">{found[0]}</small>',
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.caption(found[0] if found else "Press Enter after pasting to check the link.")
+            is_url = bool(found and found[1])
+            st.toggle(
+                "Victim visitor",
+                key=_form_key("victim"),
+                disabled=not (is_url and VICTIM),
+                help=(
+                    "Walk this link's funnel as a persona. It never pays or installs."
+                    if VICTIM
+                    else "Not in this build: the victim visitor lives on its own branch."
+                ),
+            )
+            left, right = st.columns(2)
+            left.file_uploader("Files", accept_multiple_files=True, key=_form_key("files"))
+            right.file_uploader(
+                "Folder", accept_multiple_files="directory", key=_form_key("folder")
+            )
+            with st.popover("Supported files", icon=":material/info:", type="tertiary"):
+                st.markdown(
+                    "| | |\n|---|---|\n"
+                    "| Saved page | `.html` with its `_files` folder |\n"
+                    "| Web archive | `.har` |\n"
+                    "| Screenshot | `.png` `.jpg` `.webp` `.gif` |\n"
+                    "| Video | `.mp4` `.mov` `.webm` with `.info.json` |\n"
+                    "| Folder | any of these; each sub-folder is one case |"
+                )
+                st.caption("Choose a folder with Browse: a dragged folder loses its structure.")
+
+        links = st.session_state.get("links", [])
+        for text in links:
+            with st.container(horizontal=True, vertical_alignment="center"):
+                if _AD_LIBRARY.search(text):
+                    st.markdown(f"{META} {html.escape(text)}", unsafe_allow_html=True)
+                else:
+                    st.markdown(f":material/link: {text}")
+                st.button(
+                    "",
+                    icon=":material/close:",
+                    key=f"rm-{text}",
+                    type="tertiary",
+                    on_click=remove_link,
+                    args=(text,),
+                    help="Remove",
+                )
+        if error := st.session_state.get("intake_error"):
+            st.error(error)
+        files = st.session_state.get(_form_key("files")) or []
+        folder = st.session_state.get(_form_key("folder")) or []
+        count = len(links) + len(files) + len(folder)
+        with st.container(horizontal=True, horizontal_alignment="right"):
+            st.button(
+                "Analyse" if count < 2 else f"Analyse {count} items together",
+                type="primary",
+                on_click=submit,
+            )
+        st.markdown("##### Or let a tool find material")
+        with st.container(border=True):
+            st.markdown(f"{META} **Meta Ad Library**", unsafe_allow_html=True)
+            st.caption("Search ads by keyword, page or ad ID. Paste a found ad's link above.")
+            with st.container(horizontal=True, vertical_alignment="bottom"):
+                terms = st.text_input(
+                    "Search the Ad Library",
+                    key="ad_terms",
+                    placeholder="inwestycja, an advertiser's name or an ad ID",
+                    label_visibility="collapsed",
+                ).strip()
+                url = (
+                    ad_library_url(ad_id=terms) if terms.isdigit() else ad_library_url(terms=terms)
+                )
+                st.link_button("Search", url, icon=":material/open_in_new:", disabled=not terms)
+            if DISCOVERY:
+                st.caption("Automated searches: `ftf discover run`, then review the ads it found.")
+    if st.session_state.pop("go_library", False):
+        st.switch_page(PAGES["library"])
+
+
+# -- Library -------------------------------------------------------------------------------
+
+
+@st.cache_resource
+def library_cache():
+    return {}, threading.Lock()
+
+
+_CACHE, _CACHE_LOCK = library_cache()
+
+
+def current_library() -> Library | None:
+    """The last complete Library. Rebuilt only while no analysis runs, so it is never torn."""
+    key = str(settings.db_path)
+    with _CACHE_LOCK:
+        cached = _CACHE.get(key)
+        if cached and cached["generation"] == worker.generation:
+            return cached["library"]
+        if not ANALYSIS_LOCK.acquire(blocking=False):
+            return cached["library"] if cached else None
+        try:
+            reader = Store(settings.db_path)
+            try:
+                groups = build_groups(reader, persist_funnel=False)
+                previous = cached["library"] if cached else None
+                library = build_library(reader, groups, settings.data_dir, previous)
+                snapshot = reader.db.serialize()
+            finally:
+                reader.close()
+        finally:
+            ANALYSIS_LOCK.release()
+        _CACHE[key] = {"generation": worker.generation, "library": library, "snapshot": snapshot}
+        return library
+
+
+def _row_key(prefix: str, view_id: str, selected: bool) -> str:
+    return f"{prefix}-{re.sub(r'[^A-Za-z0-9]', '-', view_id)}{'-sel' if selected else ''}"
+
+
+def md(text: str) -> str:
+    """Page-controlled text as literal markdown: no links, shortcodes or badge breakouts."""
+    text = text.replace("[", "(").replace("]", ")")
+    return re.sub(r"([\\`*_{}()#+\-.!|<>~:$])", r"\\\1", text)
+
+
+def risk_badge(item: Item) -> str:
+    if item.risk.level == "error":
+        return f":red-badge[:material/report: {item.risk.text}]"
+    if item.risk.level == "warning":
+        return f":orange-badge[:material/warning: {item.risk.text}]"
+    return ""
+
+
+def label_badges(item: Item) -> str:
+    """One link line: the campaign chip and how many items it joins, or the duplicate."""
+    parts = []
+    for label in item.labels:
+        parts.append(f":{BADGES[label.kind]}-badge[{md(label.text)}]")
+        if label.detail:
+            parts.append(f":gray[{md(label.detail)}]")
+    return " ".join(parts)
+
+
+def short_date(stamp: str) -> str:
+    try:
+        return datetime.fromisoformat(stamp).strftime("%-d %b %Y")
+    except ValueError:
+        return "unknown"
+
+
+def show_campaign(campaign_id: str) -> None:
+    st.session_state["library_filter"] = {"campaign": campaign_id}
+    st.session_state.pop("library_compare", None)
+
+
+def open_campaign(campaign_id: str) -> None:
+    show_campaign(campaign_id)
+    st.session_state["go_library"] = True
+
+
+def select(view_id: str) -> None:
+    st.session_state["selected"] = view_id
+    st.session_state.pop("library_compare", None)
+
+
+def show_matches(view_id: str) -> None:
+    st.session_state.setdefault("library_previous_selected", st.session_state.get("selected"))
+    st.session_state["library_filter"] = {"matches_of": view_id}
+    select(view_id)
+
+
+def close_matches() -> None:
+    st.session_state.pop("library_filter", None)
+    st.session_state.pop("library_compare", None)
+    previous = st.session_state.pop("library_previous_selected", None)
+    if previous:
+        st.session_state["selected"] = previous
+
+
+def item_row(item: Item, show_case: bool, selected: bool) -> None:
+    prefix = "row"
+    if item.step:  # the steps of one journey are joined by a line through their dots
+        place = {1: "first", item.step.total: "last"}.get(item.step.position, "mid")
+        prefix = f"row-step{place}"
+    with st.container(
+        key=_row_key(prefix, item.view_id, selected), horizontal=True, vertical_alignment="center"
+    ):
+        dot = f'<span class="ftf-dot">{item.step.position}</span>' if item.step else "&nbsp;"
+        st.markdown(dot, unsafe_allow_html=True, width=22)
+        if item.thumbnail:
+            st.image(item.thumbnail, width=36)
+        else:
+            with st.container(key=_row_key("icon", item.view_id, False), width=36):
+                st.markdown(f":gray[{ICONS[KIND_NAMES[item.kind]]}]")
+        with st.container(gap=None, width="stretch"):
+            st.button(
+                item.title,
+                key=_row_key("title", item.view_id, False),
+                type="tertiary",
+                on_click=select,
+                args=(item.view_id,),
+            )
+            sub = KIND_NAMES[item.kind] + (f" · {item.host}" if item.host else "")
+            if show_case:
+                sub += f" · {case_title(item.case_id)}"
+            note = f" · :blue[{item.note}]" if item.note else ""
+            st.caption(label_badges(item))
+            st.caption(f"{sub}{note}")
+        st.markdown(risk_badge(item) or "&nbsp;", width=120)
+        st.button(
+            str(len(item.matches)) if item.matches else "",
+            icon=":material/fingerprint:",
+            key=f"matches-{item.view_id}",
+            type="tertiary",
+            disabled=not item.matches,
+            help=match_help(item),
+            on_click=show_matches,
+            args=(item.view_id,),
+        )
+
+
+def pending_rows(library: Library | None, show: bool) -> None:
+    """Submissions the last complete Library does not have yet, with their stage."""
+    known = {c.case_id for c in library.cases} if library else set()
+    for job in reversed(list(worker.jobs.values())):
+        if job.status == "done" and set(job.incidents) <= known:
+            continue
+        if job.status == "failed":
+            st.error(f"Couldn't analyse {', '.join(job.names[:3])}: {job.error}")
+            continue
+        stage = f":gray-badge[:material/progress_activity: {job.stage_name}]"
+        new_incidents = [i for i in job.incidents if i not in known]
+        if not new_incidents:
+            for name in job.names[:6]:
+                st.markdown(f":material/schedule: {name} {stage}")
+            if len(job.names) > 6:
+                st.caption(f"and {len(job.names) - 6} more")
+            continue
+        for incident_id in new_incidents:
+            for view in db().views(incident_id)[:12] if show else []:
+                st.markdown(f"{ICONS[KIND_NAMES[view.kind]]} {view.label} {stage}")
+
+
+def case_block(case, selected: str | None) -> None:
+    items = case.items
+    if not items:
+        return
+    with st.container(border=True):
+        count = len(case.items)
+        st.markdown(f"**{case.title}** :gray[· {count} item{'' if count == 1 else 's'}]")
+        quiet = [
+            i
+            for i in items
+            if i.kind.value == "image" and i.labels[0].kind == "none" and i.risk.level == "none"
+        ]
+        folded = quiet[1:] if len(quiet) > 3 else []
+        for item in items:
+            if item not in folded:
+                item_row(item, False, item.view_id == selected)
+        if folded:
+            with st.expander(f"{len(folded)} more images with no link yet"):
+                for item in folded:
+                    item_row(item, False, item.view_id == selected)
+
+
+def ad_library_url(ad_id: str | None = None, terms: str | None = None) -> str:
+    """Meta's public Ad Library: one ad by ID, or a keyword search in Poland."""
+    base = "https://www.facebook.com/ads/library/?active_status=all&ad_type=all"
+    if ad_id:
+        return f"{base}&id={quote(ad_id)}"
+    return f"{base}&country=PL&media_type=all&search_type=keyword_unordered&q={quote(terms or '')}"
+
+
+def journey_html(library: Library, item: Item) -> str:
+    """The journey as one line: dots for steps, proofs on the line, a dashed open end."""
+    journey = library.journeys[item.view_id]
+    rows = []
+
+    def row(rail: str, text: str) -> None:
+        rows.append(f'<div class="rail">{rail}</div><div>{text}</div>')
+
+    for ad in journey.ads:
+        row(
+            f'{META}<span class="bar dash"></span>',
+            f'<div class="txt">Meta ad {html.escape(ad)}<br>'
+            "<small>Ads Manager ID · not in the library</small></div>",
+        )
+        row('<span class="bar"></span>', '<div class="proof">Its ID is in the landing URL</div>')
+    last = len(journey.steps) - 1
+    for n, (view_id, title) in enumerate(journey.steps):
+        role = "Entry page" if n == 0 else "Destination so far" if n == last else "Step"
+        me = view_id == item.view_id
+        bar = '<span class="bar dash"></span>' if n == last else '<span class="bar"></span>'
+        row(
+            f'<span class="ftf-dot">{n + 1}</span>{bar}',
+            f'<div class="txt"><span class="{"me" if me else ""}">{html.escape(title)}</span>'
+            f"<br><small>{role}{' · this item' if me else ''}</small></div>",
+        )
+        if n < last:
+            proof = html.escape(journey.proofs[n])
+            row('<span class="bar"></span>', f'<div class="proof">{proof}</div>')
+    row('<span class="bar dash"></span>', '<div class="proof">Next step not captured</div>')
+    return f'<div class="ftf-j">{"".join(rows)}</div>'
+
+
+def meta_link(label: str, url: str, title: str) -> None:
+    """A link styled as a button, with Meta's mark (Streamlit buttons take only their icons)."""
+    st.markdown(
+        f'<a class="ftf-btn" href="{html.escape(url)}" target="_blank" rel="noopener" '
+        f'title="{html.escape(title)}">{META} {html.escape(label)}</a>',
+        unsafe_allow_html=True,
+        width="content",
     )
 
 
-def show_status_table(title: str, section: dict) -> None:
-    st.subheader(title)
-    if section["status"] != "available":
-        st.info(UNAVAILABLE[section["status"]])
-    if section["rows"]:
-        st.dataframe(section["rows"], width="stretch")
+def journey_actions(library: Library, item: Item) -> None:
+    journey = library.journeys[item.view_id]
+    on_path = [library.get(view_id) for view_id, _ in journey.steps]
+    library_ids = [i.library_id for i in on_path if i and i.library_id]
+    with st.container(horizontal=True):
+        if library_ids:
+            meta_link(
+                "Find the Meta ad in Ad Library",
+                ad_library_url(ad_id=library_ids[0]),
+                "Opens this ad in Meta's Ad Library by its Library ID.",
+            )
+        elif journey.ads and journey.host:
+            meta_link(
+                f"Search Ad Library for {journey.host}",
+                ad_library_url(terms=journey.host),
+                "The landing URL carries the Ads Manager ad ID, which the Ad Library cannot "
+                "look up. This searches the Library for ads that mention the landing domain.",
+            )
+        st.button(
+            "Continue with victim visitor",
+            icon=":material/person_search:",
+            key=f"vv-{item.view_id}",
+            disabled=not VICTIM,
+            help=(
+                "Walk on from the last captured page as a persona."
+                if VICTIM
+                else "Not in this build: the victim visitor lives on its own branch."
+            ),
+        )
+
+
+def panel(library: Library, item: Item) -> None:
+    with st.container(border=True):
+        st.markdown(f"##### {ICONS[KIND_NAMES[item.kind]]} {item.title}")
+        where = KIND_NAMES[item.kind] + (f" · {item.host}" if item.host else "")
+        st.caption(f"{where} · {case_title(item.case_id)}")
+        st.markdown(f"{label_badges(item)} {risk_badge(item)}")
+        if item.note:
+            st.caption(item.note)
+        campaign_section(library, item)
+
+        if item.view_id in library.journeys:
+            steps = len(library.journeys[item.view_id].steps)
+            st.markdown(f"**Journey** :gray[· {steps} known steps]")
+            # st.html strips inline SVG (the Meta mark); a raw HTML block in markdown keeps it.
+            st.markdown(journey_html(library, item), unsafe_allow_html=True)
+            journey_actions(library, item)
+        else:
+            st.markdown("**Journey**")
+            st.caption("No proven step to or from this item.")
+            if item.library_id:
+                meta_link(
+                    "Find the Meta ad in Ad Library",
+                    ad_library_url(ad_id=item.library_id),
+                    "Opens this ad in Meta's Ad Library by its Library ID.",
+                )
+
+        st.markdown("**Findings**")
+        if item.risk.findings:
+            for finding in item.risk.findings:
+                st.markdown(f":gray[{finding.kind}]  \n{finding.summary}")
+                st.caption(f"`{finding.source}`")
+        else:
+            st.caption("No risk findings.")
+        if item.risk.unchecked:
+            st.caption("Not checked: " + ", ".join(item.risk.unchecked).lower())
+
+        compare_section(library, item)
+        warning_section(item)
+        with st.expander("All observations"):
+            rows = [
+                {
+                    "signal": o.signal_id,
+                    "namespace": o.namespace,
+                    "value": str(o.value),
+                    "state": o.state.value,
+                    "source": o.source.locator,
+                }
+                for o in db().observations(item.view_id)
+            ]
+            if rows:
+                st.dataframe(rows, width="stretch", hide_index=True)
+            else:
+                st.caption("No observations for this item yet.")
+
+
+def campaign_section(library: Library, item: Item) -> None:
+    """The item's campaign and, above it, the kit it belongs to."""
+    campaign = library.campaigns.get(item.campaign or "")
+    kit = library.kits.get(item.kit or "")
+    if not (campaign or kit):
+        return
+    st.markdown("**Campaign**")
+    if kit:
+        inner = [library.campaigns[c] for c in kit.campaigns]
+        named = sum(1 for c in inner if c.name)
+        items = sum(len(c.members) for c in inner)
+        st.markdown(
+            f":material/inventory_2: {md(kit.name)} :gray[· "
+            f"{named} campaign{'' if named == 1 else 's'} and {items} items share this kit]"
+        )
+        if kit.linked_by:
+            st.caption("Kit linked by " + md("; ".join(kit.linked_by)))
+    if campaign:
+        indent = "&emsp;↳ " if kit else ""
+        size = len(campaign.members)
+        st.markdown(
+            f"{indent}:material/campaign: {md(campaign.name or '')} :gray[· {size} items · "
+            f"{md(cases_text(campaign.cases))}]",
+            unsafe_allow_html=True,
+        )
+        st.caption("Linked by " + md("; ".join(campaign.linked_by)))
+        st.button(
+            "Show its items",
+            icon=":material/filter_list:",
+            key=f"camp-{item.view_id}",
+            on_click=show_campaign,
+            args=(campaign.campaign_id,),
+        )
+    else:
+        st.caption("This item is in no campaign of its own; it shares the kit above.")
+
+
+def campaign_list(library: Library, campaign_id: str, selected: str) -> None:
+    campaign = library.campaigns[campaign_id]
+    heading, close = st.columns([20, 1], vertical_alignment="top")
+    count = len(campaign.members)
+    heading.markdown(
+        f"#### {md(campaign.name or '')} :gray[· {count} items · {md(cases_text(campaign.cases))}]"
+    )
+    with close:
+        st.button(
+            "",
+            icon=":material/close:",
+            help="Show the whole Library",
+            key="close-campaign",
+            on_click=lambda: st.session_state.pop("library_filter", None),
+            type="tertiary",
+        )
+    st.caption("Linked by " + md("; ".join(campaign.linked_by)))
+    members = set(campaign.members)
+    for item in library.items():  # Library order: newest case first, journey steps in order
+        if item.view_id in members:
+            item_row(item, True, item.view_id == selected)
+
+
+def compare_section(library: Library, item: Item) -> None:
+    with st.expander("Compare with another item"):
+        others = [i for i in library.newest() if i.view_id != item.view_id]
+        if not others:
+            st.caption("Add more material to compare.")
+            return
+        other = st.selectbox(
+            "Compare with",
+            others,
+            format_func=lambda i: f"{i.title} · {case_title(i.case_id)}",
+            key=f"cmp-{item.view_id}",
+        )
+        busy = bool(worker.active())
+        if st.button("Explain comparison", disabled=busy, help=BUSY if busy else None):
+            report = library_pair_report(item.view_id, other.view_id)
+            if report:
+                st.session_state["comparison_report"] = report
+            st.session_state.pop("narrative", None)
+        report = st.session_state.get("comparison_report")
+        if (
+            report
+            and report["objects"]["a"]["view_id"] == item.view_id
+            and report["objects"]["b"]["view_id"] == other.view_id
+        ):
+            markdown = render_pair_report(report)
+            with st.container(horizontal=True):
+                st.download_button(
+                    "Download JSON",
+                    json.dumps(report, ensure_ascii=False, indent=2),
+                    file_name="comparison.json",
+                    mime="application/json",
+                )
+                st.download_button(
+                    "Download Markdown", markdown, file_name="comparison.md", mime="text/markdown"
+                )
+            st.markdown(markdown)
+            st.markdown("**Narrative**")
+            st.caption("Written by the model from the table above. Each sentence cites its facts.")
+            pair_key = (item.view_id, other.view_id)
+            if st.button("Write narrative", disabled=busy, help=BUSY if busy else None):
+                with st.spinner("Writing from the evidence table"):
+                    st.session_state["narrative"] = {
+                        "pair": pair_key,
+                        "result": pair_narrative(db(), item.view_id, other.view_id, report=report),
+                    }
+            written = st.session_state.get("narrative")
+            if written and written["pair"] == pair_key:
+                # Plain text: model output can repeat hostile links from the page.
+                st.text(render_narrative(written["result"]))
+                with st.expander("Facts given to the model"):
+                    st.json(written["result"]["facts"])
+
+
+def warning_section(item: Item) -> None:
+    with st.expander("Warning lists"):
+        offline = st.checkbox("Use offline warning snapshots", value=True)
+        busy = bool(worker.active())
+        if st.button("Check warning lists", disabled=busy, help=BUSY if busy else None):
+            with st.spinner("Checking warning lists"), ANALYSIS_LOCK:
+                run_warning_lists(
+                    db(),
+                    settings.data_dir / "warning_lists",
+                    view_ids=[item.view_id],
+                    refresh=not offline,
+                )
+            worker.invalidate()
+            st.session_state.pop("comparison_report", None)
+            st.session_state.pop("corpus_export", None)
+            st.rerun()
+        warnings = warning_observations(db(), item.view_id)
+        if not warnings:
+            st.caption("Warning lists have not been checked for this item.")
+            return
+        st.caption("A miss says nothing about legitimacy. Fuzzy matches require verification.")
+        for reason in warning_risk_reasons(warnings):
+            st.write(reason["message"])
+        st.dataframe(
+            [
+                {
+                    "source": o["value"]["source"],
+                    "state": o["state"],
+                    "input": (o["value"]["input"] or {}).get("value"),
+                    "result": o["value"]["message"],
+                    "snapshot date": (o["value"]["snapshot"] or {}).get("snapshot_date"),
+                    "refresh error": o["value"]["refresh_error"],
+                }
+                for o in warnings
+            ],
+            width="stretch",
+            hide_index=True,
+        )
+        st.json(warnings, expanded=False)
+        related = related_listed_views(db(), item.view_id)
+        if related:
+            st.caption("Items naming the same listed entity; context, not a campaign link.")
+            st.dataframe(
+                [{k: row[k] for k in ("view_id", "label", "entity_name")} for row in related],
+                width="stretch",
+                hide_index=True,
+            )
+
+
+def library_pair_report(a: str, b: str) -> dict | None:
+    """Read the complete Library snapshot; never wait on background analysis."""
+    if not ANALYSIS_LOCK.acquire(blocking=False):
+        st.info(BUSY)
+        return None
+    try:
+        snapshot = _CACHE[str(settings.db_path)]["snapshot"]
+        reader = Store(":memory:")
+        try:
+            reader.db.deserialize(snapshot)
+            return build_pair_report(reader, a, b)
+        finally:
+            reader.close()
+    finally:
+        ANALYSIS_LOCK.release()
+
+
+def open_library_comparison(a: str, b: str) -> None:
+    report = library_pair_report(a, b)
+    if report:
+        st.session_state["library_compare"] = report
+
+
+def layer_breakdown(report: dict) -> None:
+    with st.expander("Layer breakdown"):
+        for row in report["layers"]:
+            st.markdown(f"**{LAYER_NAMES.get(row['layer_id'], 'Evidence layer')}**")
+            st.caption(f"`{row['layer_id']}` · Score: {row['score']} · {row['status']}")
+            for shared in row["shared"]:
+                st.text(str(shared["value"]))
+                if shared["demoted_to_kit"]:
+                    st.caption("Demoted to kit evidence")
+                for side, refs in shared["sources"].items():
+                    for ref in refs:
+                        obs = report["sources"][ref]
+                        source = obs["source"]
+                        st.caption(
+                            f"{side.upper()}: {obs['namespace']} · "
+                            f"{source['file'] or 'File not recorded'} · "
+                            f"{source['locator'] or 'Location not recorded'}"
+                        )
+                if not any(shared["sources"].values()):
+                    st.caption("Source observation unavailable; derived comparison value")
+
+
+def comparison_panel(report: dict) -> None:
+    with st.container(border=True):
+        with st.container(horizontal=True, vertical_alignment="center"):
+            st.markdown("##### Comparison", width="stretch")
+            if st.button("Close comparison", icon=":material/close:", type="tertiary"):
+                st.session_state.pop("library_compare", None)
+                st.rerun()
+        st.write(" · ".join(obj["label"] for obj in report["objects"].values()))
+        markdown = render_pair_report(report)
+        with st.container(horizontal=True):
+            st.download_button(
+                "Download JSON",
+                json.dumps(report, ensure_ascii=False, indent=2),
+                file_name="comparison.json",
+                mime="application/json",
+            )
+            st.download_button(
+                "Download Markdown", markdown, file_name="comparison.md", mime="text/markdown"
+            )
+        layer_breakdown(report)
+        with st.expander("Full comparison report", expanded=True):
+            st.markdown(markdown)
+
+
+def match_table(library: Library, anchor: Item, selected: str) -> None:
+    heading, close = st.columns([20, 1], vertical_alignment="top")
+    heading.markdown(f"#### Matches for {anchor.title}")
+    with close:
+        st.button(
+            "",
+            icon=":material/close:",
+            help="Close matches",
+            key="close-matches",
+            on_click=close_matches,
+            type="tertiary",
+        )
+    item_row(anchor, True, anchor.view_id == selected)
+    if not library.playbook_run:
+        st.caption("Playbook: not run")
+    rows = list(filter_matches(anchor))
+    st.caption("Scroll sideways for coverage, clues and Compare.")
+    st.html(
+        """<style>
+        .st-key-match-scroll {overflow-x: auto; padding-bottom: 12px}
+        .st-key-match-table {min-width: 1120px}
+        .ftf-tier {display: inline-block; padding: 2px 6px; border-radius: 4px;
+            background: rgba(28, 131, 225, .12); font-size: .875em;
+            white-space: nowrap; cursor: help}
+        </style>"""
+    )
+    with st.container(key="match-scroll"), st.container(key="match-table", width=1120):
+        widths = [2.2, 1, 1.2, 1, 1, 1.5, 1.5, 0.9]
+        cols = st.columns(widths, gap="small")
+        for col, title in zip(
+            cols,
+            [
+                "Matched item",
+                "Case",
+                "Verdict",
+                "Tiers",
+                "Strength",
+                "Coverage",
+                "Deciding clue",
+                "Compare",
+            ],
+            strict=True,
+        ):
+            col.caption(title)
+        for match in rows:
+            item = library.get(match.view_id)
+            cols = st.columns(widths, gap="small", vertical_alignment="center")
+            with cols[0]:
+                if item.thumbnail:
+                    st.image(item.thumbnail, width=36)
+                st.button(
+                    item.title,
+                    key=f"match-title-{item.view_id}",
+                    help=item.title,
+                    type="tertiary",
+                    on_click=select,
+                    args=(item.view_id,),
+                )
+            cols[1].write(case_title(item.case_id) + (" · same case" if match.same_case else ""))
+            cols[2].write(match.verdict)
+            for tier in match.tiers:
+                cols[3].markdown(
+                    f'<span class="ftf-tier" title="{html.escape(TIER_HINTS[tier], quote=True)}">'
+                    f"{html.escape(tier)}</span>",
+                    unsafe_allow_html=True,
+                )
+            cols[4].markdown(
+                match.strength, help=f"Stored confidence: {match.confidence or 'not assessed'}"
+            )
+            cols[5].write(match.coverage)
+            cols[6].write(match.clue)
+            cols[7].button(
+                "Compare",
+                key=f"match-compare-{item.view_id}",
+                disabled=bool(worker.active()),
+                help=BUSY if worker.active() else None,
+                on_click=open_library_comparison,
+                args=(anchor.view_id, item.view_id),
+            )
+    if not rows:
+        st.caption("No matches yet.")
+
+
+def library_body() -> None:
+    library = current_library()
+    active = worker.active()
+    generation = worker.generation
+    count = f"{len(library.items())} items · {len(library.cases)} cases" if library else ""
+    with st.container(horizontal=True, vertical_alignment="center"):
+        st.markdown(f"### Library :gray[{count}]", width="content")
+        if active:
+            job = active[0]
+            st.markdown(f":material/progress_activity: :gray[Analysing · {job.stage_name}]")
+    if library is None or not library.cases:
+        pending_rows(library, True)
+        if not worker.jobs:
+            st.info("Nothing here yet.")
+            st.page_link(PAGES["add"], label="Add material", icon=":material/add:")
+        return
+    selected = st.session_state.get("selected")
+    if library.get(selected or "") is None:  # the newest case's first item
+        selected = library.items()[0].view_id
+        st.session_state["selected"] = selected
+    matches_of = st.session_state.get("library_filter", {}).get("matches_of")
+    anchor = library.get(matches_of) if matches_of else None
+    campaign_id = st.session_state.get("library_filter", {}).get("campaign")
+    if campaign_id and campaign_id not in library.campaigns:  # gone after a rebuild
+        st.session_state.pop("library_filter", None)
+        campaign_id = None
+    if anchor:
+        st.html('<style>[data-testid="stMainBlockContainer"] {max-width: 1800px}</style>')
+    left, right = st.columns([3, 2], gap="medium")
+    with left:
+        pending_rows(library, True)
+        if anchor:
+            match_table(library, anchor, selected)
+        elif campaign_id:
+            campaign_list(library, campaign_id, selected)
+        else:
+            for case in library.cases:  # newest case first
+                case_block(case, selected)
+    with right:
+        report = st.session_state.get("library_compare")
+        if report:
+            comparison_panel(report)
+        else:
+            panel(library, library.get(selected))
+    st.session_state["seen_generation"] = generation
+
+
+def page_library() -> None:
+    if worker.active():
+
+        @st.fragment(run_every=1.5)
+        def live() -> None:
+            if not worker.active() and st.session_state.get("seen_generation") != worker.generation:
+                st.rerun(scope="app")
+            library_body()
+
+        live()
+    else:
+        library_body()
+
+
+# -- Campaigns, method, report (unchanged screens) ----------------------------------------
 
 
 def number_rows(values: dict) -> list[dict]:
@@ -125,17 +1018,21 @@ def number_rows(values: dict) -> list[dict]:
 
 def recompute() -> None:
     with ANALYSIS_LOCK:
-        run_method(store)
-    for key in ("assignments", "comparison_report", "map_cache", "corpus_export"):
+        run_method(db())
+    worker.invalidate()
+    for key in ("comparison_report", "map_cache", "corpus_export"):
         st.session_state.pop(key, None)
 
 
-def show_export() -> None:
-    st.subheader("Corpus report and export")
+def page_report() -> None:
+    st.markdown("### Report")
     st.caption("Private project material: do not publish or redistribute.")
+    if not db().incidents():
+        st.info("Nothing to report yet.")
+        return
     if st.button("Build report"):
         with ANALYSIS_LOCK, st.spinner("Building the report from stored results"):
-            files = export_files(store)
+            files = export_files(db())
         st.session_state["corpus_export"] = {
             "report": files["report.md"],
             "zip": export_zip(files),
@@ -158,8 +1055,67 @@ def show_export() -> None:
             st.markdown(built["report"])
 
 
-def show_map() -> None:
-    st.subheader("Campaign map")
+def campaign_tree_view(library: Library) -> None:
+    """Kit → its campaigns → cases. A campaign opens the Library filtered to it."""
+    tree = campaign_tree(library)
+    if not tree.rows:
+        st.caption("No campaigns yet: nothing links two items.")
+    st.html(
+        """<style>
+        [class*="st-key-tree-"] [data-testid="stMarkdownContainer"] p {margin-bottom: 0}
+        [class*="st-key-tree-d1-"] {padding-left: 2rem; border-left: 2px solid #e4e2db;
+          margin-left: .55rem}
+        [class*="st-key-tree-"] button {padding: 0; min-height: 0; font-weight: 600}
+        [class*="st-key-tree-"] button p {font-size: 1rem}
+        </style>"""
+    )
+    for n, row in enumerate(tree.rows):
+        icon = {"kit": ":material/inventory_2:", "campaign": ":material/campaign:"}.get(
+            row.kind, ":material/description:"
+        )
+        with st.container(key=f"tree-d{row.depth}-{n}", gap="xsmall"):
+            if row.campaign_id:
+                st.button(
+                    row.name,
+                    icon=icon,
+                    key=f"tree-open-{n}",
+                    type="tertiary",
+                    help="Show this campaign's items in the Library",
+                    on_click=open_campaign,
+                    args=(row.campaign_id,),
+                )
+            elif row.kind == "kit":
+                st.markdown(f"{icon} **{md(row.name)}**")
+            else:
+                st.markdown(f":gray[{icon} {md(row.name[:70])}]")
+            facts = [
+                "1 item" if row.items == 1 else f"{row.items} items",
+                cases_text(row.cases),
+                "first seen " + short_date(row.first_seen),
+            ]
+            if row.linked_by:
+                facts.append("linked by " + "; ".join(row.linked_by))
+            st.caption(md(" · ".join(facts)))
+    st.markdown(f":gray[{tree.unlinked}]")
+
+
+def page_campaigns() -> None:
+    st.markdown("### Campaigns")
+    if not db().incidents():
+        st.info("Nothing to show yet.")
+        return
+    library = current_library()
+    if library is None:
+        st.info(BUSY)
+    else:
+        campaign_tree_view(library)
+    if st.session_state.pop("go_library", False):
+        st.switch_page(PAGES["library"])
+    with st.expander("Relation map"):
+        relation_map()
+
+
+def relation_map() -> None:
     columns = st.columns(len(TOGGLES))
     enabled = [
         name
@@ -172,16 +1128,11 @@ def show_map() -> None:
     cache = st.session_state.setdefault("map_cache", {})
     if tuple(enabled) not in cache:
         with ANALYSIS_LOCK:
-            cache[tuple(enabled)] = map_data(store, enabled)
+            cache[tuple(enabled)] = map_data(db(), enabled)
     data = cache[tuple(enabled)]
     st.caption("Boxes are families and campaigns. A line is a stored relation in a chosen tier.")
     st.graphviz_chart(to_dot(data), width="stretch")
-    st.subheader("Clusters")
-    for cluster in data["clusters"]:
-        with st.expander(f"Family {cluster['family']}: {len(cluster['campaigns'])} campaign(s)"):
-            for campaign, members in cluster["campaigns"].items():
-                st.write(f"**{campaign}**: " + ", ".join(members))
-    st.subheader("Links and shared identifiers")
+    st.markdown("#### Links and shared identifiers")
     if data["edges"]:
         st.dataframe(
             [
@@ -202,7 +1153,7 @@ def show_map() -> None:
 
 
 def show_pattern_library() -> None:
-    st.subheader("Pattern library")
+    st.markdown("#### Pattern library")
     library = PatternLibraryStore(settings.data_dir / "patterns" / "library")
     version = library.latest_version()
     if version is None:
@@ -253,8 +1204,9 @@ def show_pattern_library() -> None:
     st.caption("Run `ftf patterns match` and `ftf run` so stored scores follow these edits.")
 
 
-def show_method() -> None:
-    st.subheader("Layers")
+def page_method() -> None:
+    st.markdown("### Method")
+    st.markdown("#### Layers")
     st.dataframe(
         [
             {
@@ -268,7 +1220,7 @@ def show_method() -> None:
         ],
         width="stretch",
     )
-    st.subheader("Weights and thresholds")
+    st.markdown("#### Weights and thresholds")
     values = current_values()
     edited = {}
     for section, title in (
@@ -305,8 +1257,8 @@ def show_method() -> None:
             st.session_state.pop(f"method_{section}", None)
         st.rerun()
     show_pattern_library()
-    st.subheader("Expectation profiles")
-    profiles = expectation_profiles(store)
+    st.markdown("#### Expectation profiles")
+    profiles = expectation_profiles(db())
     if not profiles:
         st.info("Not run yet. Use `ftf perceive`.")
     for kind, rows in profiles.items():
@@ -314,209 +1266,12 @@ def show_method() -> None:
             st.dataframe(rows, width="stretch")
 
 
-tab_match, tab_material, tab_add, tab_map, tab_method, tab_export = st.tabs(
-    ["Match", "Material", "Add material", "Campaign map", "Method", "Export"]
-)
-with tab_add:
-    add_material()
-
-incidents = store.incidents()
-if not incidents:
-    with tab_match:
-        st.info("Nothing ingested yet. Use Add material.")
-    with tab_material:
-        st.info("Nothing ingested yet. Use Add material.")
-    with tab_map:
-        st.info("Nothing ingested yet. Use Add material.")
-    with tab_method:
-        st.info("Nothing ingested yet. Use Add material.")
-    with tab_export:
-        st.info("Nothing ingested yet. Use Add material.")
-    st.stop()
-
-with tab_export:
-    show_export()
-with tab_map:
-    show_map()
-with tab_method:
-    show_method()
-
-labels = {v.view_id: v.label for v in store.views()}
-with st.sidebar:
-    st.subheader("Selected material")
-    incident_id = st.selectbox("Incident", [i.incident_id for i in incidents])
-    views = store.views(incident_id)
-    view = st.radio("View", views, format_func=lambda v: f"{v.kind.value}: {v.label}")
-if view is None:
-    for tab in (tab_match, tab_material):
-        with tab:
-            st.info("This incident has no views.")
-    st.stop()
-
-with tab_match:
-    st.subheader("Closest known material")
-    assignments = st.session_state.setdefault("assignments", {})
-    if view.view_id not in assignments:
-        with ANALYSIS_LOCK:
-            groups = build_groups(store, persist_funnel=False)
-            assignments[view.view_id] = assign(store, view.view_id, groups)
-    outcome = assignments[view.view_id]
-    st.write(f"Outcome: **{outcome.headline()}**")
-    for reason in outcome.reasons:
-        st.caption(reason)
-    related = [
-        {
-            "relation": relation,
-            "view": item.view_id,
-            "label": labels.get(item.view_id, ""),
-            "strength": round(item.strength, 3),
-            "coverage": round(item.relation.coverage, 3),
-        }
-        for relation, items in outcome.related.items()
-        for item in items[:5]
-    ]
-    if related:
-        st.dataframe(related, width="stretch")
-    st.subheader("Full comparison report")
-    candidates = [v for v in store.views() if v.view_id != view.view_id]
-    if candidates:
-        other = st.selectbox(
-            "Compare with", candidates, format_func=lambda v: f"{v.view_id} — {v.label}"
-        )
-        if st.button("Explain comparison"):
-            with ANALYSIS_LOCK:
-                st.session_state["comparison_report"] = build_pair_report(
-                    store, view.view_id, other.view_id
-                )
-            st.session_state.pop("narrative", None)
-        report = st.session_state.get("comparison_report")
-        if (
-            report
-            and report["objects"]["a"]["view_id"] == view.view_id
-            and report["objects"]["b"]["view_id"] == other.view_id
-        ):
-            markdown = render_pair_report(report)
-            st.download_button(
-                "Download JSON",
-                json.dumps(report, ensure_ascii=False, indent=2),
-                file_name="comparison.json",
-                mime="application/json",
-            )
-            st.download_button(
-                "Download Markdown", markdown, file_name="comparison.md", mime="text/markdown"
-            )
-            st.markdown(markdown)
-            st.subheader("Narrative")
-            st.caption("Written by the model from the table above. Each sentence cites its facts.")
-            pair_key = (view.view_id, other.view_id)
-            if st.button("Write narrative"):
-                with st.spinner("Writing from the evidence table"):
-                    st.session_state["narrative"] = {
-                        "pair": pair_key,
-                        "result": pair_narrative(
-                            store, view.view_id, other.view_id, report=report
-                        ),
-                    }
-            written = st.session_state.get("narrative")
-            if written and written["pair"] == pair_key:
-                # Plain text: model output can repeat hostile links from the page.
-                st.text(render_narrative(written["result"]))
-                with st.expander("Facts given to the model"):
-                    st.json(written["result"]["facts"])
-
-with tab_material:
-    summary = material_summary(store, view.view_id)
-    st.subheader("Why this item is suspicious")
-    st.write(f"Kind of page: {summary['page_kind'] or 'not read yet'}")
-    suspicion = summary["suspicion"]
-    st.write(f"Level: **{suspicion['level']}** independent kinds of reason (not a probability).")
-    for kind, reasons in suspicion["reasons_by_kind"].items():
-        st.markdown(f"**{kind.replace('_', ' ')}**")
-        for reason in reasons:
-            source = reason["source"]
-            st.write(f"- {reason['summary']} ({source['file'] or '-'}:{source['locator'] or '-'})")
-    if suspicion["face_matches"]:
-        st.markdown("**Possible face matches (context, not counted in the level)**")
-        for reason in suspicion["face_matches"]:
-            source = reason["source"]
-            st.text(f"{reason['summary']} ({source['file'] or '-'}:{source['locator'] or '-'})")
-    if suspicion["unchecked_kinds"]:
-        st.caption("Not checked: " + ", ".join(suspicion["unchecked_kinds"]))
-    show_status_table("Expected elements", summary["expectations"])
-    show_status_table("Persuasion patterns", summary["patterns"])
-
-    st.subheader("Observations")
-    rows = [
-        {
-            "signal": o.signal_id,
-            "namespace": o.namespace,
-            "value": str(o.value),
-            "state": o.state.value,
-            "source": o.source.locator,
-        }
-        for o in store.observations(view.view_id)
-    ]
-    if rows:
-        st.dataframe(rows, width="stretch")
-    else:
-        st.caption("No observations for this view yet.")
-    st.subheader("Evidence involving this view")
-    evidence = [
-        {
-            "score": e.score,
-            "layer": e.layer_id,
-            "other view": labels.get(e.view_b if e.view_a == view.view_id else e.view_a, ""),
-            "shared": "; ".join(f"{s['ns']}={s['value']}" for s in e.shared),
-        }
-        for e in store.evidence(view_a=view.view_id, min_score=0.01)
-    ]
-    if evidence:
-        st.dataframe(evidence, width="stretch")
-    else:
-        st.caption("No links found yet.")
-
-    st.subheader("Warning lists")
-    offline = st.checkbox("Use offline warning snapshots", value=True)
-    if st.button("Check warning lists"):
-        with st.spinner("Checking warning lists"):
-            run_warning_lists(
-                store,
-                get_settings().data_dir / "warning_lists",
-                view_ids=[view.view_id],
-                refresh=not offline,
-            )
-        st.session_state.pop("comparison_report", None)
-        st.session_state.pop("corpus_export", None)
-        st.rerun()
-    warnings = warning_observations(store, view.view_id)
-    if warnings:
-        st.caption("A miss says nothing about legitimacy. Fuzzy matches require verification.")
-        for reason in warning_risk_reasons(warnings):
-            st.write(reason["message"])
-        st.dataframe(
-            [
-                {
-                    "source": o["value"]["source"],
-                    "state": o["state"],
-                    "input": (o["value"]["input"] or {}).get("value"),
-                    "result": o["value"]["message"],
-                    "snapshot date": (o["value"]["snapshot"] or {}).get("snapshot_date"),
-                    "refresh error": o["value"]["refresh_error"],
-                }
-                for o in warnings
-            ],
-            width="stretch",
-        )
-        with st.expander("Warning-list provenance and match details"):
-            st.json(warnings)
-        related = related_listed_views(store, view.view_id)
-        if related:
-            st.caption(
-                "Views referencing the same listed entity; this is context, not a campaign link."
-            )
-            st.dataframe(
-                [{k: row[k] for k in ("view_id", "label", "entity_name")} for row in related],
-                width="stretch",
-            )
-    else:
-        st.caption("Warning lists have not been checked for this view.")
+has_material = bool(db().incidents()) or bool(worker.jobs)
+PAGES = {
+    "add": st.Page(page_add, title="Add material", url_path="add", default=not has_material),
+    "library": st.Page(page_library, title="Library", url_path="library", default=has_material),
+    "campaigns": st.Page(page_campaigns, title="Campaigns", url_path="campaigns"),
+    "method": st.Page(page_method, title="Method", url_path="method"),
+    "report": st.Page(page_report, title="Report", url_path="report"),
+}
+st.navigation(list(PAGES.values()), position="top").run()

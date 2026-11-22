@@ -1,4 +1,4 @@
-"""Command line: ftf capture | ingest | run | enrich | perceive | views | suspicions | observations |
+"""Command line: ftf start | lookup | capture | ingest | run | enrich | perceive | views | suspicions | observations |
 compare | pairs | relations | explain | groups | incidents | assign | eval | loio | ablate |
 validate | load-fixtures."""
 
@@ -56,21 +56,23 @@ def cmd_ingest(args) -> None:
 
 
 def _capture_dir(url: str | None, replay: Path | None) -> Path:
-    from datetime import UTC, datetime
-    from urllib.parse import urlsplit
+    from .intake import capture_dir
 
-    host = urlsplit(url if url and "//" in url else f"//{url or ''}").hostname
-    name = host or (replay.stem if replay else "capture")
-    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    return get_settings().data_dir / "captures" / f"{name}-{stamp}"
+    return capture_dir(url, replay)
 
 
 def cmd_capture(args) -> None:
     """Capture a URL (or replay an archived HAR) into a bundle; optionally ingest and run it."""
     from .capture import capture_url
     from .ingest import ingest_folder
+    from .intake import IntakeError, check_url
 
     replay = Path(args.replay) if args.replay else None
+    try:
+        args.url = check_url(args.url or "") or None  # a bare domain gets https://
+    except IntakeError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        raise SystemExit(2) from exc
     if not args.url and replay is None:
         print("error: give a URL, or --replay with an archived HAR", file=sys.stderr)
         raise SystemExit(2)
@@ -109,6 +111,57 @@ def cmd_capture(args) -> None:
         cmd_run(args)
     if not result.ok:
         raise SystemExit(3)
+
+
+def _print_hits(hits) -> None:
+    for h in hits:
+        label = f"  {h.label}" if h.label else ""
+        print(f"{h.view_id}  [{h.incident_id}]{label}  via {', '.join(h.namespaces)}")
+    if hits and not hits[0].exact:
+        print("(matched ignoring letter case)")
+
+
+def cmd_lookup(args) -> None:
+    """Views in the processed material that carry a value: pixel ID, ad ID, product name."""
+    from dataclasses import asdict
+
+    from .lookup import lookup
+
+    hits = lookup(_store(), args.value, args.namespace)
+    if args.json:
+        print(json.dumps([asdict(h) for h in hits], ensure_ascii=False, indent=2))
+    else:
+        _print_hits(hits)
+    if not hits:
+        if not args.json:
+            print(f"no stored view carries {args.value!r}", file=sys.stderr)
+        raise SystemExit(1)
+
+
+def cmd_start(args) -> None:
+    """Start from a bare hint: a domain or URL is captured, enriched and compared; any other
+    value is looked up among the views already processed."""
+    from .intake import IntakeError, check_url
+    from .lookup import is_address, lookup, registrable
+
+    hint = args.hint.strip()
+    if not is_address(hint):
+        args.value, args.namespace, args.json = hint, None, False
+        cmd_lookup(args)
+        return
+    try:
+        url = check_url(hint)  # refuse ftp:// and the like before anything runs
+    except IntakeError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        raise SystemExit(2) from exc
+    known = lookup(_store(), registrable(url))
+    if known:
+        print(f"already seen ({len(known)} views):")
+        _print_hits(known)
+    print(f"capturing {url}")
+    args.url, args.replay, args.ingest = url, None, True
+    args.cloaking = args.crawler = False
+    cmd_capture(args)
 
 
 def _capture_cloaking(args, incident_dir: Path) -> None:
@@ -651,12 +704,40 @@ def cmd_ablate(args) -> None:
         print(format_runs(ablate(), "Layer ablation on the fixtures (one layer off at a time)"))
 
 
+def cmd_serve(args) -> None:
+    import uvicorn
+
+    uvicorn.run("ftf.web.app:create_app", factory=True, host=args.host, port=args.port)
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="ftf", description="Follow the Fake")
     sub = parser.add_subparsers(dest="command", required=True)
 
+    p = sub.add_parser(
+        "start", help="start from a hint: a domain or URL is captured, anything else looked up"
+    )
+    p.add_argument("hint", help="domain, URL, pixel ID, ad-library ID or product name")
+    p.add_argument("--out", help="incident folder to write (default: $FTF_DATA_DIR/captures/…)")
+    p.add_argument("--incident", help="incident id (default: the folder name)")
+    p.add_argument("--proxy", help="proxy server, e.g. http://host:3128 (egress is recorded)")
+    p.add_argument("--timeout", type=float, default=30.0, help="navigation timeout, seconds")
+    p.add_argument("--candidates", action="store_true", help="compare candidate pairs only")
+    p.add_argument("--no-enrich", action="store_true", help="skip DNS, RDAP and crt.sh lookups")
+    p.set_defaults(func=cmd_start)
+
+    p = sub.add_parser("lookup", help="views in the processed material that carry a value")
+    p.add_argument("value", help="pixel ID, ad-library ID, product name, domain, …")
+    p.add_argument("--namespace", action="append", help="only this namespace; repeatable")
+    p.add_argument("--json", action="store_true", help="print the matches as JSON")
+    p.set_defaults(func=cmd_lookup)
+
     p = sub.add_parser("capture", help="capture a URL with a headless browser into a bundle")
-    p.add_argument("url", nargs="?", help="page to capture; optional with --replay")
+    p.add_argument(
+        "url",
+        nargs="?",
+        help="page or bare domain to capture (https:// is added); optional with --replay",
+    )
     p.add_argument("--replay", metavar="HAR", help="serve the browser from this archived HAR")
     p.add_argument("--out", help="incident folder to write (default: $FTF_DATA_DIR/captures/…)")
     p.add_argument("--proxy", help="proxy server, e.g. http://host:3128 (egress is recorded)")
@@ -694,7 +775,9 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--view", action="append", help="only this view id; may be repeated")
     p.set_defaults(func=cmd_perceive)
 
-    p = sub.add_parser("enrich", help="DNS/RDAP/crt.sh enrichment plus CERT/KNF refresh and local checks")
+    p = sub.add_parser(
+        "enrich", help="DNS/RDAP/crt.sh enrichment plus CERT/KNF refresh and local checks"
+    )
     p.add_argument("--view", action="append", help="only this view id; repeatable")
     p.add_argument("--offline", action="store_true", help="use cached/bundled snapshots only")
     p.add_argument(
@@ -825,6 +908,11 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--sample", help="run on this folder of real incident folders, model off")
     p.set_defaults(func=cmd_ablate)
 
+    p = sub.add_parser("serve", help="the web interface (API and screens) on one port")
+    p.add_argument("--host", default="127.0.0.1", help="address to listen on (0.0.0.0 in Docker)")
+    p.add_argument("--port", type=int, default=8000)
+    p.set_defaults(func=cmd_serve)
+
     p = sub.add_parser("eval", help="agreement with the reference pairs (docs/baseline-report.md)")
     p.add_argument("--fixtures", action="store_true", help="evaluate the fixtures in memory")
     p.add_argument("--all", action="store_true", help="also list the agreed pairs")
@@ -832,7 +920,7 @@ def main(argv: list[str] | None = None) -> None:
 
     args = parser.parse_args(argv)
     # Evaluation measures the shipped method, so analyst edits must not change its results.
-    if args.command not in ("eval", "loio", "ablate", "validate", "load-fixtures", "demo"):
+    if args.command not in ("eval", "loio", "ablate", "validate", "load-fixtures", "demo", "serve"):
         from .method_settings import apply_saved
 
         apply_saved()

@@ -12,6 +12,7 @@ import hashlib
 import mimetypes
 import shutil
 import tempfile
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
@@ -30,6 +31,7 @@ from .bundle import (
     classify_error,
     now_iso,
 )
+from .gate import EgressGate
 from .profiles import DESKTOP, Profile
 
 MAX_RESOURCE = 20 << 20  # bytes per saved resource
@@ -97,6 +99,10 @@ def _extension(url: str, mime: str) -> str:
     return mimetypes.guess_extension((mime or "").split(";")[0].strip()) or ""
 
 
+class NoDocumentError(ValueError):
+    """An archived HAR holds no HTML document to start a replay from."""
+
+
 def archived_capture(har: Path) -> tuple[str, str | None]:
     """(start URL, capture time) of an archived HAR.
 
@@ -106,7 +112,9 @@ def archived_capture(har: Path) -> tuple[str, str | None]:
     entries = load_har(har)
     doc = main_document(entries)
     if doc is None:
-        raise ValueError(f"{har}: no HTML document in the archive; pass the URL to replay")
+        raise NoDocumentError(
+            f"{har.name}: no HTML document in the archive; pass the URL to replay"
+        )
     hops = document_redirects(entries)
     first = hops[0][0] if hops else doc[0]
     start = hops[0][1] if hops else doc[1]
@@ -124,18 +132,28 @@ def capture_url(
     profile: Profile = DESKTOP,
     differential: str | None = None,
     differential_run: str | None = None,
+    public_only: bool = False,
 ) -> CaptureResult:
     """Capture `url` (or, in replay mode, the archive's own page) into `out_dir`.
 
     `profile` decides device, user agent, referrer and which form of the URL is opened.
     `differential` names the URL a cloaking differential is testing and `differential_run`
     the run; the variants of one run share both, which is how they are paired after ingestion.
+    `public_only` sends the browser through an `EgressGate`, so no request (redirects,
+    resources and WebSockets included) reaches a loopback, private, link-local or reserved
+    address, as the web interface needs. A replay never leaves the archive anyway.
     """
     out_dir.mkdir(parents=True, exist_ok=True)
     archived_at = None
     if replay_har is not None:
-        archived_url, archived_at = archived_capture(replay_har)
-        url = url or archived_url
+        try:
+            archived_url, archived_at = archived_capture(replay_har)
+        except NoDocumentError:
+            if not url:
+                raise
+            archived_at = None  # the given URL picks the page; the archive has no document
+        else:
+            url = url or archived_url
     if not url:
         raise ValueError("a URL is required for a live capture")
     if not urlsplit(url).scheme:
@@ -166,8 +184,16 @@ def capture_url(
     work = Path(tempfile.mkdtemp(prefix="ftf-capture-"))
     try:
         record_path = work / "replay.har" if replay_har else har_path
-        run = _Run(manifest, out_dir, record_path, replay_har, proxy, timeout, settle, profile)
-        run.browse(url)
+        gate = EgressGate(timeout) if public_only and replay_har is None else None
+        if gate is not None and proxy:
+            raise ValueError("a public-only capture cannot go through another proxy")
+        with gate or nullcontext():
+            egress = gate.url if gate else proxy
+            run = _Run(manifest, out_dir, record_path, replay_har, egress, timeout, settle, profile)
+            run.gate = gate
+            run.browse(url)
+        if gate is not None:
+            _gate_findings(gate, manifest, run)
         recorded = load_har(record_path)
         if run.dom_from_har:
             _dom_from_har(recorded, manifest, out_dir, run.notes)
@@ -208,6 +234,7 @@ class _Run:
         self.failed: list[FailedRequest] = []
         self.blocked: list[FailedRequest] = []
         self.dom_from_har = False
+        self.gate: EgressGate | None = None
 
     def guard(self, route, request) -> None:
         """No form is ever submitted: a non-GET navigation, or a request carrying a form
@@ -247,9 +274,17 @@ class _Run:
         with sync_playwright() as pw:
             browser = pw.chromium.launch(
                 headless=True,
-                proxy={"server": self.proxy} if self.proxy else None,
+                proxy=self.proxy_settings(),
                 # Otherwise navigator.webdriver is true, the first thing a cloaker checks.
-                args=["--disable-blink-features=AutomationControlled"],
+                args=[
+                    "--disable-blink-features=AutomationControlled",
+                    # WebRTC would otherwise send UDP around the gate.
+                    *(
+                        ["--force-webrtc-ip-handling-policy=disable_non_proxied_udp"]
+                        if self.gate
+                        else []
+                    ),
+                ],
             )
             try:
                 man.user_agent = self.profile.user_agent_for(browser.version)
@@ -268,6 +303,8 @@ class _Run:
                 try:
                     if self.replay_har is not None:
                         context.route_from_har(str(self.replay_har), not_found="abort")
+                        # route_from_har leaves WebSockets alone: a replay stays offline.
+                        context.route_web_socket("**/*", lambda ws: ws.close())
                     context.route("**/*", self.guard)
                     context.add_init_script(_NO_SUBMIT_JS)
                     self.page = page = context.new_page()
@@ -311,6 +348,14 @@ class _Run:
                     context.close()  # writes the HAR, also after an error
             finally:
                 browser.close()
+
+    def proxy_settings(self) -> dict[str, str] | None:
+        if not self.proxy:
+            return None
+        if self.gate is not None:
+            # Chromium sends loopback around a proxy unless told not to.
+            return {"server": self.proxy, "bypass": "<-loopback>"}
+        return {"server": self.proxy}
 
     def mask_headless(self, context, page, browser_version: str) -> None:
         """Client hints and navigator.platform matching the profile (see Profile.ua_override)."""
@@ -372,7 +417,12 @@ class _Run:
         server = Server(url=final.url, status=final.status)
         try:
             addr = final.server_addr()
-            if addr:
+            if self.gate is not None:  # the browser only saw the gate; the gate saw the server
+                parts = urlsplit(final.url)
+                port = parts.port or (443 if parts.scheme == "https" else 80)
+                pinned = self.gate.pins.get(((parts.hostname or "").lower(), port))
+                server.ip, server.port = (pinned, port) if pinned else (None, None)
+            elif addr:
                 server.ip, server.port = addr.get("ipAddress"), addr.get("port")
         except Exception as exc:  # noqa: BLE001
             self.notes.append(f"server address: {exc}")
@@ -395,6 +445,23 @@ class _Run:
         man.server = server
         if final.status >= 400 and man.status is Status.OK:
             man.status, man.error = Status.HTTP_ERROR, f"HTTP {final.status}"
+
+
+def _gate_findings(gate: EgressGate, manifest: Manifest, run: _Run) -> None:
+    """What the gate refused, in the manifest; a failed page says why it failed."""
+    for host, address in sorted(gate.blocked.items()):
+        run.blocked.append(FailedRequest(url=host, error=f"private address {address}"))
+    manifest.blocked = run.blocked
+    if manifest.status is Status.OK:
+        return
+    tried = [manifest.page_url, *(run.chains[-1] if run.chains else [])]
+    hosts = [(urlsplit(u).hostname or "").lower() for u in tried]
+    last = hosts[-1]
+    if last in gate.blocked:
+        manifest.status = Status.FAILED
+        manifest.error = f"refused: {last} is a private address ({gate.blocked[last]})"
+    elif last in gate.unresolved:
+        manifest.status = Status.DNS_FAILED
 
 
 def _same_doc(a: str, b: str) -> bool:

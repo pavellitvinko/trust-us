@@ -73,9 +73,13 @@ def test_missing_data_is_unavailable_not_separation(method):
     for a, b in (("3:ad", "3:page"), ("5:video", "1:page"), ("47:video", "47:page")):
         r = rel(store, a, b)
         assert (r.type, r.confidence) == (RelationType.INSUFFICIENT, ""), (a, b)
+    # Missing data is a pair with no layer group comparable on both sides (a video and a
+    # page): it is insufficient evidence, never unrelated.
+    no_overlap = [r for r in store.relations() if r.coverage == 0]
+    assert no_overlap and all(r.type is RelationType.INSUFFICIENT for r in no_overlap)
+    # Since HAC-19 every sample view carries a fingerprint: videos get key-frame hashes.
     with_fp = {f.view_id for f in store.fingerprints()}
-    bare = [r for r in store.relations() if r.view_a not in with_fp or r.view_b not in with_fp]
-    assert bare and all(r.type is RelationType.INSUFFICIENT for r in bare)
+    assert {v.view_id for v in store.views()} <= with_fp
 
 
 def test_confidence_labels_match_the_supporting_groups(method):

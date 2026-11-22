@@ -1,0 +1,18 @@
+[theme]
+base = "light"
+primaryColor = "#1c4f9c"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f6f5f2"
+textColor = "#1f1e1c"
+font = "sans-serif"
+baseRadius = "0.5rem"
+borderColor = "#e3e1da"
+showWidgetBorder = true
+
+[client]
+toolbarMode = "minimal"
+showSidebarNavigation = false
+
+[server]
+# A whole sample folder is uploaded file by file; this caps one file.
+maxUploadSize = 1024
