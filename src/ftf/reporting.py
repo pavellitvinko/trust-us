@@ -13,9 +13,9 @@ from typing import Any
 from . import pipeline
 from .compare.minhash import shingles
 from .compare.weights import weights
-from .contracts import FingerprintKind, Purpose, RelationType, State, Tier
+from .contracts import FingerprintKind, Purpose, State
 from .fusion import DEFAULT, prepare
-from .fusion.fuse import decide, summarise
+from .fusion.fuse import explain, summarise
 from .grouping import build_groups
 from .layers._text import TEXT_NAMESPACES
 from .registry import layers, load_plugins
@@ -113,51 +113,26 @@ def _sets(fp):
     return set()
 
 
-def _confidence_basis(fused, relation, config):
-    if relation is RelationType.DUPLICATE:
+def _stored_relation(store, view_a, view_b, rtype, confidence):
+    """The relation written at the last Method pass, next to the one recomputed here.
+
+    Rarity is counted over campaigns at both times, so the two normally agree. When they
+    do not, the stored result is older than the corpus it was computed on and the report
+    says so rather than letting the two drift apart unnoticed."""
+    stored = store.get_relation(view_a, view_b)
+    if stored is None:
         return {
-            "rule": "shared duplicate anchor, no contradiction, text absent or above threshold",
-            "anchors": fused.anchors,
-            "text_score": fused.duplicate_text,
-            "text_threshold": config.duplicate_text,
-            "label_rule": "high with observed text; medium when text is unavailable",
+            "relation": None,
+            "confidence": None,
+            "agrees": None,
+            "note": "no stored relation for this pair; the recomputation above stands alone",
         }
-    if relation is RelationType.INSUFFICIENT:
-        return {"rule": "insufficient coverage", "coverage_threshold": config.min_coverage}
-    if relation is RelationType.UNRELATED:
-        return {
-            "rule": "no tier reached its threshold",
-            "high_coverage_threshold": 0.6,
-            "coverage": fused.coverage,
-        }
-    tier = {
-        RelationType.SAME_CAMPAIGN: Tier.IDENTITY,
-        RelationType.SAME_FAMILY: Tier.KIT,
-        RelationType.SAME_PLAYBOOK: Tier.PLAYBOOK,
-    }[relation]
-    threshold = {
-        Tier.IDENTITY: config.identity,
-        Tier.KIT: config.kit,
-        Tier.PLAYBOOK: config.playbook,
-    }[tier]
-    if relation is RelationType.SAME_CAMPAIGN and fused.tiers[tier].score < threshold:
-        tier, threshold = Tier.ARTIFACT, config.artifact
-    summary = fused.tiers[tier]
     return {
-        "rule": "tier score, independent agreeing groups and pair coverage",
-        "tier": tier.value,
-        "score": summary.score,
-        "threshold": threshold,
-        "agreeing_groups": summary.agreeing,
-        "coverage": fused.coverage,
-        "high_requires": {
-            "score_at_least": 0.9,
-            "agreeing_groups_at_least": 2,
-            "coverage_at_least": 0.4,
-        },
-        "exception": "contradiction can cap identity/artifact support at family with medium confidence"
-        if fused.contradictions and summary.score < threshold
-        else None,
+        "relation": stored.type.value,
+        "confidence": stored.confidence,
+        "coverage": stored.coverage,
+        "agrees": stored.type is rtype and stored.confidence == confidence,
+        "note": "stored at the last Method pass; recomputed here under current campaign rarity",
     }
 
 
@@ -170,7 +145,7 @@ def build_pair_report(store: Store, view_a: str, view_b: str, config=DEFAULT) ->
     prepare(store, config, campaigns=groups.campaign_of)
     evidence = pipeline.compare_views(store, view_a, view_b)
     fused = summarise(evidence, config)
-    rtype, confidence, reasons = decide(fused, config)
+    rtype, confidence, reasons, basis = explain(fused, config)
     observations = {side: store.observations(v.view_id) for side, v in views.items()}
     fingerprints = {
         side: {f.layer_id: f for f in store.fingerprints(view_id=v.view_id)}
@@ -211,7 +186,7 @@ def build_pair_report(store: Store, view_a: str, view_b: str, config=DEFAULT) ->
         "confidence": {
             "label": confidence or "unavailable",
             "meaning": CONFIDENCE_MEANING,
-            "basis": _confidence_basis(fused, rtype, config),
+            "basis": basis,
         },
         "coverage": {
             "value": round(fused.coverage, 4),
@@ -480,6 +455,7 @@ def build_pair_report(store: Store, view_a: str, view_b: str, config=DEFAULT) ->
             }
         )
     report["membership"] = _membership(store, view_a, view_b, config)
+    report["stored_relation"] = _stored_relation(store, view_a, view_b, rtype, confidence)
     return report
 
 
@@ -508,6 +484,35 @@ def _membership(store: Store, view_a: str, view_b: str, config) -> dict[str, Any
 def _display(value):
     text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
     return text.replace("\n", " ").replace("|", "\\|").replace("`", "\\`")
+
+
+def _basis_lines(basis: dict) -> list[str]:
+    """The decision path and the numbers it compared, one per line."""
+    path, rule = basis.get("path", "unknown"), _display(basis.get("rule", "unknown"))
+    lines = [f"Decision path: **{path}** — {rule}."]
+    numbers = {
+        k: v
+        for k, v in basis.items()
+        if k not in ("path", "rule", "label_rule") and v not in (None, [], {})
+    }
+    if numbers:
+        lines.append("Compared: " + "; ".join(f"{k}={_display(v)}" for k, v in numbers.items()))
+    rule = basis.get("label_rule")
+    if isinstance(rule, dict):
+        lines.append("Label rule: " + "; ".join(f"{k}: {v}" for k, v in rule.items()))
+    elif rule:
+        lines.append(f"Label rule: {rule}")
+    return lines
+
+
+def _stored_line(stored: dict | None) -> str:
+    if not stored or stored.get("relation") is None:
+        return "Stored relation: none for this pair."
+    verdict = "agrees" if stored["agrees"] else "**disagrees**"
+    return (
+        f"Stored relation: {stored['relation']} ({stored['confidence'] or 'no label'}) — "
+        f"{verdict} with this recomputation."
+    )
 
 
 def render_pair_report(report: dict) -> str:
@@ -565,7 +570,8 @@ def render_pair_report(report: dict) -> str:
         "",
         f"Coverage: **{cov['comparable_groups']} / {cov['total_groups']} groups**.",
         report["confidence"]["meaning"],
-        "Confidence basis: " + _display(report["confidence"]["basis"]),
+        *_basis_lines(report["confidence"]["basis"]),
+        _stored_line(report.get("stored_relation")),
         cov["meaning"],
         "",
         *[f"- {reason}" for reason in report["reasons"]],

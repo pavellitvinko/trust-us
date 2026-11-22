@@ -493,6 +493,23 @@ def build_corpus_report(store: Store, config: FusionConfig = DEFAULT) -> dict[st
     no_layer = [name for name, count in layer_coverage.items() if count == 0]
     if no_layer:
         open_questions.append("Layers with no fingerprint: " + ", ".join(no_layer))
+    disagreements = [
+        {
+            "a": p["objects"]["a"]["view_id"],
+            "b": p["objects"]["b"]["view_id"],
+            "stored": p["stored_relation"]["relation"],
+            "recomputed": p["relation"],
+            "stored_confidence": p["stored_relation"]["confidence"],
+            "recomputed_confidence": p["confidence"]["label"],
+        }
+        for p in pairs
+        if p["stored_relation"]["agrees"] is False
+    ]
+    if disagreements:
+        open_questions.append(
+            f"{len(disagreements)} linked pairs recompute to a different relation or label "
+            "than the stored one: rerun the Method pass before relying on the stored table."
+        )
 
     return {
         "schema_version": SCHEMA,
@@ -538,9 +555,12 @@ def build_corpus_report(store: Store, config: FusionConfig = DEFAULT) -> dict[st
                 "coverage": p["coverage"]["value"],
                 "comparable_groups": p["coverage"]["comparable_groups"],
                 "total_groups": p["coverage"]["total_groups"],
+                "decision_path": p["confidence"]["basis"].get("path"),
+                "agrees_with_stored": p["stored_relation"]["agrees"],
             }
             for p in pairs
         ],
+        "recomputation_disagreements": disagreements,
         "below_folder": below_folder,
         "patterns": _pattern_table(get_settings().data_dir),
         "model_sections": sections,

@@ -22,15 +22,30 @@ current terms and limits before use.
 The Docker image also installs `ffmpeg` from Ubuntu packages and uses the Playwright base image
 with Chromium. Their licences depend on the build and should be recorded from the final image.
 
-## Models and paid services
+## Models and external services in this prototype
 
-Both are commercial APIs used with the operator's own keys. Rate limits and data-use terms depend
-on the account.
+Because of the limited time of the hackathon, and so that the application is easy to start from
+Docker with `docker compose up` without a GPU or large local language models, this prototype uses
+the services below. The target application will run local models instead, including a local face
+recognition model.
 
-| Provider | Default model setting | Used for | Terms |
+| Service | Default model setting | Used for | Terms |
 | --- | --- | --- | --- |
-| OpenAI | `FTF_OPENAI_MODEL=gpt-6-luna` | reading, patterns, expectation profiles | <https://openai.com/policies/> |
-| Google Gemini | `FTF_EMBEDDING_MODEL=gemini-embedding-2`, `FTF_VIDEO_MODEL=gemini-4-hydrogen` | embeddings, video | <https://ai.google.dev/gemini-api/terms> |
+| OpenAI API | `FTF_OPENAI_MODEL=gpt-6-luna` | reading, patterns, expectation profiles, narrative | <https://openai.com/policies/> |
+| Google Gemini API | `FTF_EMBEDDING_MODEL=gemini-embedding-2`, `FTF_VIDEO_MODEL=gemini-4-hydrogen` | embeddings, video | <https://ai.google.dev/gemini-api/terms> |
+| CompreFace with FaceNet | `exadel/compreface:1.2.0-facenet` | face matching against a closed reference list | see below |
+
+Both APIs are used with the operator's own keys. Rate limits and data-use terms depend on the account.
+
+## Face matching
+
+| Component | Licence | Note |
+| --- | --- | --- |
+| CompreFace 1.2.0 | Apache-2.0 | <https://github.com/exadel-inc/CompreFace> |
+| FaceNet code | MIT | <https://github.com/davidsandberg/facenet> |
+| Reference photos | CC0, public domain, CC BY, CC BY-SA | Author, licence and source for each are in `src/ftf/faces/reference_people.json`. |
+
+InsightFace-based CompreFace builds are not used: their models are for non-commercial research only.
 
 ## Public data sources
 
@@ -38,6 +53,7 @@ on the account.
 | --- | --- | --- |
 | IANA RDAP bootstrap and registry RDAP servers | domain registration data | <https://data.iana.org/rdap/dns.json> |
 | DNS resolvers | DNS records | system or configured resolver |
+| crt.sh (Sectigo), certificate transparency logs | certificate history | <https://crt.sh/>; public CT log data, queried politely (one request per second, cached 7 days) |
 | CERT Polska warning list | listed domains | <https://hole.cert.pl/domains/v2/domains.txt> |
 | KNF public warnings | listed entities | <https://www.knf.gov.pl/dla_konsumenta/ostrzezenia_publiczne> |
 | Ministry of Finance gambling register | prohibited gambling domains | <https://hazard.mf.gov.pl/> |

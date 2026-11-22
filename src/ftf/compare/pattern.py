@@ -50,7 +50,8 @@ class PatternOverlap:
 @comparators.register
 class AbsenceAgreement:
     name = "absence_agreement"
-    version = "1"
+    version = "2"
+    weak_weight = 0.5  # an absence that genuine pages also show
     min_co_observed = 3
 
     def compatible(self, a: Fingerprint, b: Fingerprint) -> bool:
@@ -76,8 +77,10 @@ class AbsenceAgreement:
             return Evidence(comparable=False, **base)
         agree = [k for k in co if sa[k] == sb[k]]
         # both-absent agreements carry the signal; both-present ones are what any page has
-        weight = {k: (1.0 if sa[k] == "absent" else 0.5) for k in agree}
-        total = sum(1.0 if (sa[k] == "absent" or sb[k] == "absent") else 0.5 for k in co)
+        weak = {i["value"] for fp in (a, b) for i in fp.payload["items"] if i.get("weak")}
+        absent = {k: self.weak_weight if k in weak else 1.0 for k in co}
+        weight = {k: (absent[k] if sa[k] == "absent" else 0.5) for k in agree}
+        total = sum(absent[k] if "absent" in (sa[k], sb[k]) else 0.5 for k in co)
         score = sum(weight.values()) / total if total else 0.0
         return Evidence(
             score=round(score, 6),

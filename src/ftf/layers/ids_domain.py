@@ -9,7 +9,7 @@ from ..registry import layers
 @layers.register
 class IdsDomain:
     name = "ids.domain"
-    version = "2"
+    version = "3"
     kind = FingerprintKind.SET
     tier = Tier.IDENTITY
     group = "domain"
@@ -20,6 +20,7 @@ class IdsDomain:
         "url.host_path",
         "outbound.domain",
         "redirect.domain",
+        "ct.shared_cert",
     )
 
     def build(self, view: View, observations: list[Observation]) -> Fingerprint | None:

@@ -195,6 +195,7 @@ def cmd_load_fixtures(args) -> None:
 
 def cmd_perceive(args) -> None:
     from .perception.expectations import run_expectations
+    from .perception.faces import run_perceive_faces
     from .perception.image import run_perceive
     from .perception.page import run_perceive_pages
     from .perception.techniques import run_techniques
@@ -221,6 +222,8 @@ def cmd_perceive(args) -> None:
         f"not observable: {checks['not_observable']}, "
         f"failed but kept earlier check: {checks['kept']}, profiles: {checks['profiles']}"
     )
+    faces = run_perceive_faces(ctx, args.view or None)
+    print(f"faces: {faces}")
     # After image and page reading, so a screenshot's text can be quoted as technique evidence.
     cards = run_techniques(ctx, args.view or None)
     print(
@@ -337,7 +340,7 @@ def cmd_demo(args) -> None:
     def show(step) -> None:
         print(f"[{step.status.upper():7}] {step.name}: {step.detail}", flush=True)
 
-    print("mode: shipped settings, local text vectors, no model calls, no DNS or RDAP")
+    print("mode: shipped settings, local text vectors, no model calls, no DNS, RDAP or crt.sh")
     steps = run_demo(
         Path(args.sample), live_url=args.live_url, capture=not args.no_capture, on_step=show
     )
@@ -345,6 +348,81 @@ def cmd_demo(args) -> None:
     skipped = sum(s.status == "skipped" for s in steps)
     print(f"{len(steps) - failed - skipped} passed, {failed} failed, {skipped} skipped")
     if failed:
+        raise SystemExit(1)
+
+
+def cmd_ground(args) -> None:
+    """Check expectation profiles against genuine pages (model and live capture)."""
+    from .perception.grounding import load_grounding, run_grounding
+
+    try:
+        kinds = load_grounding() if args.show else run_grounding(args.kind or None)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
+    if args.kind:
+        kinds = {kind: entry for kind, entry in kinds.items() if kind in args.kind}
+    if not kinds:
+        print("no grounding results yet")
+        return
+    for kind, entry in sorted(kinds.items()):
+        print(f"{kind}: {entry['status']}")
+        for page in entry.get("pages", []):
+            share = page.get("control_present_share")
+            control = "" if share is None else f", control present {share:.0%}"
+            print(f"  page {page.get('status', '-')}{control}: {page['url']}")
+        for key, row in entry.get("elements", {}).items():
+            rate = row["false_alarm_rate"]
+            shown = "n/a" if rate is None else f"{rate:.0%}"
+            print(f"  {row['decision']:10} false alarms {shown:4} {key}")
+        for key in entry.get("added", {}):
+            print(f"  added      {key}")
+
+
+def cmd_narrate(args) -> None:
+    """Write a narrative for a pair or a campaign from the evidence table (model)."""
+    from .narrative import campaign_narrative, pair_narrative, render_narrative
+
+    store = _store()
+    try:
+        if args.campaign and args.views:
+            raise ValueError("give two view ids or --campaign, not both")
+        if args.campaign:
+            result = campaign_narrative(store, args.campaign)
+        elif len(args.views) == 2:
+            result = pair_narrative(store, *args.views)
+        else:
+            raise ValueError("give two view ids, or --campaign")
+    except (KeyError, ValueError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
+    print(render_narrative(result))
+    if result["status"] != "available":
+        raise SystemExit(1)
+    if result["rejected"]:
+        print(f"\n({result['rejected']} unsupported sentence(s) removed)")
+
+
+def cmd_faces(args) -> None:
+    """Set up the private face service and load the closed reference list."""
+    from .faces.client import FaceServiceError, bootstrap, service_url
+    from .faces.enroll import enroll
+
+    url = service_url()
+    if not url:
+        print("error: FTF_COMPREFACE_URL is not set", file=sys.stderr)
+        raise SystemExit(1)
+    try:
+        report = enroll(bootstrap(url))
+    except FaceServiceError as exc:
+        print(f"error: face service: {exc.reason}", file=sys.stderr)
+        raise SystemExit(1) from exc
+    print(f"added {report['added']}, already loaded {report['already']}")
+    print(f"ready: {', '.join(report['people_ready']) or 'nobody'}")
+    for item in report["skipped"]:
+        print(f"skipped {item['person']}: {item['title']} ({item['why']})")
+    if report["people_missing"]:
+        print(f"error: no photo for {', '.join(report['people_missing'])}", file=sys.stderr)
         raise SystemExit(1)
 
 
@@ -366,6 +444,8 @@ def cmd_suspicions(args) -> None:
             print(f"  {kind}:")
             for r in reasons:
                 print(f"    [{r.signal_id}] {r.summary} ({r.source.file}:{r.source.locator})")
+        for r in summary.face_matches:
+            print(f"  context: {r.summary} ({r.source.file}:{r.source.locator})")
         if summary.unchecked_kinds:
             print(f"  not checked: {', '.join(summary.unchecked_kinds)}")
 
@@ -579,7 +659,7 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--ingest", action="store_true", help="ingest the bundle and run everything")
     p.add_argument("--incident", help="incident id for --ingest (default: the folder name)")
     p.add_argument("--candidates", action="store_true", help="compare candidate pairs only")
-    p.add_argument("--no-enrich", action="store_true", help="skip DNS and RDAP lookups")
+    p.add_argument("--no-enrich", action="store_true", help="skip DNS, RDAP and crt.sh lookups")
     p.add_argument(
         "--cloaking",
         action="store_true",
@@ -594,7 +674,7 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("path")
     p.add_argument("--no-run", action="store_true", help="only ingest; do not extract and compare")
     p.add_argument("--candidates", action="store_true", help="compare candidate pairs only")
-    p.add_argument("--no-enrich", action="store_true", help="skip DNS and RDAP lookups")
+    p.add_argument("--no-enrich", action="store_true", help="skip DNS, RDAP and crt.sh lookups")
     p.add_argument(
         "--replace-known", action="store_true", help="let this folder replace shipped incidents"
     )
@@ -602,14 +682,14 @@ def main(argv: list[str] | None = None) -> None:
 
     p = sub.add_parser("run", help="extract, enrich, fingerprint and compare everything stored")
     p.add_argument("--candidates", action="store_true", help="compare candidate pairs only")
-    p.add_argument("--no-enrich", action="store_true", help="skip DNS and RDAP lookups")
+    p.add_argument("--no-enrich", action="store_true", help="skip DNS, RDAP and crt.sh lookups")
     p.set_defaults(func=cmd_run)
 
     p = sub.add_parser("perceive", help="read images and pages, and observe techniques")
     p.add_argument("--view", action="append", help="only this view id; may be repeated")
     p.set_defaults(func=cmd_perceive)
 
-    p = sub.add_parser("enrich", help="DNS/RDAP enrichment plus CERT/KNF refresh and local checks")
+    p = sub.add_parser("enrich", help="DNS/RDAP/crt.sh enrichment plus CERT/KNF refresh and local checks")
     p.add_argument("--view", action="append", help="only this view id; repeatable")
     p.add_argument("--offline", action="store_true", help="use cached/bundled snapshots only")
     p.add_argument(
@@ -636,6 +716,20 @@ def main(argv: list[str] | None = None) -> None:
     browser.add_argument("--live-url", help="URL for the live capture step")
     browser.add_argument("--no-capture", action="store_true", help="skip the browser steps")
     p.set_defaults(func=cmd_demo)
+
+    p = sub.add_parser("ground", help="check expectation profiles against genuine pages")
+    p.add_argument("--kind", action="append", help="only this kind of page; may be repeated")
+    p.add_argument("--show", action="store_true", help="show stored results; run nothing")
+    p.set_defaults(func=cmd_ground)
+
+    p = sub.add_parser("narrate", help="model-written narrative from the evidence table")
+    p.add_argument("views", nargs="*", help="two view ids")
+    p.add_argument("--campaign", help="a campaign id, instead of two views")
+    p.set_defaults(func=cmd_narrate)
+
+    p = sub.add_parser("faces", help="face reference list in the private CompreFace service")
+    p.add_argument("action", choices=("setup",))
+    p.set_defaults(func=cmd_faces)
 
     sub.add_parser("views", help="list views").set_defaults(func=cmd_views)
 

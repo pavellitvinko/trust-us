@@ -227,8 +227,13 @@ def test_one_command_on_the_sample_without_models(tmp_path):
         (r["view_a"], r["view_b"]) for r in linked
     }
     for pair in pairs:
-        assert pair["confidence"]["basis"] and pair["layers"]
+        assert pair["confidence"]["basis"]["path"] and pair["layers"]
         assert pair["coverage"]["total_groups"] > 0
+        assert pair["stored_relation"]["agrees"] is True
+    assert report["recomputation_disagreements"] == []
+    assert all(p["decision_path"] for p in report["linked_pairs"])
+    paths = {(p["relation"], p["decision_path"]) for p in report["linked_pairs"]}
+    assert ("same_family", "identity_solo") in paths  # the 61 business page, HAC-54
     assert report["inventory"]["views"] and report["pair_matrix"]
     kinds = {link["link"] for c in report["campaigns"] for link in c["links"]}
     assert "direct" in kinds

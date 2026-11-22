@@ -6,7 +6,6 @@ import os
 import shutil
 import subprocess
 import time
-from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
 from types import SimpleNamespace as NS
@@ -31,21 +30,11 @@ from ftf.models import (
 from ftf.models.gemini import CHARS_PER_TOKEN, CHUNK_TOKENS, EMBEDDING_DIMENSIONS
 from ftf.models.redact import hash_secret, is_secret_name, redact_text
 
+from ._fakes import FakeOpenAI
+
 
 class Answer(BaseModel):
     kind: str
-
-
-@pytest.fixture
-def settings(tmp_path):
-    return Settings(
-        data_dir=tmp_path,
-        openai_api_key="",
-        gemini_api_key="",
-        openai_model="openai-test",
-        embedding_model="embed-test",
-        video_model="video-test",
-    )
 
 
 def _message(text='{"kind": "news"}', stop_reason="end_turn"):
@@ -56,21 +45,6 @@ def _message(text='{"kind": "news"}', stop_reason="end_turn"):
     )
     status = "incomplete" if stop_reason == "max_tokens" else "completed"
     return NS(status=status, output=[NS(type="message", phase=None, content=[part])])
-
-
-class FakeOpenAI:
-    def __init__(self, *responses):
-        self.queue = list(responses)
-        self.requests = []
-        self.responses = NS(stream=self._stream)
-
-    @contextmanager
-    def _stream(self, **request):
-        self.requests.append(request)
-        response = self.queue.pop(0)
-        if isinstance(response, Exception):
-            raise response
-        yield NS(get_final_response=lambda: response)
 
 
 class FakeEmbeddings:

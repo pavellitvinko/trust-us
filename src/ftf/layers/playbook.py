@@ -62,7 +62,7 @@ class PatternMo:
 @layers.register
 class KitAbsence:
     name = "kit.absence"
-    version = "1"
+    version = "2"
     kind = FingerprintKind.SET
     tier = Tier.PLAYBOOK
     group = "absence"
@@ -75,7 +75,7 @@ class KitAbsence:
         )
         items = sorted(
             {
-                (str(o.value), o.state.value)
+                (str(o.value), o.state.value, o.state is State.ABSENT and o.confidence < 1.0)
                 for o in observations
                 if o.namespace == "expect.element" and o.state is not State.NOT_OBSERVABLE
             }
@@ -88,7 +88,10 @@ class KitAbsence:
             kind=self.kind,
             payload={
                 "kind": kind,
-                "items": [{"ns": "element", "value": v, "state": s} for v, s in items],
+                "items": [
+                    {"ns": "element", "value": v, "state": s, **({"weak": True} if w else {})}
+                    for v, s, w in items
+                ],
             },
             version=self.version,
         )

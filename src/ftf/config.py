@@ -26,7 +26,7 @@ class Settings:
     openai_model: str
     embedding_model: str
     video_model: str
-    enrich_mode: str = "on"  # on | cache | off — outside lookups (DNS, RDAP)
+    enrich_mode: str = "on"  # on | cache | off — outside lookups (DNS, RDAP, crt.sh)
 
     @property
     def db_path(self) -> Path:
