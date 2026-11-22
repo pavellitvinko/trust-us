@@ -109,6 +109,9 @@ HAR_NAMESPACES = {
     "outbound.domain",
     "gads_id",
     "dns.ns_pair",
+    # HAC-19: playlist hosts and CDN video libraries are read mostly from HAR requests
+    "video.hls_host",
+    "cdn.zone_id",
 }
 MODEL_NAMESPACES_PREFIX = ("ocr.", "pattern.", "expect.", "page.kind", "entity.", "layout.")
 MODEL_LAYERS = (

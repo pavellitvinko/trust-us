@@ -135,6 +135,7 @@ BASE_WEIGHTS: dict[str, float] = {
     "dns.ns_pair": 0.4,
     "rdap.registrar": 0.2,
     "http.server": 0.2,
+    "video.hls_host": 0.3,  # a page's own streaming host is specific, a public CDN is not
 }
 
 
