@@ -24,8 +24,10 @@ with Chromium. Their licences depend on the build and should be recorded from th
 
 ## Models and external services in this prototype
 
-Because of the limited time of the hackathon, this prototype uses the services below. The target
-application will run local models instead, including a local face recognition model.
+Because of the limited time of the hackathon, and so that the application is easy to start from
+Docker with `docker compose up` without a GPU or large local language models, this prototype uses
+the services below. The target application will run local models instead, including a local face
+recognition model.
 
 | Service | Default model setting | Used for | Terms |
 | --- | --- | --- | --- |
