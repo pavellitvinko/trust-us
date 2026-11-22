@@ -46,6 +46,7 @@ class PatternDefinition(BaseModel):
     near_misses: list[dict[str, Any]] = Field(default_factory=list)  # similar but different
     related_patterns: list[str] = Field(default_factory=list)  # pattern IDs of near-neighbours
     centroid: list[float] = Field(default_factory=list)  # keeps IDs stable across versions
+    merged_centroids: list[list[float]] = Field(default_factory=list)  # analyst merges persist
     metadata: PatternMetadata | None = None
 
 

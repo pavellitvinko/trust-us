@@ -127,7 +127,47 @@ def _similarity(a: list[float], b: list[float]) -> float:
     return float(x @ y / denominator) if denominator else -1.0
 
 
+def _merge_target(cluster: ClusterResult, earlier: list[PatternDefinition]) -> str | None:
+    """The pattern an analyst merged this cluster's technique into, if any."""
+    scored = [
+        (_similarity(cluster.centroid, centroid), p.pattern_id)
+        for p in earlier
+        for centroid in p.merged_centroids
+    ]
+    best = max(scored, key=lambda row: (row[0], row[1]), default=(-1.0, None))
+    return best[1] if best[0] >= SAME_PATTERN_SIMILARITY else None
+
+
 def _assign_ids(
+    drafts: list[tuple[ClusterResult, InducedPattern]],
+    prior: LibraryVersion | None,
+    version_id: str,
+) -> tuple[list[PatternDefinition], list[tuple[ClusterResult, str]]]:
+    """Patterns for this version, and which pattern each cluster landed in."""
+    earlier = list(prior.patterns) if prior else []
+    targets = {i: _merge_target(pair[0], earlier) for i, pair in enumerate(drafts)}
+    direct = [pair for i, pair in enumerate(drafts) if targets[i] is None]
+    patterns = [p.model_copy(deep=True) for p in _assign_direct(direct, prior, version_id)]
+    by_id = {p.pattern_id: p for p in patterns}
+    by_centroid = {tuple(p.centroid): p.pattern_id for p in patterns}
+    placed = [(cluster, by_centroid[tuple(cluster.centroid)]) for cluster, _ in direct]
+    for index, (cluster, draft) in enumerate(drafts):
+        target = by_id.get(targets[index])
+        if target is None:
+            continue
+        known = {e.get("card_id") for e in target.positive_examples}
+        target.positive_examples += [
+            {"card_id": c.card_id, "card_name": c.card_name, "evidence": c.evidence[:2]}
+            for c in cluster.cards
+            if c.card_id in set(draft.positive_card_ids) and c.card_id not in known
+        ]
+        if target.metadata is not None:
+            target.metadata.last_seen_in_version = version_id
+        placed.append((cluster, target.pattern_id))
+    return patterns, placed
+
+
+def _assign_direct(
     drafts: list[tuple[ClusterResult, InducedPattern]],
     prior: LibraryVersion | None,
     version_id: str,
@@ -182,6 +222,7 @@ def _assign_ids(
                 ],
                 near_misses=[{"description": m} for m in draft.near_misses if m.strip()],
                 centroid=cluster.centroid,
+                merged_centroids=list(kept.merged_centroids) if kept else [],
                 metadata=PatternMetadata(
                     created_in_version=meta.created_in_version if meta else version_id,
                     last_seen_in_version=version_id,
@@ -321,14 +362,7 @@ def run_induction(
 
     number = len(library.list_versions()) + 1
     version_id = f"v{number:04d}-{fingerprint[:8]}"
-    patterns = _assign_ids(drafts, prior, version_id)
-    fresh = {
-        p.pattern_id
-        for p in patterns
-        if p.metadata and p.metadata.last_seen_in_version == version_id
-    }
-    by_centroid = {tuple(p.centroid): p.pattern_id for p in patterns if p.pattern_id in fresh}
-    placed = [(cluster, by_centroid[tuple(cluster.centroid)]) for cluster, _ in drafts]
+    patterns, placed = _assign_ids(drafts, prior, version_id)
     version = LibraryVersion(
         version_id=version_id,
         created_at=datetime.now(UTC).isoformat(),
