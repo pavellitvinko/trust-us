@@ -76,40 +76,52 @@ def ingest_folder(
     roles: dict[Path, str] = {}
     views: list[View] = []
 
-    # 1. Capture bundles: a directory holding manifest.json + dom.html is one page view.
+    # 1. Capture bundles: a directory holding manifest.json + dom.html is one page view. A
+    #    bundle written by `ftf capture` is one even without dom.html: a dead domain still
+    #    gets a view, whose page layers are not observable and whose failure is recorded.
+    manifests = {p.parent: _read_json(p) for p in files if p.name == "manifest.json"}
     bundle_dirs = {
-        p.parent for p in files if p.name == "manifest.json" and (p.parent / "dom.html").is_file()
+        d for d, m in manifests.items() if (d / "dom.html").is_file() or _is_ftf_capture(m)
     }
     for bdir in sorted(bundle_dirs):
         har = bdir / "page.har"
+        dom = bdir / "dom.html"
         attachments = [
             bdir / n
             for n in ("screenshot.png", "page.mhtml", "manifest.json")
             if (bdir / n).is_file()
         ]
-        try:
-            page_url = json.loads((bdir / "manifest.json").read_text(encoding="utf-8")).get(
-                "page_url"
-            )
-        except (OSError, ValueError):
-            page_url = None
+        manifest = manifests[bdir]
+        meta = {"origin": "capture_bundle"}
+        keys = [("page_url", "manifest_url")]
+        if _is_ftf_capture(manifest):  # other tools' manifests may use these names otherwise
+            keys += [
+                ("final_url", "final_url"),
+                ("status", "capture_status"),
+                ("mode", "capture_mode"),
+            ]
+        for key, field in keys:
+            value = manifest.get(key)
+            if isinstance(value, str) and value:
+                meta[field] = value
+        host = urlsplit(meta.get("final_url") or meta.get("manifest_url") or "").hostname
+        status = meta.get("capture_status")
+        suffix = f" ({status})" if status and status != "ok" else ""
         views.append(
             View(
-                view_id=_view_id(incident_id, rel(bdir / "dom.html")),
+                view_id=_view_id(incident_id, rel(dom)),
                 incident_id=incident_id,
                 kind=ViewKind.PAGE,
-                label=f"{incident_id} · capture bundle {bdir.name}",
-                primary=rel(bdir / "dom.html"),
+                label=f"{incident_id} · {host or f'capture bundle {bdir.name}'}{suffix}",
+                primary=rel(dom) if dom.is_file() else None,
                 har=rel(har) if har.is_file() else None,
                 resources_dir=rel(bdir / "resources") if (bdir / "resources").is_dir() else None,
                 attachments=[rel(a) for a in attachments],
-                meta={
-                    "origin": "capture_bundle",
-                    **({"manifest_url": page_url} if page_url else {}),
-                },
+                meta=meta,
             )
         )
-        roles[bdir / "dom.html"] = "primary"
+        if dom.is_file():
+            roles[dom] = "primary"
         if har.is_file():
             roles[har] = "har"
         for a in attachments:
@@ -260,3 +272,16 @@ def ingest_path(path: Path, store: Store) -> list[tuple[Incident, list[View]]]:
     if own_files or not subdirs:
         return [ingest_folder(path, store)]
     return [ingest_folder(d, store) for d in subdirs]
+
+
+def _read_json(path: Path) -> dict:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _is_ftf_capture(manifest: dict) -> bool:
+    """A bundle `ftf capture` wrote (see `ftf.capture.bundle.SCHEMA`)."""
+    return str(manifest.get("schema", "")).startswith("ftf.capture/")

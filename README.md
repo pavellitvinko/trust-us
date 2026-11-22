@@ -17,8 +17,9 @@ conversion and outbound targets), tracker-kit extractors (URL parameter schema, 
 conventions, API routes, config key paths, hidden fields, server headers) and asset hashes
 (exact by role, grayscale perceptual) produce observations on the sample and the layers consume
 them; the Perception track reads pages and screenshots with the model (`ftf perceive`).
-`docs/method-namespaces.md` lists the namespaces the layers consume. Warning-list enrichment
-and the basic interface are available below; live capture and broader enrichment remain to be built.
+`docs/method-namespaces.md` lists the namespaces the layers consume. `ftf capture` turns a URL,
+or an archived HAR in replay mode, into a capture bundle (see below). Warning-list enrichment
+and the basic interface are available below; broader enrichment remains to be built.
 
 Pattern discovery (architecture §6) includes a versioned library with stable IDs and
 merge/split history, embedding and clustering, pattern induction and matching, novelty
@@ -30,6 +31,7 @@ Needs [uv](https://docs.astral.sh/uv/).
 
 ```bash
 uv sync
+uv run playwright install chromium   # once, for ftf capture
 uv run ftf ingest testing_sample      # a folder of incident folders, or one incident folder
 uv run ftf enrich                     # DNS and RDAP lookups again (cached; also part of run)
 uv run ftf views
@@ -82,12 +84,36 @@ That check covers report completeness on the real sample with model/network acce
 source resolution, missing/incompatible inputs, ignored matches, reversed object order,
 and the Streamlit report view. The real-sample check skips if the sample is absent.
 
+## Live capture
+
+```bash
+uv run ftf capture https://example.com --ingest               # live: capture, ingest, run
+uv run ftf capture --replay testing_sample/2/healthlinkq.pro.har --ingest   # dead domain, from its HAR
+uv run ftf capture https://example.com --out some/folder      # bundle only, ingest later
+```
+
+A capture writes `<incident>/bundle/` with `dom.html` (rendered after scrolling),
+`page.har` (bodies embedded), `screenshot.png` (full page), `resources/` (bodies by SHA-256)
+and `manifest.json`: requested and final URL, capture time, mode, egress, user agent, the
+ordered redirect trace (`http`, `meta_refresh`, `script`, `history`, each citing its HAR
+entry), the final response's IP, TLS certificate and headers, failed and blocked requests.
+Default location: `$FTF_DATA_DIR/captures/<host>-<UTC time>/`.
+
+Each capture uses a fresh browser context with service workers blocked and downloads
+refused; forms are never submitted (blocked in the page, and any non-GET navigation is
+aborted) and nothing is typed or clicked. A dead or unreachable domain still produces a
+bundle with `status` (`dns_failed`, `connection_failed`, `tls_failed`, `timeout`,
+`http_error`) and becomes a view whose page layers are not observable, while DNS and RDAP
+still run. Replay serves the browser only from the archive (`not_in_archive` when it lacks
+the page); the archive is kept as `page.har` and its own time stays the capture time.
+
 ## Run in Docker
 
 ```bash
 cp .env.example .env                  # keys are only needed for the model-based layers
 docker compose up --build             # interface on http://localhost:8501
 docker compose run --rm app ftf ingest /sample
+docker compose run --rm app ftf capture https://example.com --ingest   # Chromium is in the image
 ```
 
 `FTF_SAMPLE_DIR` chooses which host folder is mounted at `/sample` (default `./testing_sample`).

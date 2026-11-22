@@ -45,6 +45,10 @@ def registrable_domain(host: str) -> str:
     return f"{parts.domain}.{parts.suffix}" if parts.domain and parts.suffix else host
 
 
+def _manifest_file(view: View) -> str | None:
+    return next((a for a in view.attachments if Path(a).name == "manifest.json"), view.primary)
+
+
 def landing_url(view: View) -> tuple[str, Source, bool] | None:
     """The page's URL in order of trust: (url, source, is_page_url).
 
@@ -53,6 +57,8 @@ def landing_url(view: View) -> tuple[str, Source, bool] | None:
     """
     choices = (
         ("saved_from", view.primary, "html:comment[saved from url]", True),
+        # A live capture lands where the redirects end; the requested URL is a hop.
+        ("final_url", _manifest_file(view), "manifest.json:final_url", True),
         ("manifest_url", view.primary, "manifest.json:page_url", True),
         ("har_document", view.har, "har:main document request.url", True),
         ("har_first_party", view.har, "har:busiest first-party host", False),
