@@ -226,7 +226,7 @@ def test_match_filter_compare_close_and_previous_mode(tmp_path, monkeypatch):
     assert app.session_state["library_filter"] == {"matches_of": "a"}
     assert any(c.value == "Playbook: not run" for c in app.caption)
     assert not any(e.label == "What do these tiers mean?" for e in app.expander)
-    identity_badge = next(m for m in app.markdown if '>identity</span>' in m.value)
+    identity_badge = next(m for m in app.markdown if ">identity</span>" in m.value)
     assert 'class="ftf-tier" title="' in identity_badge.value
     assert "tracking pixel ID" in identity_badge.value and "same campaign" in identity_badge.value
     assert not identity_badge.proto.help

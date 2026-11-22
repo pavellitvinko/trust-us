@@ -222,7 +222,9 @@ def test_sample_direct_matches_and_muted_screenshots(sample_library):
     health2, health3 = page("2", "healthlinkq.pro"), page("3", "healthlinkq.pro")
     assert next(m for m in health2.matches if m.view_id == health3.view_id).verdict == "Duplicate"
     kit = page("48", "novumfy.com")
-    assert any(lib.get(m.view_id).case_id == "61" and m.verdict == "Shared kit" for m in kit.matches)
+    assert any(
+        lib.get(m.view_id).case_id == "61" and m.verdict == "Shared kit" for m in kit.matches
+    )
     assert any(i.kind is ViewKind.IMAGE and not i.matches for i in lib.items())
 
 

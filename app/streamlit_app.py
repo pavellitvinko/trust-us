@@ -784,11 +784,7 @@ def match_table(library: Library, anchor: Item, selected: str, kinds: set[str]) 
     item_row(anchor, True, anchor.view_id == selected)
     if not library.playbook_run:
         st.caption("Playbook: not run")
-    rows = [
-        m
-        for m in filter_matches(anchor)
-        if KIND_NAMES[library.get(m.view_id).kind] in kinds
-    ]
+    rows = [m for m in filter_matches(anchor) if KIND_NAMES[library.get(m.view_id).kind] in kinds]
     st.caption("Scroll sideways for coverage, clues and Compare.")
     st.html(
         """<style>
@@ -836,7 +832,7 @@ def match_table(library: Library, anchor: Item, selected: str, kinds: set[str]) 
             for tier in match.tiers:
                 cols[3].markdown(
                     f'<span class="ftf-tier" title="{html.escape(TIER_HINTS[tier], quote=True)}">'
-                    f'{html.escape(tier)}</span>',
+                    f"{html.escape(tier)}</span>",
                     unsafe_allow_html=True,
                 )
             cols[4].markdown(
