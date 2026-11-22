@@ -210,6 +210,7 @@ class Library:
     campaigns: dict[str, Campaign] = field(default_factory=dict)  # linked ones only
     kits: dict[str, Kit] = field(default_factory=dict)
     ads: AdLinks = field(default_factory=AdLinks)  # same post, shared advertiser or account
+    view_cache: dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
 
     def items(self) -> list[Item]:
         return [i for c in self.cases for i in c.items]
