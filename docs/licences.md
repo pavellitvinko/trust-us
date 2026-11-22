@@ -22,6 +22,19 @@ current terms and limits before use.
 The Docker image also installs `ffmpeg` from Ubuntu packages and uses the Playwright base image
 with Chromium. Their licences depend on the build and should be recorded from the final image.
 
+## Models and external services in this prototype
+
+Because of the limited time of the hackathon, this prototype uses the services below. The target
+application will run local models instead, including a local face recognition model.
+
+| Service | Default model setting | Used for | Terms |
+| --- | --- | --- | --- |
+| OpenAI API | `FTF_OPENAI_MODEL=gpt-6-luna` | reading, patterns, expectation profiles, narrative | <https://openai.com/policies/> |
+| Google Gemini API | `FTF_EMBEDDING_MODEL=gemini-embedding-2`, `FTF_VIDEO_MODEL=gemini-4-hydrogen` | embeddings, video | <https://ai.google.dev/gemini-api/terms> |
+| CompreFace with FaceNet | `exadel/compreface:1.2.0-facenet` | face matching against a closed reference list | see below |
+
+Both APIs are used with the operator's own keys. Rate limits and data-use terms depend on the account.
+
 ## Face matching
 
 | Component | Licence | Note |
