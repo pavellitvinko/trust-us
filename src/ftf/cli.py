@@ -704,6 +704,12 @@ def cmd_ablate(args) -> None:
         print(format_runs(ablate(), "Layer ablation on the fixtures (one layer off at a time)"))
 
 
+def cmd_serve(args) -> None:
+    import uvicorn
+
+    uvicorn.run("ftf.web.app:create_app", factory=True, host=args.host, port=args.port)
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="ftf", description="Follow the Fake")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -902,6 +908,11 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--sample", help="run on this folder of real incident folders, model off")
     p.set_defaults(func=cmd_ablate)
 
+    p = sub.add_parser("serve", help="the web interface (API and screens) on one port")
+    p.add_argument("--host", default="127.0.0.1", help="address to listen on (0.0.0.0 in Docker)")
+    p.add_argument("--port", type=int, default=8000)
+    p.set_defaults(func=cmd_serve)
+
     p = sub.add_parser("eval", help="agreement with the reference pairs (docs/baseline-report.md)")
     p.add_argument("--fixtures", action="store_true", help="evaluate the fixtures in memory")
     p.add_argument("--all", action="store_true", help="also list the agreed pairs")
@@ -909,7 +920,7 @@ def main(argv: list[str] | None = None) -> None:
 
     args = parser.parse_args(argv)
     # Evaluation measures the shipped method, so analyst edits must not change its results.
-    if args.command not in ("eval", "loio", "ablate", "validate", "load-fixtures", "demo"):
+    if args.command not in ("eval", "loio", "ablate", "validate", "load-fixtures", "demo", "serve"):
         from .method_settings import apply_saved
 
         apply_saved()

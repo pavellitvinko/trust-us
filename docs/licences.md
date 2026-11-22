@@ -18,6 +18,20 @@ current terms and limits before use.
 | scikit-learn | 1.9.1 | BSD-3-Clause |
 | dnspython | 2.9.2 | ISC |
 | playwright | 1.65.2 | Apache-2.0 |
+| fastapi | 0.165.0 | MIT |
+| python-multipart | 0.0.34 | Apache-2.0 |
+
+`ftf serve` runs FastAPI on uvicorn 0.54.0 (BSD-3-Clause), already installed with Streamlit.
+
+## Web screens (`frontend/package-lock.json`)
+
+| Library | Version | Licence |
+| --- | --- | --- |
+| react, react-dom | 19.3.1 | MIT |
+| react-router-dom | 7.18.6 | MIT |
+| vite (build only) | 8.3.8 | MIT |
+| @vitejs/plugin-react (build only) | 6.3.0 | MIT |
+| typescript (build only) | 7.0.2 | Apache-2.0 |
 
 The Docker image also installs `ffmpeg` from Ubuntu packages and uses the Playwright base image
 with Chromium. Their licences depend on the build and should be recorded from the final image.

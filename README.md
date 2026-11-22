@@ -66,7 +66,7 @@ Needs [uv](https://docs.astral.sh/uv/).
 
 ```bash
 uv sync
-uv run playwright install chromium   # once, for ftf capture
+uv run playwright install chromium   # once, for ftf capture and page previews
 uv run ftf ingest testing_sample      # a folder of incident folders, or one incident folder
 uv run ftf enrich                     # DNS, RDAP and crt.sh lookups again (cached; also part of run)
 uv run ftf views
@@ -87,9 +87,37 @@ uv run ftf ablate [--degrade] --sample testing_sample   # the same on real files
 uv run ftf loio --sample testing_sample   # leave-one-out on real files, weights frozen
 uv run ftf validate testing_sample --out docs/method-results-real-sample.md   # the whole real-file validation
 uv run ftf validate testing_sample --model gateway --out docs/method-results-real-sample-gateway.md   # the same on real Gemini embeddings; needs GEMINI_API_KEY
-uv run streamlit run app/streamlit_app.py
 uv run pytest
 ```
+
+### The web interface
+
+The screens are a React app in `frontend/`, served by a FastAPI app over the same store
+(`src/ftf/web/`). Build the screens once (needs Node 20+), then one command serves both:
+
+```bash
+(cd frontend && npm ci && npm run build)
+uv run ftf serve                      # http://127.0.0.1:8000
+```
+
+While working on the screens, run `uv run ftf serve` and `(cd frontend && npm run dev)` side by
+side and open http://localhost:5173: Vite reloads on every change and forwards `/api` to the server.
+
+- **Add material**: paste links, drop files or a whole folder (it keeps its structure; a folder of
+  folders becomes one case each). Analysis runs in the background and the Library shows its progress.
+  Links are captured like `ftf capture`, in a separate browser process that reaches public addresses
+  only: a link to localhost or a private network is refused (`FTF_UI_ALLOW_PRIVATE=1` allows it in a lab).
+- **Library**: every item with a picture, as a table or as a map of linked items. Saved pages get
+  their picture by being rendered offline in Chromium (JavaScript off, only files from the page's
+  own folder), kept in `$FTF_DATA_DIR/previews`. Case, campaign, kit and duplicate are explained on
+  screen.
+- **Item page**: warning signs in plain words, where the link leads (as pictures), linked items as
+  picture pairs with what they share, and the full pair report.
+- **How it works**: what the groups and links mean, and the report downloads.
+
+The API is described at http://127.0.0.1:8000/api/docs. The method weights editor, pattern-library
+edits and the graph of every stored relation are still in the classic Streamlit screens:
+`uv run streamlit run app/streamlit_app.py`.
 
 With the organiser sample in `testing_sample/`, run the deterministic checkpoint with:
 
@@ -109,8 +137,7 @@ or incompatible layer. Observation references include the file, locator, extract
 version. Derived text/DOM comparisons include exact input overlaps; Markdown shows labelled
 examples and JSON retains the complete sets. Long source text is a labelled excerpt.
 Reports use stored fingerprints and never call a model or modify the database.
-The same report is available under **Full comparison report** in Streamlit with JSON and
-Markdown downloads. Its separate acceptance check is:
+The same report opens under **Compare in full** on an item page, with JSON and Markdown downloads. Its separate acceptance check is:
 
 ```bash
 uv run pytest tests/test_reporting.py -q
@@ -258,7 +285,7 @@ model calls and no DNS, RDAP or crt.sh. It does not change your stored data and 
 
 ```bash
 cp .env.example .env                  # keys are only needed for the model-based layers
-docker compose up --build             # interface on http://localhost:8501
+docker compose up --build             # interface on http://localhost:8000
 docker compose run --rm app ftf ingest /sample
 docker compose run --rm app ftf capture https://example.com --ingest   # Chromium is in the image
 ```

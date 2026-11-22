@@ -657,24 +657,30 @@ def test_replay_with_a_url_needs_no_document_in_the_archive(tmp_path):
 
 @browser
 def test_interface_captures_a_live_url(tmp_path, monkeypatch, site):
-    """Add material → URL in the Streamlit app: a live capture becomes a stored view."""
-    from streamlit.testing.v1 import AppTest
+    """Add material → link in the web interface: the background worker captures it through
+    the guarded child process (HAC-45), and the capture becomes a stored view."""
+    import time
+
+    from fastapi.testclient import TestClient
 
     from ftf.store import Store
+    from ftf.web.app import create_app
 
     monkeypatch.setenv("FTF_EMBEDDER", "fake")
+    monkeypatch.setenv("FTF_ENRICH", "off")
     monkeypatch.setenv("FTF_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("FTF_WEB_DIST", str(tmp_path / "no-dist"))
     monkeypatch.setenv("FTF_UI_ALLOW_PRIVATE", "1")  # the test site is on 127.0.0.1
-    root = Path(__file__).resolve().parents[1]
-    app = AppTest.from_file(str(root / "app/streamlit_app.py"), default_timeout=120).run()
-    assert not app.exception
-    next(t for t in app.text_input if t.label == "Or a URL to capture").input(f"{site}/r")
-    next(c for c in app.checkbox if c.label.startswith("Look up")).uncheck()
-    next(b for b in app.button if b.label == "Analyse material").click().run()
-    assert not app.exception, app.exception
-    assert not app.error, [e.value for e in app.error]
-    assert any("Capture (live): ok" in i.value and "/final" in i.value for i in app.info)
-    assert any("Added 1 views" in s.value for s in app.success)
+    client = TestClient(create_app())
+    job = client.post("/api/material", data={"links": [f"{site}/r"]})
+    assert job.status_code == 200, job.text
+    for _ in range(240):
+        library = client.get("/api/library").json()
+        if not library["busy"]:
+            break
+        time.sleep(0.5)
+    assert not library["busy"] and not library["jobs"], library["jobs"]  # finished, not failed
     store = Store(tmp_path / "data" / "ftf.sqlite")
     (view,) = [v for v in store.views() if v.meta.get("capture_status") == "ok"]
-    assert view.incident_id.startswith("127.0.0.1-")
+    assert "/final" in (view.meta.get("final_url") or "")
+    assert any(i["id"] == view.view_id for i in library["items"])
