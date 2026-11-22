@@ -373,6 +373,14 @@ def ground_kind(
             "checked": present + absent,
             "false_alarm_rate": rate,
         }
+    if all(d["decision"] == "unverified" for d in decisions.values()):
+        # The pages were read, but none could confirm or refute any element of this profile.
+        return {
+            "status": "inconclusive",
+            "profile": profile_hash,
+            "pages": summary_pages,
+            "elements": decisions,
+        }
     retained = [k for k, d in decisions.items() if d["decision"] in ("kept", "downgraded")]
     for row, page in zip(summary_pages, results, strict=True):
         if page["status"] != "checked":

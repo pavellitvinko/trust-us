@@ -280,3 +280,12 @@ def test_regrade_removes_dropped_and_marks_weak(store):
     rows = {o.value: o for o in store.observations("v") if o.namespace == ex.ELEMENT_NAMESPACE}
     assert set(rows) == {"controller"} and rows["controller"].confidence == 0.5
     assert ex.regrade_stored(Context(store), grounding) == 0
+
+
+def test_pages_that_decide_nothing_are_inconclusive(tmp_path, settings, monkeypatch):
+    monkeypatch.setattr(gr, "_profile", lambda *a, **k: (ELEMENTS, "hash", None))
+    urls = ("https://a.pl/1", "https://b.pl/2")
+    monkeypatch.setattr(gr, "_check_page", lambda url, *a: page(url))
+    result = gr.ground_kind("k", urls, tmp_path, settings=settings)
+    assert result["status"] == "inconclusive"
+    assert gr.apply_grounding("k", ELEMENTS, "hash", {"k": result}) == (ELEMENTS, {})
