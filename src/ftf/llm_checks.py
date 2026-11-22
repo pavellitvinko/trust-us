@@ -1,4 +1,8 @@
-"""Run the library's model checks in dependency order, preserving stage summaries."""
+"""Check definitions and the legacy synchronous runner.
+
+The web app schedules progressive work through scheduler.Scheduler. The synchronous runner
+is retained for callers that explicitly need the original stage-by-stage interface.
+"""
 
 from collections import Counter
 from collections.abc import Callable
@@ -10,14 +14,18 @@ from .intake import ANALYSIS_LOCK, IntakeError
 from .store import Store
 
 CHECK_STEPS = (
+    ("local", "Collect local clues", "Read identifiers, text and file identity", False, True),
     ("image", "Read images", "Text, people, brands and visual claims", True, True),
     ("page", "Read pages", "Page identity, claims and offers", True, True),
     ("video", "Read videos", "Speech, scenes and on-screen text", True, True),
-    ("expectations", "Check expected elements", "Compare pages with their expected elements", True, True),
+    ("expectations", "Check expected elements", "Compare pages with shared kind profiles", True, False),
     ("techniques", "Find persuasion techniques", "Evidence-backed technique cards", True, True),
     ("warnings", "Check warning lists", "Check local snapshots using the extracted names", True, False),
     ("rebuild", "Refresh campaigns", "Prepare current groups for pattern discovery", False, False),
     ("patterns", "Discover and match patterns", "Embed cards, discover patterns and match material", True, False),
+    ("enrich", "Refresh domain information", "Live DNS, registration and certificate checks", True, True),
+    ("semantic", "Build semantic fingerprints", "Compare meaning using embeddings", True, False),
+    ("previews", "Prepare pictures", "Render saved pages in the background", True, False),
     ("finalize", "Update library", "Rebuild links from the available results", False, False),
 )
 
@@ -25,18 +33,15 @@ CHECK_STEPS = (
 def new_steps() -> list[dict]:
     return [{"id": key, "label": label, "description": description,
              "skippable": skippable, "itemwise": itemwise, "status": "pending",
+             "phase": "on_demand" if key == "video" else "core" if key in ("local", "image", "page", "warnings", "rebuild") else "additional",
              "done": 0, "total": None, "current": None, "skipRequested": False}
             for key, label, description, skippable, itemwise in CHECK_STEPS]
 
 
 def require_model_keys() -> None:
     settings = get_settings()
-    missing = [name for name, value in (
-        ("OPENAI_API_KEY", settings.openai_api_key),
-        ("GEMINI_API_KEY", settings.gemini_api_key),
-    ) if not value]
-    if missing:
-        raise IntakeError(f"Set {' and '.join(missing)} in .env to run all LLM checks.")
+    if not settings.openai_api_key and not settings.gemini_api_key:
+        raise IntakeError("Set OPENAI_API_KEY for page/image reads or GEMINI_API_KEY for embeddings.")
 
 
 def run_llm_checks(
@@ -184,6 +189,10 @@ def result_issues(results: dict[str, Any]) -> list[str]:
             issues.append(f"{stage}: {summary['failures']}")
         if summary.get("errors"):
             issues.append(f"{stage}: {summary['errors']}")
+        if summary.get("unavailable") and not any(summary.get(k) for k in ("reason", "not_observable", "kept", "errors", "failures")):
+            issues.append(f"{stage}: {summary['unavailable']} checks unavailable")
+        if summary.get("deferred"):
+            issues.append(f"{stage}: deferred checks remain incomplete")
         if isinstance(summary.get("matching"), dict):
             issues.extend(result_issues({"pattern matching": summary["matching"]}))
     return issues

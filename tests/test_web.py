@@ -28,7 +28,7 @@ def client(tmp_path, monkeypatch):
     store.close()
     monkeypatch.setenv("FTF_DATA_DIR", str(data))
     monkeypatch.setenv("FTF_WEB_DIST", str(tmp_path / "no-dist"))
-    monkeypatch.setattr("ftf.web.app.render_missing", lambda store, data_dir: 0)  # no browser
+    monkeypatch.setattr("ftf.previews.render_missing", lambda store, data_dir: 0)  # no browser
     from ftf.web.app import create_app
 
     with TestClient(create_app()) as c:
@@ -286,6 +286,69 @@ def test_llm_checks_require_keys_without_queueing(client, monkeypatch):
     assert response.status_code == 409
     assert "OPENAI_API_KEY" in response.json()["detail"]
     assert client.get("/api/library").json()["llmRun"] is None
+
+
+def test_openai_only_can_schedule_library_processing(client, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("GEMINI_API_KEY", "")
+    monkeypatch.setattr("ftf.scheduler.Scheduler.start", lambda self: None)
+    response = client.post("/api/library/llm-checks")
+    assert response.status_code == 202
+    data = client.get("/api/library").json()
+    assert data["llmRun"]["core"]["total"] == 2
+    assert all(row["processing"]["state"] == "queued" for row in data["items"])
+
+
+def test_local_only_selection_does_not_require_model_keys(client, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "")
+    monkeypatch.setenv("GEMINI_API_KEY", "")
+    monkeypatch.setattr("ftf.scheduler.Scheduler.start", lambda self: None)
+    skipped = ["image", "page", "expectations", "techniques", "patterns", "semantic"]
+    response = client.post("/api/library/llm-checks", json=skipped)
+    assert response.status_code == 202
+    from ftf.config import get_settings
+    from ftf.jobs import worker_for
+    settings = get_settings()
+    worker = worker_for(settings.db_path, settings.data_dir)
+    assert all(t["state"] == "skipped" for t in worker.scheduler.tasks.values()
+               if t["stage"] in (*skipped, "match"))
+
+
+def test_item_check_endpoint_validates_scope_and_deduplicates(client, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr("ftf.scheduler.Scheduler.start", lambda self: None)
+    assert client.post("/api/items/missing/checks", json=["image"]).status_code == 404
+    assert client.post("/api/items/7:shot/checks", json=["expectations"]).status_code == 409
+    assert client.post("/api/items/7:shot/checks", json=[]).status_code == 409
+    first = client.post("/api/items/7:shot/checks", json=["image"])
+    assert first.status_code == 202
+    assert client.post("/api/items/7:shot/checks", json=["image"]).json()["id"] == first.json()["id"]
+    assert client.get("/api/items/7:shot").json()["processing"]["checks"][0]["state"] == "queued"
+    assert all(c["state"] == ("not_ready" if c["id"] == "patterns" else "not_run")
+               for c in client.get("/api/items/7:page").json()["processing"]["checks"])
+
+
+def test_video_analysis_endpoint_is_explicit_idempotent_and_cancellable(client, monkeypatch):
+    from ftf.config import get_settings
+    from ftf.jobs import worker_for
+
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr("ftf.scheduler.Scheduler.start", lambda self: None)
+    settings = get_settings()
+    store = Store(settings.db_path)
+    store.put_incident(Incident(incident_id="video", root=str(settings.data_dir)), [], [
+        View(view_id="video", incident_id="video", kind=ViewKind.VIDEO, label="Video", primary="clip.mp4"),
+    ])
+    store.close()
+    assert client.post("/api/items/missing/video-analysis").status_code == 404
+    assert client.post("/api/items/7:shot/video-analysis").status_code == 409
+    first = client.post("/api/items/video/video-analysis")
+    assert first.status_code == 202
+    assert client.post("/api/items/video/video-analysis").json()["id"] == first.json()["id"]
+    assert client.get("/api/items/video").json()["videoAnalysis"]["id"] == first.json()["id"]
+    assert client.post("/api/items/video/video-analysis/cancel").json()["status"] == "done"
+    assert client.post("/api/items/video/video-analysis/cancel").status_code == 409
+    worker_for(settings.db_path, settings.data_dir).scheduler.close()
 
 
 def test_llm_worker_reports_partial_coverage_and_survives_restart(tmp_path, monkeypatch):

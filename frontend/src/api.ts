@@ -2,12 +2,14 @@
 
 export type LinkKind = "campaign" | "kit" | "duplicate" | "possible";
 
-export type CheckState = "not_run" | "queued" | "running" | "complete" | "partial" | "unavailable" | "retained" | "skipped" | "failed";
+export type CheckState = "not_run" | "queued" | "running" | "complete" | "partial" | "unavailable" | "retained" | "skipped" | "failed" | "deferred" | "on_demand" | "not_ready" | "not_applicable";
 export interface ItemCheck {
+  canRun?: boolean;
   id: string; label: string; state: CheckState; status: string; message: string;
   hasResult: boolean; updatedAt: string | null; runId: string | null; observations: number;
 }
 export interface ItemProcessing {
+  canRun?: boolean;
   state: CheckState; status: string; complete: number; total: number; current: string | null;
   checks: ItemCheck[];
 }
@@ -54,7 +56,7 @@ export interface MapEdge {
 }
 
 export interface Job {
-  kind?: "llm" | "material";
+  kind?: "llm" | "material" | "video" | "item";
   id: string;
   names: string[];
   status: "queued" | "running" | "done" | "failed";
@@ -63,12 +65,15 @@ export interface Job {
 }
 
 export interface ProcessingStep {
+  phase?: "core" | "additional" | "on_demand";
   id: string; label: string; description: string; skippable: boolean; itemwise: boolean;
   status: "pending" | "running" | "done" | "skipped" | "failed";
   done: number; total: number | null; current: string | null; skipRequested: boolean;
 }
 
 export interface LlmRun {
+  core?: { status: string; total: number; done: number; startedAt: string; finishedAt: string | null;
+    targetSeconds: number; targetMet: boolean | null; elapsedSeconds?: number };
   id: string; status: Job["status"]; stage: string; error: string | null;
   results: Record<string, unknown>; issues: string[]; createdAt: string; finishedAt: string | null;
   steps: ProcessingStep[];
@@ -103,6 +108,7 @@ export interface MatchInfo extends Brief {
 }
 
 export interface ItemData extends Row {
+  videoAnalysis?: (Job & { steps: ProcessingStep[]; results: Record<string, unknown>; issues: string[] }) | null;
   busy: boolean;
   groups: { kind: "campaign" | "kit"; id: string; name: string; reason: string; title: string }[];
   warningSigns: string[];
@@ -277,6 +283,11 @@ export const api = {
   campaign: (id: string) => get<GroupDetail>(`/api/campaigns/${encodeURIComponent(id)}`),
   kit: (id: string) => get<GroupDetail>(`/api/kits/${encodeURIComponent(id)}`),
   item: (id: string) => get<ItemData>(`/api/items/${encodeURIComponent(id)}`),
+  runItemChecks: (id: string, checks?: string[]) => get<Job>(`${itemApi(id)}/checks`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(checks ?? null),
+  }),
+  analyzeVideo: (id: string) => get<Job>(`${itemApi(id)}/video-analysis`, { method: "POST" }),
+  cancelVideoAnalysis: (id: string) => get<Job>(`${itemApi(id)}/video-analysis/cancel`, { method: "POST" }),
   compare: (a: string, b: string) =>
     get<ComparisonData>(`/api/compare/${encodeURIComponent(a)}/${encodeURIComponent(b)}?format=view`),
   evidence: (id: string) => get<{ rows: EvidenceRow[] }>(`${itemApi(id)}/evidence`),

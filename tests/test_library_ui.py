@@ -86,7 +86,8 @@ def test_links_without_files_become_one_named_case(tmp_path, monkeypatch):
     assert job.status == "done", job.error
     assert len(job.incidents) == 1 and job.incidents[0].startswith("ad.example-")
     assert job.incidents[0] in read_meta(data)["cases"]
-    assert worker.generation == 1
+    assert worker.generation >= 1
+    worker.scheduler.close()
 
 
 def test_a_failed_capture_is_reported_not_raised(tmp_path, monkeypatch):

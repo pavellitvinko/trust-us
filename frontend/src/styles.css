@@ -270,7 +270,7 @@ pre.report { white-space: pre-wrap; font-size: 12px; background: #fafaf7; border
 .check-not_run, .check-queued { color: var(--text-2); }
 .check-running { color: var(--accent); }
 .check-complete { color: #366a40; }
-.check-partial, .check-unavailable, .check-retained, .check-skipped { color: #85663b; }
+.check-partial, .check-unavailable, .check-retained, .check-skipped, .check-deferred, .check-on_demand { color: #85663b; }
 .check-failed { color: #a33e33; }
 .progress-ring { display: inline-grid; position: relative; place-items: center; flex-shrink: 0; vertical-align: middle; }
 .progress-ring svg { width: 100%; height: 100%; transform: rotate(-90deg); overflow: visible; }

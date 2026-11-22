@@ -11,8 +11,13 @@ import hashlib
 import json
 import logging
 import os
+import threading
+import time
 import uuid
 from collections.abc import Callable
+from concurrent.futures import Future
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -24,6 +29,31 @@ from ..contracts import State
 log = logging.getLogger(__name__)
 
 _MISS = object()
+_flights: dict[str, Future] = {}
+_flights_lock = threading.Lock()
+_budget: ContextVar[tuple[float, dict] | None] = ContextVar("model_budget", default=None)
+
+
+@contextmanager
+def request_budget(seconds: float, metrics: dict):
+    token = _budget.set((time.monotonic() + seconds, metrics))
+    try:
+        yield
+    finally:
+        _budget.reset(token)
+
+
+def remaining_time(default: float = 60.0) -> float:
+    budget = _budget.get()
+    remaining = min(default, budget[0] - time.monotonic()) if budget else default
+    if remaining <= 0:
+        raise TransientModelError("timeout")
+    return remaining
+
+
+def record_metric(name: str, amount: float = 1) -> None:
+    if budget := _budget.get():
+        budget[1][name] = budget[1].get(name, 0) + amount
 
 
 @dataclass(frozen=True)
@@ -126,10 +156,33 @@ def cached_call(
     path = Path(cache_dir) / task / f"{key}.json"
     cached = _read_cache(path)
     if cached is not _MISS:
+        record_metric("cacheHits")
         return cached
-    result = compute()
-    _write_cache(path, result)
-    return result
+    flight_key = str(path.resolve())
+    with _flights_lock:
+        owner = flight_key not in _flights
+        flight = _flights.setdefault(flight_key, Future())
+    if not owner:
+        record_metric("sharedRequests")
+        try:
+            return flight.result(timeout=remaining_time(900))
+        except TimeoutError as exc:
+            raise TransientModelError("timeout") from exc
+    started = time.monotonic()
+    try:
+        remaining_time(900)
+        record_metric("providerCalls")
+        result = compute()
+        _write_cache(path, result)
+        flight.set_result(result)
+        return result
+    except BaseException as exc:
+        flight.set_exception(exc)
+        raise
+    finally:
+        record_metric("providerSeconds", time.monotonic() - started)
+        with _flights_lock:
+            _flights.pop(flight_key, None)
 
 
 def guarded_call[T](
@@ -145,6 +198,7 @@ def guarded_call[T](
     try:
         envelope = cached_call(cache_dir, task, prompt_version, model, payload, compute)
     except TransientModelError as exc:
+        record_metric(f"failures.{exc.reason}")
         return ModelResult.not_observable(exc.reason)
     if not isinstance(envelope, dict):
         return ModelResult.not_observable("schema")

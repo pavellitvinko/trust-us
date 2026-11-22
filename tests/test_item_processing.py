@@ -27,6 +27,20 @@ def test_zero_findings_is_a_completed_run_and_failed_rerun_keeps_old_results():
     assert retained["state"] == "retained" and retained["hasResult"]
 
 
+def test_warning_sources_without_applicable_input_do_not_mark_successful_sources_failed():
+    good = observation("enrich.warning_lists", State.ABSENT).model_copy(update={"namespace": "warning.knf"})
+    no_domain = observation("enrich.warning_lists", State.NOT_OBSERVABLE).model_copy(
+        update={"value": {"message": "no supported input"}, "namespace": "warning.cert"})
+    assert check_result("warnings", [good, no_domain])["state"] == "complete"
+    assert check_result("warnings", [no_domain])["state"] == "not_applicable"
+
+
+def test_missing_pattern_library_is_a_disabled_prerequisite_not_a_failed_attempt():
+    result = item_processing(view(), [], {"patterns": {"state": "retained", "hasResult": True}}, patterns_available=False)
+    pattern = next(c for c in result["checks"] if c["id"] == "patterns")
+    assert pattern["state"] == "not_ready" and not pattern["canRun"]
+
+
 def test_partial_observation_coverage_does_not_claim_complete():
     rows = [observation(), observation(state=State.NOT_OBSERVABLE)]
     check = check_result("image", rows)

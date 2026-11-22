@@ -28,10 +28,13 @@ export default function ItemPage() {
   const meta = useMeta();
   const [item, setItem] = useState<ItemData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [videoPending, setVideoPending] = useState(false);
+  const [videoError, setVideoError] = useState<string | null>(null);
+  const [revision, setRevision] = useState(0);
   useEffect(() => {
     let alive = true;
     let timer: number | undefined;
-    setItem(null);
+    setItem((current) => current?.id === id ? current : null);
     setError(null);
     function load() {
       api.item(id).then((data) => {
@@ -46,7 +49,7 @@ export default function ItemPage() {
     load();
     if (!window.location.hash) window.scrollTo(0, 0);
     return () => { alive = false; window.clearTimeout(timer); };
-  }, [id]);
+  }, [id, revision]);
   useEffect(() => {
     if (item?.id === id && window.location.hash === "#checks") {
       document.getElementById("checks")?.scrollIntoView({ block: "start" });
@@ -82,6 +85,22 @@ export default function ItemPage() {
         </div>
         <div>
           <Band kind="item" text={`One ${item.type === "Image" ? "picture" : item.type.toLowerCase()}`} />
+          {item.type === "Video" && <section className="box video-analysis-controls" aria-label="Video analysis">
+            <strong>Video analysis</strong>
+            <p className="small">The automatic pass uses file hashes, metadata and available text. Full speech, scene and technique checks run on demand.</p>
+            {item.videoAnalysis && <p className="small" role="status">{item.videoAnalysis.status === "running" || item.videoAnalysis.status === "queued"
+              ? item.videoAnalysis.stage : item.videoAnalysis.status === "failed" ? item.videoAnalysis.error : "Analysis finished. See check coverage below."}</p>}
+            <button className="btn primary" disabled={videoPending} onClick={async () => {
+              setVideoPending(true); setVideoError(null);
+              try {
+                if (item.videoAnalysis && ["queued", "running"].includes(item.videoAnalysis.status)) await api.cancelVideoAnalysis(id);
+                else await api.analyzeVideo(id);
+                setRevision((r) => r + 1);
+              } catch (e) { setVideoError(e instanceof Error ? e.message : String(e)); }
+              finally { setVideoPending(false); }
+            }}>{videoPending ? "Updating…" : item.videoAnalysis && ["queued", "running"].includes(item.videoAnalysis.status) ? "Cancel analysis" : "Analyze video"}</button>
+            {videoError && <p className="error" role="alert">{videoError}</p>}
+          </section>}
           <h1 style={{ fontSize: 20, lineHeight: 1.3 }}>{item.title}</h1>
           <div className="small" style={{ margin: "6px 0 6px" }}>
             {item.type}
@@ -141,7 +160,7 @@ export default function ItemPage() {
         </div>
       </div>
 
-      <ItemChecks processing={item.processing} />
+      <ItemChecks processing={item.processing} id={item.id} refresh={() => setRevision((r) => r + 1)} />
 
       <h2>Where the link leads</h2>
       <Path item={item} />
