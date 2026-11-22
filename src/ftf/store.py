@@ -212,3 +212,11 @@ class Store:
     def relations(self) -> list[Relation]:
         rows = self.db.execute("SELECT body FROM relations ORDER BY view_a, view_b")
         return [Relation.model_validate_json(r[0]) for r in rows]
+
+    def get_relation(self, view_a: str, view_b: str) -> Relation | None:
+        """The stored relation for one pair, in either order; None when the pair was never fused."""
+        a, b = ordered(view_a, view_b)
+        row = self.db.execute(
+            "SELECT body FROM relations WHERE view_a = ? AND view_b = ?", (a, b)
+        ).fetchone()
+        return Relation.model_validate_json(row[0]) if row else None

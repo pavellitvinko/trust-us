@@ -206,12 +206,15 @@ def _disjoint_store() -> Store:
 
 
 def test_well_observed_view_sharing_nothing_is_novel_not_insufficient():
+    """No candidate at all, yet the pages carry identity layers: fusion can call them unrelated,
+    so the view is novel (one separable comparison is enough), not insufficient."""
     s = _disjoint_store()
     prepare(s)
     assert candidate_views(s, "x:page") == set()  # the reviewer's scenario: no candidate at all
     a = assign(s, "x:page", prepared=True)
     assert a.outcome is Outcome.NOVEL, a.reasons
     assert any("comparable with" in r for r in a.reasons)
+    assert any("identity tier included" in r for r in a.reasons)
     weights.reset()
     s.close()
 
@@ -507,16 +510,5 @@ def test_differing_screenshots_are_insufficient_not_novel(tmp_path):
     a = assign(s, ids[1], g, prepared=True)
     assert a.outcome is Outcome.INSUFFICIENT, a.reasons
     assert any("identity tier was not comparable" in x for x in a.reasons)
-    weights.reset()
-    s.close()
-
-
-def test_novel_still_needs_only_one_separable_comparison():
-    """The disjoint-set-layer scenario keeps its outcome: those pages carry identity layers,
-    so fusion can call them unrelated and the view is novel."""
-    s = _disjoint_store()
-    prepare(s)
-    a = assign(s, "x:page", prepared=True)
-    assert a.outcome is Outcome.NOVEL and any("identity tier included" in r for r in a.reasons)
     weights.reset()
     s.close()

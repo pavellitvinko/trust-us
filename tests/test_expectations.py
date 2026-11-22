@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import pytest
-from datetime import datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from src.ftf.expectations.library import (
+import pytest
+
+from ftf.expectations.library import (
     ElementBasis,
     ElementChecked,
     ElementProfile,
@@ -18,19 +18,12 @@ from src.ftf.expectations.library import (
     PageKind,
     TypicalWording,
 )
-from src.ftf.expectations.verification import (
-    ElementCheckRecord,
+from ftf.expectations.matching import ViewElementVector
+from ftf.expectations.verification import (
     ProfileCheckResult,
-    VerificationResult,
-    verify_element,
-    verify_profile_checks,
-    verify_quote_in_text,
     search_for_element_in_text,
-)
-from src.ftf.expectations.matching import (
-    ViewElementVector,
-    judge_patterns_for_view,
-    ElementJudgement,
+    verify_element,
+    verify_quote_in_text,
 )
 
 
@@ -127,6 +120,7 @@ class TestKindLibraryStore:
 
             lib = KindLibraryVersion(version_id="1.0.0", profiles=[profile])
             path = store.save_version(lib)
+            assert path.exists()
 
             # Load it back
             loaded = store.load_version("1.0.0")
@@ -363,7 +357,3 @@ class TestElementVector:
         states = {item["state"] for item in payload}
         assert "present" in states
         assert "absent" in states
-
-
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
