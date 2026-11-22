@@ -284,6 +284,23 @@ def cmd_report(args) -> None:
     print("private project material: do not publish or redistribute")
 
 
+def cmd_demo(args) -> None:
+    """Rehearse the demo sequence on a temporary store; stored data is not touched."""
+    from .demo import run_demo
+
+    def show(step) -> None:
+        print(f"[{step.status.upper():7}] {step.name}: {step.detail}", flush=True)
+
+    steps = run_demo(
+        Path(args.sample), live_url=args.live_url, capture=not args.no_capture, on_step=show
+    )
+    failed = sum(s.status == "failed" for s in steps)
+    skipped = sum(s.status == "skipped" for s in steps)
+    print(f"{len(steps) - failed - skipped} passed, {failed} failed, {skipped} skipped")
+    if failed:
+        raise SystemExit(1)
+
+
 def cmd_views(args) -> None:
     for v in _store().views():
         print(f"{v.view_id}  {v.kind.value:5}  {v.label}")
@@ -557,6 +574,12 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("report", help="corpus report (Markdown) and JSON/CSV export")
     p.add_argument("--out", help="output folder (default: $FTF_DATA_DIR/export)")
     p.set_defaults(func=cmd_report)
+
+    p = sub.add_parser("demo", help="rehearse the demo sequence and check each step")
+    p.add_argument("sample", help="folder with the organiser sample")
+    p.add_argument("--live-url", help="URL for the live capture step")
+    p.add_argument("--no-capture", action="store_true", help="skip the browser steps")
+    p.set_defaults(func=cmd_demo)
 
     sub.add_parser("views", help="list views").set_defaults(func=cmd_views)
 
