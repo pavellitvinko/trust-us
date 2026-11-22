@@ -7,7 +7,7 @@ Results with real gateway embeddings belong to HAC-32 and are not in this file.
 
 ## Run record
 
-- Commit: `30c22c7`
+- Commit: `497fd2e`
 - Date: 2026-11-22
 - Corpus: `testing_sample`: 10 incident folders, 37 views (21 image, 13 page, 3 video), 1316 observations; 3 views carry no fingerprint at all
 - Execution mode: model-off: no gateway call; vector layers use the local hashed-word embedder; no screenshot, video, pattern or expected-element reading
@@ -132,9 +132,9 @@ Rule check (confidence labels the evidence does not carry): none found.
 
 ## Candidate generation against all pairs (HAC-36)
 
-Parity with the all-pairs run: **holds**. Both runs store 666 relations for 37 views. Relation type, confidence label and coverage are equal for every pair, tier scores for every compared pair, and campaigns, families, playbooks and funnel edges are identical. A skipped pair carries the same reasons as in the all-pairs run plus one line saying it was not compared in full.
+Parity with the all-pairs run: **holds**. Both runs store 666 relations for 37 views. Relation type, confidence label and coverage are equal for every pair, tier scores for every compared pair, and campaigns, families, playbooks and funnel edges are identical. Every skipped pair carries the same reasons as in the all-pairs run plus one line saying it was not compared in full.
 
-Pairs compared in full: 288 of 666. This is **not a saving on this corpus**: 78 of 78 page pairs are still compared, because the perceptual and vector layers put every view that holds them into one bucket. Only pairs across view kinds are skipped, and those are insufficient evidence in either run.
+Pairs compared in full: 288 of 666. This is **not a saving on this corpus**: within a view kind the index proposes either every pair or none (image-image 210 of 210, page-page 78 of 78, video-video 0 of 3), because the perceptual and vector layers put every view that holds them into one bucket. No pair across view kinds is compared. All 378 skipped pairs are unrelated or insufficient evidence in the all-pairs run.
 
 | View kinds | Compared in full | All pairs |
 | --- | --- | --- |
@@ -172,7 +172,7 @@ What the index would propose under two key choices, measured against the all-pai
 | as built: all index keys | 288 | 78 of 78 | 8 of 8 | 0 |
 | identifier, set and MinHash keys only | 36 | 36 of 78 | 8 of 8 | 8 (highest tier score 0.30) |
 
-Scaling is therefore not demonstrated: at this size the catch-all buckets make candidate generation equal to all pairs within a view kind. The identifier index alone finds every linked pair here, but it would not find a link that rests only on vector similarity (a playbook link from real embeddings), which is why the buckets stay.
+The identifier, set and MinHash keys alone find every linked pair here (8 of 8) while proposing 36 pairs instead of 288; the 8 scored pairs they miss reach a tier score of at most 0.30. Scaling is therefore not demonstrated: at this size the catch-all buckets make candidate generation equal to all pairs within a view kind. The buckets stay because a link that rests only on vector similarity (a playbook link from real embeddings) has no identifier key to propose it.
 
 ## Degradation on real files
 
