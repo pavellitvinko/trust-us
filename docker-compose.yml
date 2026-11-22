@@ -105,7 +105,7 @@ services:
     volumes:
       - ${FTF_PROBE_DIR:-./data/probe-sandbox}:/data/probe-sandbox
 
-  # Runs the jobs queued by the app's Probe agent tab, with the same restrictions.
+  # Runs the jobs queued from the app's Add material page, with the same restrictions.
   probe-worker:
     <<: *probe-sandbox
     entrypoint: ["ftf", "probe-worker"]

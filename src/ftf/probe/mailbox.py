@@ -1,7 +1,7 @@
 """Level 4: read the bait mailbox and attribute each message to the site given that identity.
 
-The mailbox is opened read-only. Links and attachments in messages are never opened.
-A sender domain becomes linkage evidence only when the receiving server verified DKIM.
+The mailbox is opened read-only. Attachments are never opened. Links are never opened here:
+one activation link per registration is handed to the sandboxed browser. A sender domain becomes linkage evidence only when the receiving server verified DKIM.
 """
 
 from __future__ import annotations
@@ -16,10 +16,12 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from email.utils import parseaddr
+from html.parser import HTMLParser
 from pathlib import Path
 
 from ..extract._material import registrable_domain
 from .persona import Ledger
+from .policy import CONFIRM_LINK, is_dangerous, site_key
 
 # Shared senders say nothing about who runs a site.
 SHARED_SENDERS = frozenset(
@@ -210,6 +212,57 @@ def watch_resend(api_key: str, ledger_path: Path, *, get=_resend_get, pause: flo
         "new": record_messages(attributed),
         "resold": [p for p in attributed if p["resold"]],
     }
+
+
+class _Links(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.links: list[list[str]] = []
+        self._open = False
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "a":
+            self.links.append([dict(attrs).get("href") or "", ""])
+            self._open = True
+
+    def handle_endtag(self, tag):
+        if tag == "a":
+            self._open = False
+
+    def handle_data(self, data):
+        if self._open and self.links:
+            self.links[-1][1] += data
+
+
+def confirmation_link(html: str, text: str, site: str = "") -> str | None:
+    """The activation link of a message. Only read here; the sandboxed browser opens it."""
+    parser = _Links()
+    parser.feed(html or "")
+    pairs = [(href.strip(), label) for href, label in parser.links]
+    pairs += [(url.rstrip(".,)>"), "") for url in re.findall(r"https?://\S+", text or "")]
+    usable = [
+        href
+        for href, label in pairs
+        if urllib.parse.urlsplit(href).scheme in ("http", "https")
+        and CONFIRM_LINK.search(f"{href} {label}")
+        and not is_dangerous(href, label)
+    ]
+    same_site = [u for u in usable if site and site_key(u) == site]
+    return (same_site or usable or [None])[0]
+
+
+def find_confirmation(api_key: str, address: str, site: str = "", *, get=_resend_get) -> str | None:
+    """The activation link in the newest messages to exactly this bait address."""
+    wanted = address.strip().lower()
+    for item in get(api_key, "/emails/receiving?limit=100").get("data") or []:
+        if wanted not in _addresses(item.get("to"), item.get("cc"), item.get("bcc")):
+            continue
+        message_id = urllib.parse.quote(str(item["id"]), safe="")
+        detail = get(api_key, f"/emails/receiving/{message_id}")
+        link = confirmation_link(str(detail.get("html") or ""), str(detail.get("text") or ""), site)
+        if link:
+            return link
+    return None
 
 
 def check_leaks(address: str, api_key: str) -> list[str]:

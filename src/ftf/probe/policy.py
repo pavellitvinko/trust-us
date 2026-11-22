@@ -36,7 +36,7 @@ SECRET_SETTINGS = (
     "FTF_HIBP_API_KEY",
 )
 
-# Checked in this order. Everything before "email" is data the probe never provides.
+# Checked in this order, so a "card e-mail" field is a card field.
 _FIELD_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
         "card",
@@ -46,7 +46,7 @@ _FIELD_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
         "bank",
         re.compile(r"iban|bank|konto bankowe|account.?number|nr.?konta|przelew", re.IGNORECASE),
     ),
-    ("national_id", re.compile(r"pesel|\bnip\b|ssn|national.?id", re.IGNORECASE)),
+    ("national_id", re.compile(r"pesel|\bnip\b|tax.?id|ssn|national.?id", re.IGNORECASE)),
     ("document", re.compile(r"passport|paszport|dow[oó]d|document|dokument|selfie", re.IGNORECASE)),
     ("phone", re.compile(r"phone|\btel\b|telefon|mobile|kom[oó]rk", re.IGNORECASE)),
     ("birth", re.compile(r"birth|\bdob\b|urodzeni", re.IGNORECASE)),
@@ -64,9 +64,17 @@ _FIELD_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("full_name", re.compile(r"full.?name|\bname\b|imi[eę] i nazwisko", re.IGNORECASE)),
     ("username", re.compile(r"user.?name|\blogin\b|nick", re.IGNORECASE)),
 )
-FORBIDDEN_FIELDS = frozenset(
-    {"card", "bank", "national_id", "document", "phone", "birth", "address"}
+# The agent registers only where these are all a form requires.
+ACCOUNT_FIELDS = frozenset({"email", "password"})
+# A site that asks for mail confirmation, in its page text.
+CONFIRM_NOTICE = re.compile(
+    r"potwierd[zź]\w* (?:\w+ )?(?:e-?mail|adres|konto|rejestracj)|aktywuj\w* konto|"
+    r"link aktywacyjny|sprawd[zź] (?:swoj[aą] )?(?:skrzynk|e-?mail|poczt)|"
+    r"(?:confirm|verify) your (?:e-?mail|account|address)|check your (?:e-?mail|inbox)|"
+    r"activate your account",
+    re.IGNORECASE,
 )
+CONFIRM_LINK = re.compile(r"confirm|verif|activat|potwierd|aktywuj|aktywac|weryfik", re.IGNORECASE)
 
 # Never clicked or followed, whatever the page says.
 NEVER_OPEN = re.compile(

@@ -20,13 +20,28 @@ from ..capture import capture_url
 from ..config import get_settings
 from .agent import ProbeResult, run_probe
 from .fake_site import FakeSite
-from .policy import Level, ProbeRefused, check_target, require_sandbox
+from .policy import Level, ProbeRefused, check_target, require_sandbox, site_key
 
 JOB_ID = re.compile(r"^[0-9a-f]{32}$")
 JOB_TIMEOUT = 420  # seconds
 HEARTBEAT_AGE = 15  # seconds
 MAX_STATUS = 2 << 20  # bytes
 ACTIVE = ("queued", "running")
+CONFIRM_WAIT = 150  # seconds a run waits for its activation email
+DEMO_MAIL_DOMAIN = "bait.example.test"  # reserved name: no message can ever be delivered there
+PROBE_NAMES = {
+    "contact.iban": "Bank account (IBAN)",
+    "contact.wallet": "Crypto wallet",
+    "contact.email": "Email",
+    "contact.telegram": "Telegram",
+    "contact.whatsapp": "WhatsApp",
+    "company.nip": "Company NIP",
+    "company.krs": "Company KRS",
+    "payment.public_key": "Payment key",
+    "payment.merchant_id": "Merchant ID",
+    "payment.provider": "Payment provider",
+    "mail.sender_domain": "Verified mail sender",
+}
 
 
 def _now() -> str:
@@ -120,8 +135,13 @@ def step_label(step: dict) -> str:
         "login": "Logged in",
         "visit_failed": f"Could not open {path}",
         "left_site": "A page sent the agent to another site; it stopped there",
-        "register_stopped": f"Registration stopped: asks for {', '.join(step.get('needs', []))}",
+        "register_stopped": f"Skipped registration: needs more than email and password ({', '.join(step.get('needs', []))})",
         "login_stopped": f"Login stopped: asks for {', '.join(step.get('needs', []))}",
+        "confirm_waiting": "Waiting for the activation email",
+        "email_confirmed": "Email confirmed with the activation link",
+        "confirm_timeout": "No activation email arrived in time",
+        "confirm_unavailable": "The site wants email confirmation, but no inbox is connected",
+        "confirm_failed": "The activation link did not open",
         "register_failed": "Registration failed",
         "login_failed": "Login failed",
     }.get(action, action)
@@ -136,8 +156,49 @@ def _summary(result: ProbeResult) -> dict:
         "blocked": len(result.blocked),
         "registered": result.registered,
         "logged_in": result.logged_in,
+        "email_confirmed": result.email_confirmed,
+        "awaiting_mail": result.awaiting_mail,
         "checkout_seen": result.checkout_seen,
     }
+
+
+def _link_file(root: Path, job_id: str) -> Path:
+    # In the app-owned jobs folder, so the sandbox cannot redirect this write with a symlink.
+    return root / "jobs" / f"{job_id}.link"
+
+
+def wait_for_link(root: Path, job_id: str, timeout: float = CONFIRM_WAIT) -> str | None:
+    """Inside the sandbox: wait for the app to hand over this job's activation link."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        link = _read(_link_file(root, job_id)).get("url")
+        if isinstance(link, str) and urlsplit(link).scheme in ("http", "https"):
+            return link
+        time.sleep(2)
+    return None
+
+
+def relay_confirmations(root: Path, api_key: str, mail_domain: str, *, find=None) -> int:
+    """In the app: find activation links for running jobs. The app never opens them.
+
+    A job's status comes from the sandbox, so only addresses on the bait domain are looked up.
+    """
+    from .mailbox import find_confirmation
+
+    find = find or find_confirmation
+    domain = mail_domain.strip().lower()
+    handed = 0
+    for job in list_jobs(root, limit=1000):
+        address = job.get("awaiting_mail")
+        if job["state"] != "running" or not isinstance(address, str) or not domain:
+            continue
+        if address.lower().rpartition("@")[2] != domain or _link_file(root, job["id"]).exists():
+            continue
+        link = find(api_key, address, site_key(str(job.get("url", ""))))
+        if link:
+            _write(_link_file(root, job["id"]), {"url": link})
+            handed += 1
+    return handed
 
 
 def run_job(root: Path, job_id: str) -> None:
@@ -159,7 +220,7 @@ def run_job(root: Path, job_id: str) -> None:
         fake = job.get("fake") is True
         settings = get_settings()
         if fake:
-            site = FakeSite().start()
+            site = FakeSite(confirm=True).start()
         url = site.url if site else str(job["url"])
         check_target(url, level, live=job.get("live") is True, local=fake)
         if not fake:
@@ -172,15 +233,24 @@ def run_job(root: Path, job_id: str) -> None:
         state["steps"] = ["Capturing the page"]
         _write(path, state)
         capture_url(url, bundle, timeout=20.0)
+        # The demo needs no mail setup and leaves the real ledger of bait addresses alone.
+        ledger = root / "probe" / ("demo-ledger.json" if fake else "ledger.json")
+        if fake:
+            ledger.unlink(missing_ok=True)
         result = run_probe(
             url,
             bundle,
             level=int(level),
-            mail_domain=os.environ.get("FTF_PROBE_MAIL_DOMAIN", "").strip(),
-            ledger_path=root / "probe" / "ledger.json",
+            mail_domain=DEMO_MAIL_DOMAIN
+            if fake
+            else os.environ.get("FTF_PROBE_MAIL_DOMAIN", "").strip(),
+            ledger_path=ledger,
             live=job.get("live") is True,
             local=fake,
             on_step=on_step,
+            confirm_link=(
+                site.confirmation_for if site else (lambda _: wait_for_link(root, job_id))
+            ),
         )
         state.update(_summary(result))
         state.update(state="done", finished=_now())

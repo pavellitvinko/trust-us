@@ -16,7 +16,7 @@ from ftf.probe.jobs import create_job, importable_run, job_state, list_jobs
 from ftf.probe.mailbox import parse_message, parse_received, record_messages, watch_resend
 from ftf.probe.persona import Ledger
 from ftf.probe.policy import (
-    FORBIDDEN_FIELDS,
+    ACCOUNT_FIELDS,
     check_target,
     classify_field,
     is_bait,
@@ -46,8 +46,8 @@ def test_classify_field(text, kind):
     assert classify_field(text) == kind
 
 
-def test_payment_and_identity_fields_are_forbidden():
-    assert {"card", "bank", "national_id", "phone"} <= FORBIDDEN_FIELDS
+def test_only_email_and_password_are_account_fields():
+    assert ACCOUNT_FIELDS == {"email", "password"}
 
 
 @pytest.mark.parametrize("text", ["Wyloguj", "Wpłać teraz", "Zapłać", "/wp-login.php", "Pobierz"])
@@ -354,3 +354,63 @@ def test_app_lists_the_probe_page(tmp_path, monkeypatch):
     app = AppTest.from_file(str(script), default_timeout=30).run()
     assert not app.exception
     assert 'title="Probe agent"' in script.read_text(encoding="utf-8")
+
+
+def test_registers_with_email_and_password_then_confirms(tmp_path):
+    _chromium_or_skip()
+    site = FakeSite(confirm=True).start()
+    try:
+        result = run_probe(
+            site.url, tmp_path, level=3, email=BAIT, ledger_path=tmp_path / "ledger.json",
+            local=True, confirm_link=site.confirmation_for,
+        )  # fmt: skip
+    finally:
+        site.shutdown()
+        site.server_close()
+    assert result.registered and result.email_confirmed and result.logged_in
+    assert result.awaiting_mail is None
+    assert {k for k, v in site.posts[0][1].items() if v} == {"email", "password", "password2", "rules"}
+
+
+def test_form_asking_for_more_is_skipped(tmp_path):
+    _chromium_or_skip()
+    site = FakeSite(asks_phone=True).start()
+    try:
+        result = run_probe(
+            site.url, tmp_path, level=3, email=BAIT, ledger_path=tmp_path / "ledger.json",
+            local=True,
+        )  # fmt: skip
+    finally:
+        site.shutdown()
+        site.server_close()
+    assert not result.registered and site.posts == []
+    assert any(s["action"] == "register_stopped" and s["needs"] == ["phone"] for s in result.steps)
+
+
+def test_confirmation_link_skips_unsubscribe_and_prefers_the_site():
+    from ftf.probe.mailbox import confirmation_link
+
+    html = """<a href="https://x.test/unsubscribe?verify=1">Wypisz</a>
+    <a href="https://tracker.test/c/1">Potwierdź konto</a>
+    <a href="https://suspect.test/activate?t=abc">Aktywuj</a>"""
+    assert confirmation_link(html, "", "suspect.test") == "https://suspect.test/activate?t=abc"
+    assert confirmation_link('<a href="javascript:verify()">Potwierdź</a>', "") is None
+
+
+def test_relay_only_looks_up_bait_addresses(tmp_path):
+    from ftf.probe.jobs import _write, create_job, relay_confirmations, wait_for_link
+
+    good = create_job(tmp_path, "https://suspect.test", 1)
+    bad = create_job(tmp_path, "https://suspect.test", 1)
+    _write(tmp_path / "status" / f"{good}.json", {"state": "running", "awaiting_mail": "a@bait.test"})
+    _write(tmp_path / "status" / f"{bad}.json", {"state": "running", "awaiting_mail": "boss@real.test"})
+    asked = []
+
+    def find(key, address, site):
+        asked.append(address)
+        return "https://suspect.test/confirm?t=1"
+
+    assert relay_confirmations(tmp_path, "key", "bait.test", find=find) == 1
+    assert asked == ["a@bait.test"]
+    assert wait_for_link(tmp_path, good, timeout=1) == "https://suspect.test/confirm?t=1"
+    assert wait_for_link(tmp_path, bad, timeout=0.1) is None

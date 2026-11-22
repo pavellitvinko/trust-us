@@ -5,6 +5,7 @@ All identifiers are examples. It binds to loopback only and keeps nothing after 
 
 from __future__ import annotations
 
+import secrets
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs
@@ -28,8 +29,6 @@ PAGES = {
     "/register": (
         "Rejestracja",
         """<h1>Rejestracja</h1><form method=post action="/register">
-        <label>Imię <input name=first_name required></label>
-        <label>Nazwisko <input name=last_name required></label>
         <label>E-mail <input type=email name=email required></label>
         <label>Hasło <input type=password name=password required></label>
         <label>Powtórz hasło <input type=password name=password2 required></label>
@@ -63,13 +62,27 @@ PAGES = {
 }
 
 
+CHECK_EMAIL = "<h1>Sprawdź skrzynkę</h1><p>Potwierdź adres e-mail, aby aktywować konto.</p>"
+
+
 class FakeSite(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, port: int = 0):
+    def __init__(self, port: int = 0, *, confirm: bool = False, asks_phone: bool = False):
         super().__init__(("127.0.0.1", port), _Handler)
+        self.confirm = confirm  # login works only after the activation link
+        self.asks_phone = asks_phone  # the form requires more than email and password
         self.accounts: dict[str, str] = {}
         self.posts: list[tuple[str, dict]] = []
+        self.tokens: dict[str, str] = {}  # token -> address awaiting confirmation
+        self.confirmed: set[str] = set()
+
+    def confirmation_for(self, address: str) -> str | None:
+        """What the site's activation mail would link to."""
+        for token, owner in self.tokens.items():
+            if owner == address:
+                return f"{self.url}confirm?token={token}"
+        return None
 
     @property
     def url(self) -> str:
@@ -95,7 +108,24 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_GET(self) -> None:
-        page = PAGES.get(self.path.split("?")[0])
+        path, _, query = self.path.partition("?")
+        if path == "/confirm":
+            owner = self.server.tokens.get(parse_qs(query).get("token", [""])[0])
+            if owner is None:
+                self._send(404, "bad token")
+            else:
+                self.server.confirmed.add(owner)
+                self._send(303, location="/login")
+            return
+        if path == "/check-email":
+            self._send(200, _PAGE.format(title="Sprawdź skrzynkę", body=CHECK_EMAIL))
+            return
+        if path == "/register" and self.server.asks_phone:
+            title, body = PAGES[path]
+            body = body.replace("name=phone>", "name=phone required>")
+            self._send(200, _PAGE.format(title=title, body=body))
+            return
+        page = PAGES.get(path)
         if page is None:
             self._send(404, "not found")
         else:
@@ -105,11 +135,18 @@ class _Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length") or 0)
         form = {k: v[0] for k, v in parse_qs(self.rfile.read(length).decode()).items()}
         self.server.posts.append((self.path, form))
+        address = form.get("email", "")
         if self.path == "/register":
-            self.server.accounts[form.get("email", "")] = form.get("password", "")
-            self._send(303, location="/login")
+            self.server.accounts[address] = form.get("password", "")
+            if self.server.confirm:
+                self.server.tokens[secrets.token_urlsafe(12)] = address
+                self._send(303, location="/check-email")
+            else:
+                self._send(303, location="/login")
         elif self.path == "/login":
-            good = self.server.accounts.get(form.get("email", "")) == form.get("password")
+            good = self.server.accounts.get(address) == form.get("password")
+            if self.server.confirm and address not in self.server.confirmed:
+                good = False
             self._send(303, location="/dashboard" if good else "/login")
         else:
             self._send(403, "refused")

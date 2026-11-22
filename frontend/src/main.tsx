@@ -44,6 +44,7 @@ function App() {
           <Route path="/add" element={<AddMaterial />} />
           <Route path="/library" element={<Library />} />
           <Route path="/item/:id" element={<ItemPage />} />
+          <Route path="/probe" element={<Navigate to="/add" replace />} />
           <Route path="/how-it-works" element={<HowItWorks />} />
           <Route path="*" element={<Navigate to="/library" replace />} />
         </Routes>

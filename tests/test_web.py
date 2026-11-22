@@ -170,3 +170,21 @@ def test_the_worker_captures_through_the_guarded_child_process(tmp_path, monkeyp
     monkeypatch.undo()
     with pytest.raises(IntakeError, match="private network"):
         jobs._capture("http://10.0.0.1/", tmp_path / "out")
+
+
+def test_probe_api_queues_a_job_and_refuses_unconfirmed_registration(client, tmp_path):
+    root = tmp_path / "data" / "probe-sandbox"
+    assert client.get("/api/probe").json()["workerAlive"] is False
+    assert client.post("/api/probe", json={"fake": True}).status_code == 409  # no worker
+
+    root.mkdir(parents=True)
+    (root / "worker.alive").touch()
+    refused = client.post(
+        "/api/probe", json={"url": "https://suspect.example", "level": 3, "fake": False}
+    )
+    assert refused.status_code == 400 and client.get("/api/probe").json()["jobs"] == []
+
+    job_id = client.post("/api/probe", json={"fake": True, "level": 2}).json()["id"]
+    job = client.get("/api/probe").json()["jobs"][0]
+    assert (job["id"], job["state"], job["target"]) == (job_id, "queued", "Fake test site")
+    assert client.post(f"/api/probe/{job_id}/add").status_code == 404  # nothing finished yet

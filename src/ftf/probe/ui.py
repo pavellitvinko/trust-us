@@ -9,6 +9,7 @@ import streamlit as st
 from ..intake import IntakeError, run_stages
 from .jobs import (
     ACTIVE,
+    PROBE_NAMES,
     create_job,
     importable_run,
     job_state,
@@ -26,19 +27,6 @@ PROBE_LEVELS = {
     2: "2. Payment: also read deposit and checkout pages",
     3: "3. Register: also create an account and log in",
     4: "4. Watch inbox: also track mail sent to the bait address",
-}
-PROBE_NAMES = {
-    "contact.iban": "Bank account (IBAN)",
-    "contact.wallet": "Crypto wallet",
-    "contact.email": "Email",
-    "contact.telegram": "Telegram",
-    "contact.whatsapp": "WhatsApp",
-    "company.nip": "Company NIP",
-    "company.krs": "Company KRS",
-    "payment.public_key": "Payment key",
-    "payment.merchant_id": "Merchant ID",
-    "payment.provider": "Payment provider",
-    "mail.sender_domain": "Verified mail sender",
 }
 
 

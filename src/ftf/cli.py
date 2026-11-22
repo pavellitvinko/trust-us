@@ -174,7 +174,7 @@ def cmd_probe(args) -> None:
     from .probe.fake_site import FakeSite
 
     settings = get_settings()  # also loads .env
-    site = FakeSite().start() if args.fake_site else None
+    site = FakeSite(confirm=True).start() if args.fake_site else None
     url = site.url if site else args.url
     if not url:
         print("error: give a URL, or --fake-site", file=sys.stderr)
@@ -200,6 +200,7 @@ def cmd_probe(args) -> None:
             live=args.live,
             local=bool(site),
             timeout=args.timeout,
+            confirm_link=site.confirmation_for if site else None,
         )
     except ProbeRefused as exc:
         print(f"refused: {exc}", file=sys.stderr)
@@ -246,7 +247,6 @@ def cmd_probe_worker(args) -> None:
 def cmd_probe_mail(args) -> None:
     """Read the bait mailbox (read-only), attribute messages, and optionally check for leaks."""
     import os
-
     from urllib.error import URLError
 
     from .probe.mailbox import check_leaks, watch, watch_resend

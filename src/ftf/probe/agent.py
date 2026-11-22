@@ -16,8 +16,9 @@ from ..config import get_settings
 from .harvest import harvest
 from .persona import Ledger, Persona
 from .policy import (
+    ACCOUNT_FIELDS,
+    CONFIRM_NOTICE,
     CONTINUE,
-    FORBIDDEN_FIELDS,
     LOOPBACK,
     Level,
     check_target,
@@ -39,7 +40,8 @@ _FORMS_JS = """() => [...document.forms].map((form) => ({
   fields: [...form.querySelectorAll('input,select,textarea')].map((el) => ({
     tag: el.tagName.toLowerCase(), type: (el.type || '').toLowerCase(),
     name: el.name, id: el.id, placeholder: el.placeholder || '',
-    autocomplete: el.autocomplete || '', required: el.required,
+    autocomplete: el.autocomplete || '',
+    required: el.required || el.getAttribute('aria-required') === 'true',
     label: (el.labels && el.labels[0] ? el.labels[0].innerText : '').slice(0, 120),
     visible: !!(el.offsetWidth || el.offsetHeight),
   })),
@@ -64,6 +66,8 @@ class ProbeResult:
     blocked: list[dict] = field(default_factory=list)
     registered: bool = False
     logged_in: bool = False
+    email_confirmed: bool = False
+    awaiting_mail: str | None = None  # the bait address, only while waiting for its message
     checkout_seen: bool = False
     persona: str | None = None
     mail: list[dict] = field(default_factory=list)
@@ -79,10 +83,23 @@ class ProbeResult:
 
 class _Probe:
     def __init__(
-        self, url, level, bundle, *, email, mail_domain, ledger, local, timeout, on_step=None
+        self,
+        url,
+        level,
+        bundle,
+        *,
+        email,
+        mail_domain,
+        ledger,
+        local,
+        timeout,
+        on_step=None,
+        confirm_link=None,
     ):
         self.mail_domain = mail_domain
         self.on_step = on_step
+        self.confirm_link = confirm_link
+        self.confirm_tried = False
         self.start, self.level, self.bundle = url, Level(level), bundle
         self.email, self.ledger, self.local = email, ledger, local
         self.timeout_ms = int(timeout * 1000)
@@ -260,9 +277,14 @@ class _Probe:
         needed = [
             classify_field(*_attrs(f)) for f in form["fields"] if _fillable(f) and f["required"]
         ]
-        stop = sorted(set(needed) & FORBIDDEN_FIELDS)
-        if "other" in needed:
-            stop.append("unrecognised required field")
+        # A login field named "login" takes the address we registered with.
+        allowed = ACCOUNT_FIELDS | ({"username"} if action == "login" else set())
+        stop = sorted(set(needed) - allowed)
+        if any(
+            f["visible"] and f["required"] and f["type"] in ("file", "radio")
+            for f in form["fields"]
+        ):
+            stop.append("a choice or file")
         if stop:
             self.step(f"{action}_stopped", url=page.url, needs=stop)
             return
@@ -304,18 +326,57 @@ class _Probe:
             self.note_outbound(page.url)
             return
         self.read(page)
-        if action == "register":
+        if not self.result.logged_in and self.asks_for_confirmation(page):
+            self.confirm_email(page)
+            if site_key(page.url) != self.site:
+                return
+        if action == "register" or (self.result.email_confirmed and not self.result.logged_in):
             self.try_account(page)
 
+    def asks_for_confirmation(self, page) -> bool:
+        if self.confirm_tried:
+            return False
+        try:
+            return bool(CONFIRM_NOTICE.search(page.inner_text("body", timeout=2000)))
+        except Exception:  # noqa: BLE001 - an unreadable page asks for nothing
+            return False
+
+    def confirm_email(self, page) -> None:
+        """Open the activation link from the bait inbox, in this sandboxed browser."""
+        self.confirm_tried = True
+        if self.confirm_link is None:
+            self.step("confirm_unavailable")
+            return
+        self.result.awaiting_mail = self.persona.email
+        self.step("confirm_waiting")
+        try:
+            link = self.confirm_link(self.persona.email)
+        finally:
+            self.result.awaiting_mail = None
+        if not link:
+            self.step("confirm_timeout")
+            return
+        try:
+            page.goto(link, wait_until="domcontentloaded", timeout=self.timeout_ms)
+            page.wait_for_timeout(600)
+        except Exception as exc:  # noqa: BLE001
+            self.step("confirm_failed", error=str(exc).splitlines()[0])
+            return
+        if site_key(page.url) != self.site:
+            self.step("left_site", url=link, landed=page.url)
+            self.note_outbound(page.url)
+            return
+        self.result.email_confirmed = True
+        self.step("email_confirmed")
+        self.read(page)
+
     def value_for(self, kind: str) -> str | None:
+        """Only the account's address and password: every other field stays empty."""
         persona = self.persona
         return {
             "email": persona.email,
+            "username": persona.email,
             "password": persona.password,
-            "first_name": persona.first_name,
-            "last_name": persona.last_name,
-            "full_name": persona.full_name,
-            "username": persona.username,
         }.get(kind)
 
 
@@ -353,6 +414,7 @@ def run_probe(
     local: bool = False,
     timeout: float = 20.0,
     on_step=None,
+    confirm_link=None,
 ) -> ProbeResult:
     """Probe `url` and write `<bundle>/probe.json`. Raises ProbeRefused outside policy."""
     from .policy import ProbeRefused
@@ -375,6 +437,7 @@ def run_probe(
         local=local,
         timeout=timeout,
         on_step=on_step,
+        confirm_link=confirm_link,
     ).run()
     result.write(bundle)
     return result

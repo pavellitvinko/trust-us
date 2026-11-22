@@ -10,8 +10,8 @@ This is the one exception to the capture rule that nothing is typed or submitted
 | --- | --- | --- |
 | 1 Explore | Follows same-site links and quiz steps | Submits anything |
 | 2 Payment | Reads checkout pages: provider, merchant ID, public key, IBAN, wallet | Fills a payment field |
-| 3 Register | Registers and logs in with the bait identity, on its own account only | Gives a phone, ID, address, birth date or bank detail |
-| 4 Watch | Records the site for `ftf probe-mail` | Opens links or attachments in messages |
+| 3 Register | Registers only when a form requires just email and password, opens the activation link in the sandbox, logs in | Fills any other field |
+| 4 Watch | Records the site for `ftf probe-mail` | Opens attachments, or any mail link other than the activation link |
 
 ```bash
 uv run ftf probe --fake-site --level 4 --ingest      # safe demo, needs FTF_PROBE_MAIL_DOMAIN
@@ -30,7 +30,7 @@ uv run ftf probe-mail [--leaks] && uv run ftf run
 docker compose --profile probe up -d --build
 ```
 
-Open **Probe agent** at <http://localhost:8501>, choose a site and a level, and click **Run agent**.
+Open **Add material** at <http://localhost:8000/add>, paste a link and click **Run probe agent**. Tick the box to let it register. **Run demo**, under the tools, uses the built-in fake site.
 The app only writes a job file. `probe-worker` runs it in the sandbox, and **Add to analysis**
 ingests the result after refusing any links or special files in it.
 
@@ -38,8 +38,10 @@ ingests the result after refusing any links or special files in it.
 
 - Non-GET requests are aborted except while the agent submits its own form.
 - Private, loopback and reserved addresses are refused. `--fake-site` allows loopback only.
-- A required field asking for forbidden data stops the registration. Many lead forms require a
-  phone number, so those sites stop at this point until the team owns a number for this use.
+- If a form requires anything beyond email, password and a terms checkbox, the agent skips
+  registration and keeps reading the public pages.
+- For email confirmation the app reads the bait inbox (the sandbox holds no key) and passes one
+  activation link to the sandboxed browser. The app itself never opens it.
 - Logout, payment, deposit, download and admin controls are never followed.
 - Choices come from fixed rules and no language model, so page text cannot instruct the agent.
 - The password lives in memory for one run and is not stored.
