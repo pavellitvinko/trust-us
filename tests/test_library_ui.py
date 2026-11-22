@@ -15,6 +15,7 @@ from ftf.library import (
     Match,
     Risk,
     build_library,
+    campaign_title,
     campaign_tree,
     name_groups,
     plain_proof,
@@ -176,7 +177,7 @@ def test_saved_pages_are_named_after_their_title():
 
 
 @pytest.fixture(scope="module")
-def sample_library(tmp_path_factory):
+def sample_library(tmp_path_factory, sample_observations):
     if not SAMPLE.is_dir():
         pytest.skip("testing_sample/ not present")
     mp = pytest.MonkeyPatch()
@@ -184,18 +185,14 @@ def sample_library(tmp_path_factory):
                        ("OPENAI_API_KEY", ""), ("GEMINI_API_KEY", "")):  # fmt: skip
         mp.setenv(key, value)
     from ftf import pipeline
+    from ftf.eval import sample
     from ftf.fusion import run_method
     from ftf.grouping import build_groups
-    from ftf.ingest import ingest_path
     from ftf.registry import load_plugins
-    from ftf.store import Store
 
     load_plugins()
-    s = Store(":memory:")
-    ingest_path(SAMPLE, s)
-    pipeline.run_extract(s)
+    s = sample.clone(sample_observations)
     pipeline.run_fingerprint(s)
-    pipeline.run_compare_all(s)
     run_method(s)
     lib = build_library(s, build_groups(s, persist_funnel=False), tmp_path_factory.mktemp("d"))
     yield lib
@@ -474,3 +471,119 @@ def test_risk_is_worded_with_the_right_plural(level, n, text):
 
     risk = Risk(level=level, findings=[Finding("Domain", "x", "s")] * n)
     assert risk.text == text
+
+
+# -- the Campaigns screen: repeats, titles and why ------------------------------------------
+
+
+def _page(view_id, case, title, host=None):
+    meta = {"final_url": f"https://{host}/"} if host else {}
+    return View(view_id=view_id, incident_id=case, kind=ViewKind.PAGE, label=f"{case} · {title}",
+                primary=f"{title}.html", meta=meta)  # fmt: skip
+
+
+def test_the_same_page_in_two_cases_is_not_a_campaign(store, tmp_path):
+    for view in (_page("a", "47", "Uromexil Forte", "shryxla.icu"), _page("b", "47-copy", "Uromexil Forte", "shryxla.icu")):  # fmt: skip
+        store.put_incident(Incident(incident_id=view.incident_id, root="."), [], [view])
+    lib = build_library(store, _groups({"c1": ["a", "b"]}), tmp_path)
+    repeat = lib.campaigns["c1"]
+    assert repeat.repeat and repeat.name is None
+    assert lib.get("a").campaign is None
+    assert [lab.text for lab in lib.get("a").labels] == ["Duplicate · 47-copy"]
+    assert not campaign_tree(lib).rows  # the classic tree agrees
+
+
+def test_the_same_title_on_two_hosts_or_one_case_stays_a_campaign():
+    views = {v.view_id: v for v in [_page("a", "1", "Wiem, kto strzelał", "civicdaybook.live"),
+                                    _page("b", "2", "Wiem, kto strzelał", "acrosscommunities.live"),
+                                    _page("c", "3", "Oferta", "x.pro"), _page("d", "3", "Oferta", "x.pro")]}  # fmt: skip
+    campaigns, _ = name_groups(_groups({"c1": ["a", "b"], "c2": ["c", "d"]}), {}, views, {})
+    assert not campaigns["c1"].repeat and campaigns["c1"].name
+    assert not campaigns["c2"].repeat  # landing variants inside one case
+
+
+def test_a_repeat_inside_a_kit_stays_in_the_kit():
+    views = {v.view_id: v for v in [_page("a", "1", "Oferta", "x.pro"), _page("b", "2", "Oferta", "x.pro"),
+                                    _page("c", "3", "Inna", "y.pro"), _page("d", "3", "Druga", "y.pro")]}  # fmt: skip
+    groups = _groups({"c1": ["a", "b"], "c2": ["c", "d"]}, families={"f1": ["c1", "c2"]})
+    campaigns, kits = name_groups(groups, {}, views, {})
+    assert campaigns["c1"].repeat and campaigns["c1"].kit == "f1"
+    assert kits["f1"].campaigns and set(kits["f1"].campaigns) == {"c1", "c2"}
+
+
+def test_a_campaign_title_comes_from_its_pages_whatever_the_order():
+    pages = [_page("a", "1", "ineptsolidoval.top", "ineptsolidoval.top"), _page("b", "1", "Metabo RX", "ineptsolidoval.top"),
+             _page("c", "2", "Zamach_ kto strzelał", "a.live"), _page("d", "2", "Zamach_ kto strzelał", "b.live")]  # fmt: skip
+    views = {v.view_id: v for v in pages}
+    assert campaign_title(["a", "b"], views) == campaign_title(["b", "a"], views) == "Metabo RX"
+    assert campaign_title(["a"], views) == "Pages on ineptsolidoval.top"  # only an address
+    assert campaign_title(["c", "d", "b"], views) == "Zamach: kto strzelał"  # most common wins
+    shots = {
+        v: View(view_id=v, incident_id="5", kind=ViewKind.IMAGE, label=f"5 · {v}.png") for v in "xy"
+    }
+    assert campaign_title(["x", "y"], shots) == "2 pictures"
+    long = {"l": _page("l", "1", "słowo " * 30)}
+    assert len(campaign_title(["l"], long)) <= 81 and campaign_title(["l"], long).endswith("…")
+
+
+def test_why_prefers_what_only_the_operator_controls():
+    from dataclasses import replace
+
+    from ftf.library import Campaign, Case, Item, Library, campaign_why
+
+    pixel = replace(_match("b", ns="fb_pixel", value="1071875908635809"), clue="Same pixel 1071875908635809")  # fmt: skip
+    files = replace(_match("b", verdict="Duplicate"), clue="3 identical files")
+    items = [
+        Item("a", "1", ViewKind.PAGE, "a", None, [], Risk("none"), matches=[files, pixel]),
+        Item("b", "1", ViewKind.PAGE, "b", None, [], Risk("none")),
+    ]
+    campaign = Campaign("c1", "Campaign x", ["a", "b"], ["1"], "", [])
+    lib = Library(cases=[Case("1", "Case 1", "", items)], journeys={}, links={}, campaigns={"c1": campaign})  # fmt: skip
+    text, label, strength, note = campaign_why(lib, campaign)
+    assert label == "same Facebook tracking pixel"
+    assert text == "Same Facebook tracking pixel 1071875908635809" and strength == "Strong"
+    assert note.startswith("Only whoever runs the pages")
+    lib.get("a").matches = [files]
+    assert campaign_why(lib, campaign)[0] == "3 identical files (images or scripts)"
+
+
+def test_link_captures_of_two_addresses_on_one_host_are_not_a_repeat():
+    def capture(view_id, case, url):
+        return View(view_id=view_id, incident_id=case, kind=ViewKind.PAGE, label=f"{case} · x",
+                    primary="dom.html", meta={"final_url": url})  # fmt: skip
+
+    views = {v.view_id: v for v in [capture("a", "1", "https://shop.top/offer"),
+                                    capture("b", "2", "https://shop.top/thanks"),
+                                    capture("c", "3", "https://shop.top/offer"),
+                                    capture("d", "4", "https://other.top/")]}  # fmt: skip
+    campaigns, _ = name_groups(_groups({"c1": ["a", "b"], "c2": ["a", "c"]}), {}, views, {})
+    assert not campaigns["c1"].repeat and campaigns["c2"].repeat
+    assert campaign_title(["a", "d"], views) == "Pages on other.top and shop.top"
+
+
+def test_why_falls_back_to_the_journey():
+    from ftf.library import Campaign, Case, Item, Journey, Library, campaign_why
+
+    items = [Item(v, "1", ViewKind.PAGE, v, None, [], Risk("none")) for v in "ab"]
+    journey = Journey(
+        ads=[], steps=[("a", "a"), ("b", "b")], proofs=["Ad ID 12 is in the landing URL"]
+    )
+    campaign = Campaign("c1", "Campaign x", ["a", "b"], ["1"], "", [])
+    lib = Library(cases=[Case("1", "Case 1", "", items)], journeys={"a": journey, "b": journey},
+                  links={}, campaigns={"c1": campaign})  # fmt: skip
+    assert campaign_why(lib, campaign) == (
+        "Ad ID 12 is in the landing URL",
+        "the visitor's path",
+        "",
+        "A visitor is taken from one to the next.",
+    )
+
+
+def test_group_pages_are_titled_for_what_they_are():
+    from ftf.library import campaign_heading, kit_heading
+
+    assert campaign_heading("Metabo RX") == "Metabo RX campaign"  # never the page's own title
+    assert campaign_heading("Pages on x.top") == "Campaign: Pages on x.top"
+    assert campaign_heading("słowo " * 10).startswith("Campaign: ")
+    views = {v: _page(v, "1", v) for v in "abcd"}
+    assert kit_heading(list("abcd"), views) == "Page template used by 4 pages"

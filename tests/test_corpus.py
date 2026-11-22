@@ -207,6 +207,7 @@ def test_folder_cannot_replace_a_known_incident(store, tmp_path):
         refuse_known_overwrite(store, case)
 
 
+@pytest.mark.sample
 @pytest.mark.skipif(not SAMPLE.is_dir(), reason="testing_sample/ not present")
 def test_clean_start_knows_campaigns_and_accepts_new_material(tmp_path, monkeypatch):
     monkeypatch.setenv("FTF_EMBEDDER", "fake")

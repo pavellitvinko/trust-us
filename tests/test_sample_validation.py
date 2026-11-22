@@ -19,10 +19,8 @@ SAMPLE = Path(__file__).resolve().parents[1] / "testing_sample"
 
 
 @pytest.fixture(scope="module")
-def base():
-    if not SAMPLE.is_dir():
-        pytest.skip("testing_sample/ not present")
-    s = sample.extracted(SAMPLE)
+def base(sample_observations):
+    s = sample.clone(sample_observations)
     yield s
     s.close()
 

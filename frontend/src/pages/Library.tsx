@@ -1,36 +1,17 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { api, type LibraryData, type Row } from "../api";
+import { api, type Row } from "../api";
 import { Chip, Help, Legend, Picture, plural } from "../components/bits";
 import MapView from "../components/MapView";
+import { VideoThumbnail } from "../components/video";
+import ProcessingPanel from "../components/ProcessingPanel";
+import { ItemChecksCell } from "../components/ItemChecks";
+import { campaignUrl, kitUrl, usePolled } from "../hooks";
 
 /** The Library, refreshed every 1.5 s while an analysis runs. */
-export function useLibrary() {
-  const [data, setData] = useState<LibraryData | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    let alive = true;
-    let timer: number | undefined;
-    const load = () =>
-      api
-        .library()
-        .then((d) => {
-          if (!alive) return;
-          setData(d);
-          setError(null);
-          if (d.busy) timer = window.setTimeout(load, 1500);
-        })
-        .catch((e) => alive && setError(String(e.message ?? e)));
-    load();
-    return () => {
-      alive = false;
-      window.clearTimeout(timer);
-    };
-  }, []);
-  return { data, error };
-}
+export const useLibrary = () => usePolled(api.library);
 
-type SortKey = "title" | "case" | "campaign" | "kit" | "signs" | "links";
+type SortKey = "title" | "case" | "campaign" | "kit" | "signs" | "links" | "processing";
 
 function signsText(r: Row) {
   if (r.signs) return <span className="danger">{plural(r.signs, "warning sign")}</span>;
@@ -51,7 +32,8 @@ function ItemsTable({ rows }: { rows: Row[] }) {
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 } | null>(null);
   const sorted = useMemo(() => {
     if (!sort) return rows; // newest case first, journey steps in order
-    const value = (r: Row) => (sort.key === "signs" || sort.key === "links" ? r[sort.key] : r[sort.key] || "￿");
+    const value = (r: Row) => sort.key === "processing" ? r.processing.status :
+      (sort.key === "signs" || sort.key === "links" ? r[sort.key] : r[sort.key] || "￿");
     return [...rows].sort((a, b) => (value(a) > value(b) ? 1 : value(a) < value(b) ? -1 : 0) * sort.dir);
   }, [rows, sort]);
   const header = (key: SortKey, label: string, help?: "case" | "campaign" | "kit") => (
@@ -66,7 +48,13 @@ function ItemsTable({ rows }: { rows: Row[] }) {
     </th>
   );
   return (
+    <div className="items-scroll" role="region" aria-label="Library items" tabIndex={0}>
     <table className="items">
+      <colgroup>
+        <col style={{ width: 110 }} /><col /><col style={{ width: 115 }} />
+        <col style={{ width: 145 }} /><col style={{ width: 105 }} />
+        <col style={{ width: 80 }} /><col style={{ width: 115 }} /><col style={{ width: 115 }} />
+      </colgroup>
       <thead>
         <tr>
           <th style={{ width: 112 }} />
@@ -74,6 +62,7 @@ function ItemsTable({ rows }: { rows: Row[] }) {
           {header("case", "Case", "case")}
           {header("campaign", "Campaign", "campaign")}
           {header("kit", "Kit", "kit")}
+          {header("processing", "Checks")}
           {header("signs", "Warning signs")}
           {header("links", "Linked items")}
         </tr>
@@ -82,7 +71,8 @@ function ItemsTable({ rows }: { rows: Row[] }) {
         {sorted.map((r) => (
           <tr key={r.id} onClick={() => navigate(`/item/${encodeURIComponent(r.id)}`)}>
             <td>
-              <Picture id={r.id} has={r.picture} type={r.type} width={96} height={60} />
+              {r.type === "Video" ? <VideoThumbnail id={r.id} /> :
+                <Picture id={r.id} has={r.picture} type={r.type} width={96} height={60} />}
             </td>
             <td>
               <Link className="title" to={`/item/${encodeURIComponent(r.id)}`} onClick={(e) => e.stopPropagation()}>
@@ -99,55 +89,57 @@ function ItemsTable({ rows }: { rows: Row[] }) {
               <Chip kind="case">{r.case}</Chip>
             </td>
             <td>
-              <Chip kind="campaign">{r.campaign}</Chip>
+              {r.campaign && (
+                <Link to={campaignUrl(r.campaignId)} onClick={(e) => e.stopPropagation()} title="See this campaign">
+                  <Chip kind="campaign">{r.campaign}</Chip>
+                </Link>
+              )}
             </td>
             <td>
-              <Chip kind="kit">{r.kit}</Chip>
+              {r.kit && (
+                <Link to={kitUrl(r.kitId)} onClick={(e) => e.stopPropagation()} title="See this kit">
+                  <Chip kind="kit">{r.kit}</Chip>
+                </Link>
+              )}
             </td>
+            <td><ItemChecksCell id={r.id} processing={r.processing} /></td>
             <td>{signsText(r)}</td>
             <td>{linksText(r)}</td>
           </tr>
         ))}
       </tbody>
     </table>
+    </div>
   );
 }
 
 export default function Library() {
-  const { data, error } = useLibrary();
+  const { data, error, refresh } = useLibrary();
   const [params, setParams] = useSearchParams();
   const view = params.get("view") === "map" ? "map" : "table";
   if (error) return <p className="error">Couldn't load the Library: {error}</p>;
   if (!data) return <p className="muted">Loading…</p>;
   const empty = !data.items.length && !data.jobs.length;
+  const materialJobs = data.jobs.filter((job) => job.kind !== "llm");
   return (
     <>
       <div className="head">
         <h1>Library</h1>
-        {data.items.length > 0 && (
-          <span className="sub">
-            {plural(data.items.length, "item")} in {plural(data.cases, "case")} · {data.linked} linked to something
-          </span>
-        )}
-        {!empty && (
-          <div className="seg" role="tablist">
-            {(["table", "map"] as const).map((v) => (
-              <button
-                key={v}
-                className={view === v ? "on" : ""}
-                role="tab"
-                aria-selected={view === v}
-                onClick={() => setParams(v === "map" ? { view: "map" } : {}, { replace: true })}
-              >
-                {v === "table" ? "Table" : "Map"}
-              </button>
-            ))}
-          </div>
-        )}
+        {data.items.length > 0 && <span className="sub">
+          {plural(data.items.length, "item")} in {plural(data.cases, "case")} · {data.linked} linked to something
+        </span>}
+        {!empty && <div className="seg" role="tablist">
+          {(["table", "map"] as const).map((v) => <button key={v} className={view === v ? "on" : ""}
+            role="tab" aria-selected={view === v}
+            onClick={() => setParams(v === "map" ? { view: "map" } : {}, { replace: true })}>
+            {v === "table" ? "Table" : "Map"}
+          </button>)}
+        </div>}
       </div>
-      {data.jobs.length > 0 && (
+      {data.items.length > 0 && <ProcessingPanel data={data} refresh={refresh} />}
+      {materialJobs.length > 0 && (
         <div className="jobs">
-          {data.jobs.map((j) => (
+          {materialJobs.map((j) => (
             <div key={j.id} className={`job ${j.status === "failed" ? "failed" : ""}`}>
               {j.status === "failed" ? <span className="danger">Couldn't analyse</span> : <span className="spinner" />}
               <span style={{ flex: 1 }}>

@@ -218,10 +218,10 @@ def test_interface_uses_the_complete_report(report_store, monkeypatch):
     assert_complete(app.session_state["comparison_report"])
 
 
+@pytest.mark.sample
 @pytest.mark.skipif(not (ROOT / "testing_sample").is_dir(), reason="testing_sample/ not present")
-def test_real_sample_report_completeness_without_models(tmp_path, model_off_cli):
-    cli = model_off_cli
-    cli("ingest", str(ROOT / "testing_sample"))
+def test_real_sample_report_completeness_without_models(tmp_path, model_off_sample):
+    cli = model_off_sample
     load_plugins()
     s = Store(tmp_path / "data/ftf.sqlite")
     try:

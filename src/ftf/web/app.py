@@ -13,7 +13,7 @@ import threading
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import Body, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
@@ -27,12 +27,16 @@ from ..grouping import build_groups
 from ..intake import ANALYSIS_LOCK, IntakeError
 from ..jobs import Job, check_link, link_case, save_files, worker_for
 from ..library import Library, build_library
+from ..llm_checks import new_steps
 from ..method_settings import apply_saved
 from ..previews import render_missing
+from ..processing import item_processing
 from ..registry import load_plugins
 from ..reporting import build_pair_report, render_pair_report
 from ..store import Store
 from . import views
+from .inspection import cleaner_for, comparison_sources
+from .inspection_routes import router as inspection_router
 from .probe import probe_router
 
 MAX_UPLOAD_FILES = 50_000  # parts in one upload: a saved site is hundreds of files
@@ -76,6 +80,7 @@ def job_payload(job: Job) -> dict:
         "stage": job.stage_name,
         "error": job.error,
         "createdAt": job.created_at,
+        "kind": job.kind,
     }
 
 
@@ -98,6 +103,7 @@ def create_app() -> FastAPI:
     cards: dict[tuple[str, float], bytes] = {}
 
     app = FastAPI(title="Follow the Fake", docs_url="/api/docs", openapi_url="/api/openapi.json")
+    app.include_router(inspection_router(settings))
 
     def library_or_none() -> Library | None:
         return cache.get()
@@ -122,17 +128,80 @@ def create_app() -> FastAPI:
             else {"items": [], "cases": 0, "linked": 0, "map": {"nodes": [], "edges": []}}
         )
         jobs = [job_payload(j) for j in reversed(list(worker.jobs.values()))]
+        tracked = worker.item_checks_snapshot()
+        reader = Store(settings.db_path)
+        try:
+            for row in payload["items"]:
+                view = reader.get_view(row["id"])
+                row["processing"] = item_processing(view, reader.observations(view.view_id), tracked.get(view.view_id))
+        finally:
+            reader.close()
         return {
             **payload,
             "generation": worker.generation,
             "busy": bool(worker.active()),
             "jobs": [j for j in jobs if j["status"] in ("queued", "running", "failed")],
+            "llmRun": worker.last_llm_run,
+            "checkSteps": new_steps(),
         }
+
+    @app.post("/api/library/llm-checks", status_code=202)
+    def start_llm_checks(skipped: Annotated[list[str] | None, Body()] = None) -> dict:
+        reader = Store(settings.db_path)
+        try:
+            if not any(not v.meta.get("shipped") for v in reader.views()):
+                raise HTTPException(400, "Add source material before running LLM checks.")
+        finally:
+            reader.close()
+        try:
+            return job_payload(worker.submit_llm(skipped))
+        except IntakeError as exc:
+            raise HTTPException(409, str(exc)) from exc
+
+    @app.post("/api/library/llm-checks/{job_id}/skip/{step_id}")
+    def skip_llm_step(job_id: str, step_id: str) -> dict:
+        try:
+            worker.skip_llm_step(job_id, step_id)
+        except IntakeError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return worker.last_llm_run
+
+    @app.get("/api/campaigns")
+    def campaigns() -> dict:
+        lib = library_or_none()
+        payload = (
+            views.campaigns_payload(lib)
+            if lib
+            else {"count": "", "campaigns": [], "kits": [], "unlinked": "", "repeats": ""}
+        )
+        return {**payload, "generation": worker.generation, "busy": bool(worker.active())}
+
+    @app.get("/api/campaigns/{campaign_id}")
+    def campaign(campaign_id: str) -> dict:
+        lib = library_or_none()
+        found = lib.campaigns.get(campaign_id) if lib else None
+        if found is None or not found.name:
+            raise HTTPException(404, "No such campaign")
+        return views.campaign_detail(lib, found)
+
+    @app.get("/api/kits/{kit_id}")
+    def kit(kit_id: str) -> dict:
+        lib = library_or_none()
+        found = lib.kits.get(kit_id) if lib else None
+        if found is None:
+            raise HTTPException(404, "No such kit")
+        return views.kit_detail(lib, found)
 
     @app.get("/api/items/{view_id}")
     def item(view_id: str) -> dict:
         lib, found = item_or_404(view_id)
-        return views.detail(lib, found)
+        reader = Store(settings.db_path)
+        try:
+            view = reader.get_view(view_id)
+            processing = item_processing(view, reader.observations(view_id), worker.item_checks_snapshot().get(view_id))
+        finally:
+            reader.close()
+        return {**views.detail(lib, found), "processing": processing, "busy": bool(worker.active())}
 
     @app.get("/api/pictures/{view_id}")
     def item_picture(view_id: str, size: Annotated[str, Query(pattern="^(card|full)$")] = "card"):
@@ -193,6 +262,8 @@ def create_app() -> FastAPI:
             reader = Store(settings.db_path)
             try:
                 report = build_pair_report(reader, a, b)
+                sources = comparison_sources(reader, report) if format == "view" else {}
+                clean_a, clean_b = cleaner_for(reader, a), cleaner_for(reader, b)
             finally:
                 reader.close()
         finally:
@@ -210,7 +281,12 @@ def create_app() -> FastAPI:
                 media_type="application/json",
                 headers={"Content-Disposition": 'attachment; filename="comparison.json"'},
             )
-        return {"markdown": markdown}  # format=view: what the item page shows
+        shared_refs = {
+            ref for layer in report["layers"] for shared in layer["shared"]
+            for refs in shared["sources"].values() for ref in refs
+        }
+        return {"markdown": clean_b(clean_a(markdown)), "sources": sources,
+                "sharedRefs": sorted(shared_refs)}
 
     @app.get("/api/report/{name}")
     def report(name: str):

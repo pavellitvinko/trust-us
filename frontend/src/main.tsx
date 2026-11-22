@@ -4,6 +4,8 @@ import { BrowserRouter, Link, Navigate, NavLink, Route, Routes } from "react-rou
 import { api, type Meta } from "./api";
 import { MetaContext } from "./components/bits";
 import AddMaterial from "./pages/AddMaterial";
+import CampaignPage from "./pages/CampaignPage";
+import Campaigns from "./pages/Campaigns";
 import HowItWorks from "./pages/HowItWorks";
 import ItemPage from "./pages/ItemPage";
 import Library from "./pages/Library";
@@ -35,6 +37,7 @@ function App() {
         <nav>
           <NavLink to="/add">Add material</NavLink>
           <NavLink to="/library">Library</NavLink>
+          <NavLink to="/campaigns">Campaigns</NavLink>
           <NavLink to="/how-it-works">How it works</NavLink>
         </nav>
       </header>
@@ -43,6 +46,9 @@ function App() {
           <Route path="/" element={<Home />} />
           <Route path="/add" element={<AddMaterial />} />
           <Route path="/library" element={<Library />} />
+          <Route path="/campaigns" element={<Campaigns />} />
+          <Route path="/campaigns/kit/:id" element={<CampaignPage kit />} />
+          <Route path="/campaigns/:id" element={<CampaignPage />} />
           <Route path="/item/:id" element={<ItemPage />} />
           <Route path="/probe" element={<Navigate to="/add" replace />} />
           <Route path="/how-it-works" element={<HowItWorks />} />

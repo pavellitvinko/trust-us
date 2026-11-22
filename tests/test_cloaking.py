@@ -360,18 +360,8 @@ def test_plain_captures_are_untouched(tmp_path, store):
 # --- browser: a local server that cloaks ------------------------------------------------
 
 
-def _chromium_available() -> bool:
-    try:
-        from playwright.sync_api import sync_playwright
+browser = pytest.mark.usefixtures("chromium")
 
-        with sync_playwright() as pw:
-            pw.chromium.launch(headless=True).close()
-        return True
-    except Exception:  # noqa: BLE001
-        return False
-
-
-browser = pytest.mark.skipif(not _chromium_available(), reason="Chromium not installed")
 
 
 class _Cloaker(BaseHTTPRequestHandler):
@@ -407,11 +397,17 @@ class _Cloaker(BaseHTTPRequestHandler):
 def cloaker():
     _Cloaker.seen = []
     server = ThreadingHTTPServer(("127.0.0.1", 0), _Cloaker)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
+    thread = threading.Thread(
+        target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True
+    )
+    thread.start()
     yield f"http://127.0.0.1:{server.server_address[1]}"
     server.shutdown()
+    server.server_close()
+    thread.join()
 
 
+@pytest.mark.browser
 @browser
 def test_live_differential_catches_a_referrer_gated_offer(tmp_path, store, cloaker):
     from ftf.capture import capture_differential

@@ -45,6 +45,92 @@ def test_library_lists_items_with_words_for_a_newcomer(client):
     assert set(meta["groups"]) >= {"case", "campaign", "kit", "duplicate"}
 
 
+def test_campaigns_screen_counts_what_is_left_over(client):
+    data = client.get("/api/campaigns").json()
+    assert data["campaigns"] == [] and data["kits"] == [] and data["repeats"] == ""
+    assert data["unlinked"] == "2 items aren't linked to anything yet."
+    assert "busy" in data and "generation" in data
+    assert client.get("/api/campaigns/nope").status_code == 404
+    assert client.get("/api/kits/nope").status_code == 404
+
+
+def test_a_campaign_row_and_page_say_what_it_is_and_why():
+    from ftf.library import UNCHECKED_PLAIN, Campaign, Case, Item, Library, Match, Risk
+    from ftf.web.views import campaign_detail, campaigns_payload
+
+    blank = list(UNCHECKED_PLAIN)  # nothing was looked at
+
+    pixel = Match(view_id="b", same_case=False, verdict="Same campaign", tiers=("identity",),
+                  confidence="high", observed_groups=1, total_groups=1,
+                  clue="Same pixel 1071875908635809", clue_ns="fb_pixel", clue_value="1071875908635809")  # fmt: skip
+    items = [
+        Item(
+            "a",
+            "1",
+            ViewKind.PAGE,
+            "Metabo RX",
+            "a.top",
+            [],
+            Risk("none", unchecked=blank),
+            matches=[pixel],
+        ),
+        Item("b", "2", ViewKind.PAGE, "Metabo RX", "b.top", [], Risk("none", unchecked=blank)),
+        Item("c", "2", ViewKind.IMAGE, "shot.png", None, [], Risk("none")),
+    ]
+    campaign = Campaign("c1", "Campaign 1071875908635809", ["a", "b"], ["1", "2"],
+                        "2026-11-20T10:00:00+00:00", [], title="Metabo RX")  # fmt: skip
+    lib = Library(cases=[Case("1", "Case 1", "", items[:1]), Case("2", "Case 2", "", items[1:])],
+                  journeys={}, links={}, campaigns={"c1": campaign})  # fmt: skip
+    data = campaigns_payload(lib)
+    row = data["campaigns"][0]
+    assert row["title"] == "Metabo RX" and row["kit"] == ""
+    assert row["sub"] == "2 pages · a.top, b.top" and row["cases"] == "1, 2"
+    assert row["linkedBy"] == "same Facebook tracking pixel" and row["strength"] == "Strong"
+    assert row["signs"]["text"] == "not checked"  # nothing was looked at
+    assert data["count"] == "1 campaign in 3 items"
+    assert data["unlinked"] == "1 item isn't linked to anything yet."
+
+    page = campaign_detail(lib, campaign)
+    assert {f["label"]: f["value"] for f in page["facts"]} == {
+        "Made of": "2 pages",
+        "Websites": "a.top, b.top",
+        "Found in": "Cases 1, 2",
+        "First seen": "20 Nov 2026",
+    }
+    assert page["title"] == "Metabo RX campaign" and page["short"] == "Metabo RX"
+    assert page["summary"] == "2 pages on 2 websites, linked by same Facebook tracking pixel"
+    assert page["why"]["text"] == "Same Facebook tracking pixel 1071875908635809"
+    assert page["why"]["note"].startswith("Only whoever runs the pages")
+    assert page["empty"] == "Not checked." and page["path"] is None and page["kit"] is None
+    assert [(p["a"]["id"], p["b"]["id"], p["kind"]) for p in page["pairs"]] == [
+        ("a", "b", "campaign")
+    ]
+
+
+def test_warning_signs_say_how_many_pages_show_them():
+    from ftf.library import Campaign, Case, Finding, Item, Library, Risk
+    from ftf.web.views import campaign_detail
+
+    def risk(*signs):
+        return Risk(
+            "warning",
+            findings=[Finding(kind="Domain", summary=s, source="page.html") for s in signs],
+        )
+
+    items = [
+        Item("a", "1", ViewKind.PAGE, "A", "x.top", [], risk(".top address", "countdown")),
+        Item("b", "1", ViewKind.PAGE, "B", "x.top", [], risk(".top address")),
+    ]
+    campaign = Campaign("c1", "Campaign x", ["a", "b"], ["1"], "", [], title="A")
+    lib = Library(cases=[Case("1", "Case 1", "", items)], journeys={}, links={},
+                  campaigns={"c1": campaign})  # fmt: skip
+    signs = campaign_detail(lib, campaign)["signs"]
+    assert [(s["text"], s["where"]) for s in signs] == [
+        (".top address", "on 2 of 2 pages"),
+        ("countdown", "on 1 of 2 pages"),
+    ]
+
+
 def test_item_page_and_pictures(client):
     item = client.get("/api/items/7:page").json()
     assert item["title"] == "page" and [b["id"] for b in item["sameCase"]] == ["7:shot"]
@@ -188,3 +274,199 @@ def test_probe_api_queues_a_job_and_refuses_unconfirmed_registration(client, tmp
     job = client.get("/api/probe").json()["jobs"][0]
     assert (job["id"], job["state"], job["target"]) == (job_id, "queued", "Fake test site")
     assert client.post(f"/api/probe/{job_id}/add").status_code == 404  # nothing finished yet
+
+
+def test_llm_checks_require_keys_without_queueing(client, monkeypatch):
+    from ftf.config import Settings
+
+    monkeypatch.setattr("ftf.llm_checks.get_settings", lambda: Settings(
+        Path("unused"), "", "", "reader", "embedder", "video",
+    ))
+    response = client.post("/api/library/llm-checks")
+    assert response.status_code == 409
+    assert "OPENAI_API_KEY" in response.json()["detail"]
+    assert client.get("/api/library").json()["llmRun"] is None
+
+
+def test_llm_worker_reports_partial_coverage_and_survives_restart(tmp_path, monkeypatch):
+    from ftf.jobs import Job, Worker
+
+    def run(store, on_stage, results, **controls):
+        on_stage("image")
+        results["image"] = {"views": 2, "read": 1, "not_observable": 1}
+        on_stage("patterns")
+        results["patterns"] = {"matching": {"kept": 1}}
+
+    monkeypatch.setattr("ftf.llm_checks.run_llm_checks", run)
+    worker = Worker(tmp_path / "ftf.sqlite", tmp_path)
+    job = Job("test-run", tmp_path, ["LLM checks"], kind="llm")
+    worker.run(job)
+    assert job.status == "done"
+    assert worker.generation == 1
+    assert job.issues == ["image: 1 not observable", "pattern matching: 1 kept"]
+    restarted = Worker(worker.db_path, tmp_path)
+    assert restarted.last_llm_run["results"]["image"]["read"] == 1
+    assert restarted.last_llm_run["status"] == "done"
+
+
+def test_llm_job_failure_retains_completed_stages(tmp_path, monkeypatch):
+    from ftf.jobs import Job, Worker
+
+    def run(store, on_stage, results, **controls):
+        on_stage("image")
+        results["image"] = {"read": 1}
+        raise RuntimeError("interrupted")
+
+    monkeypatch.setattr("ftf.llm_checks.run_llm_checks", run)
+    worker = Worker(tmp_path / "ftf.sqlite", tmp_path)
+    job = worker.run(Job("failed-run", tmp_path, ["LLM checks"], kind="llm"))
+    assert job.status == "failed"
+    assert "interrupted" in job.error
+    assert worker.last_llm_run["results"]["image"]["read"] == 1
+
+
+def test_llm_duplicate_submissions_are_refused(tmp_path, monkeypatch):
+    from ftf.intake import IntakeError
+    from ftf.jobs import Job, Worker
+
+    monkeypatch.setattr("ftf.llm_checks.require_model_keys", lambda: None)
+    worker = Worker(tmp_path / "ftf.sqlite", tmp_path)
+    worker.jobs["running"] = Job("running", tmp_path, [], kind="llm", status="running")
+    with pytest.raises(IntakeError, match="already queued or running"):
+        worker.submit_llm()
+
+
+def test_llm_orchestration_refreshes_groups_before_patterns_and_after_matching(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from ftf.layers._embedder import FakeEmbedder, get_embedder, set_embedder
+    from ftf.llm_checks import run_llm_checks
+
+    calls = []
+    monkeypatch.setattr("ftf.llm_checks.require_model_keys", lambda: None)
+    for module, function, name in (
+        ("image", "run_perceive", "image"), ("page", "run_perceive_pages", "page"),
+        ("video", "run_perceive_videos", "video"),
+        ("expectations", "run_expectations", "expectations"),
+        ("techniques", "run_techniques", "techniques"),
+    ):
+        def run(ctx, view_ids, *, settings, name=name):
+            calls.append(name)
+            return {"views": 1}
+        monkeypatch.setattr(f"ftf.perception.{module}.{function}", run)
+    monkeypatch.setattr("ftf.enrich.warning_lists.run_warning_lists", lambda *a: {})
+    monkeypatch.setattr("ftf.pipeline.run_fingerprint", lambda *a: calls.append("fingerprint"))
+    monkeypatch.setattr("ftf.pipeline.run_cloaking", lambda *a: None)
+    monkeypatch.setattr("ftf.pipeline.run_compare_all", lambda *a: calls.append("compare"))
+
+    def groups(*a):
+        calls.append("groups")
+        return SimpleNamespace(campaigns=[], families=[])
+
+    monkeypatch.setattr("ftf.fusion.run_method", groups)
+    monkeypatch.setattr("ftf.patterns.workflow.run_discover", lambda *a, **k: calls.append("patterns") or {})
+    previous = FakeEmbedder()
+    set_embedder(previous)
+    store = Store(tmp_path / "pipeline.sqlite")
+    store.put_incident(Incident(incident_id="7", root=str(tmp_path)), [], [
+        View(view_id="image", incident_id="7", kind=ViewKind.IMAGE, label="image"),
+        View(view_id="page", incident_id="7", kind=ViewKind.PAGE, label="page"),
+        View(view_id="video", incident_id="7", kind=ViewKind.VIDEO, label="video"),
+    ])
+    try:
+        results = {}
+        stages = []
+        run_llm_checks(store, stages.append, results)
+        assert calls == ["image", "page", "video", "expectations", "techniques", "techniques", "techniques",
+                         "fingerprint", "compare", "groups", "patterns",
+                         "fingerprint", "compare", "groups"]
+        assert stages[-3:] == ["rebuild", "patterns", "finalize"]
+        assert get_embedder() is previous
+    finally:
+        store.close()
+        set_embedder(None)
+
+
+def test_skip_controls_are_saved_and_required_or_started_batches_are_protected(tmp_path):
+    from ftf.intake import IntakeError
+    from ftf.jobs import Job, Worker
+
+    worker = Worker(tmp_path / "db.sqlite", tmp_path)
+    job = Job("control-run", tmp_path, [], kind="llm", status="running")
+    worker.jobs[job.job_id] = job
+    worker.skip_llm_step(job.job_id, "video")
+    assert next(s for s in job.steps if s["id"] == "video")["status"] == "skipped"
+    active = next(s for s in job.steps if s["id"] == "image")
+    active["status"] = "running"
+    worker.skip_llm_step(job.job_id, "image")
+    assert active["skipRequested"] and active["status"] == "running"
+    with pytest.raises(IntakeError):
+        worker.skip_llm_step(job.job_id, "finalize")
+    next(s for s in job.steps if s["id"] == "patterns")["status"] = "running"
+    with pytest.raises(IntakeError):
+        worker.skip_llm_step(job.job_id, "patterns")
+    assert Worker(worker.db_path, tmp_path).last_llm_run["status"] == "failed"
+
+
+def test_reading_skip_stops_before_the_next_item_and_retains_progress(tmp_path, monkeypatch):
+    from ftf.llm_checks import run_llm_checks
+
+    monkeypatch.setattr("ftf.llm_checks.require_model_keys", lambda: None)
+    store = Store(tmp_path / "skip.sqlite")
+    store.put_incident(Incident(incident_id="test", root=str(tmp_path)), [], [
+        View(view_id=f"image-{i}", incident_id="test", kind=ViewKind.IMAGE, label=f"Image {i}")
+        for i in range(3)
+    ])
+    processed = []
+    monkeypatch.setattr("ftf.perception.image.run_perceive",
+                        lambda ctx, ids, **kw: processed.extend(ids) or {"views": 1, "read": 1})
+    for name in ("run_fingerprint", "run_cloaking", "run_compare_all"):
+        monkeypatch.setattr(f"ftf.pipeline.{name}", lambda *a: 0)
+    from types import SimpleNamespace
+    monkeypatch.setattr("ftf.fusion.run_method", lambda *a: SimpleNamespace(campaigns=[], families=[]))
+    results, progress = {}, []
+    try:
+        run_llm_checks(store, lambda name: None, results,
+                       should_skip=lambda name: name != "image" and name not in ("rebuild", "finalize") or (name == "image" and bool(processed)),
+                       on_progress=lambda *args: progress.append(args))
+        assert processed == ["image-0"]
+        assert results["image"] == {"views": 1, "read": 1, "skipped": True}
+        assert ("image", 1, 3, None) in progress
+        assert results["patterns"]["skipped"] is True
+    finally:
+        store.close()
+
+
+def test_skip_endpoint_updates_live_progress_and_refuses_required_steps(client):
+    from ftf.config import get_settings
+    from ftf.jobs import Job, worker_for
+
+    settings = get_settings()
+    worker = worker_for(settings.db_path, settings.data_dir)
+    job = Job("api-skip", settings.data_dir, [], kind="llm", status="running")
+    worker.jobs[job.job_id] = job
+    response = client.post("/api/library/llm-checks/api-skip/skip/video")
+    assert response.status_code == 200
+    steps = response.json()["steps"]
+    assert next(s for s in steps if s["id"] == "video")["status"] == "skipped"
+    assert client.post("/api/library/llm-checks/api-skip/skip/finalize").status_code == 409
+    assert client.get("/api/library").json()["llmRun"]["id"] == "api-skip"
+    job.status = "done"
+
+
+def test_table_and_item_detail_share_live_per_item_check_state(client):
+    from ftf.config import get_settings
+    from ftf.jobs import worker_for
+
+    settings = get_settings()
+    worker = worker_for(settings.db_path, settings.data_dir)
+    worker.item_checks["7:shot"] = {"image": {
+        "state": "running", "message": "Reading this image.", "runId": "live",
+        "updatedAt": "2026-11-22T06:00:00Z",
+    }}
+    rows = {r["id"]: r for r in client.get("/api/library").json()["items"]}
+    detail = client.get("/api/items/7:shot").json()
+    assert rows["7:shot"]["processing"] == detail["processing"]
+    assert detail["processing"]["state"] == "running"
+    assert rows["7:page"]["processing"]["state"] == "not_run"
+    assert detail["processing"]["checks"][0]["runId"] == "live"

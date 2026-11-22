@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import random
+from collections.abc import Callable
 from typing import Any
 
 from ..config import Settings, get_settings
@@ -34,6 +35,7 @@ def run_discover(
     *,
     settings: Settings | None = None,
     client: Any = None,
+    on_match: Callable[[str, dict | None], None] | None = None,
 ) -> dict[str, Any]:
     settings = settings or get_settings()
     campaign_of = _campaigns(ctx)
@@ -60,8 +62,9 @@ def run_discover(
         "patterns": len(induced.version.patterns),
         "composites": len(induced.version.composites),
     }
+    match_options = {"on_view": on_match} if on_match else {}
     summary["matching"] = run_matching(
-        ctx, induced.version, view_ids, settings=settings, client=client
+        ctx, induced.version, view_ids, settings=settings, client=client, **match_options
     )
     return summary
 

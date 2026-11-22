@@ -24,7 +24,7 @@ def _fresh_cache():
     video_media.clear_cache()  # tests below fake ffmpeg failures on videos read before
 
 
-def make_video(path: Path, *sources: str, extra: tuple[str, ...] = ()) -> Path:
+def _encode_video(path: Path, *sources: str, extra: tuple[str, ...] = ()) -> Path:
     """A video made of lavfi sources played one after another, 3 s each."""
     path.parent.mkdir(parents=True, exist_ok=True)
     inputs: list[str] = []
@@ -36,8 +36,24 @@ def make_video(path: Path, *sources: str, extra: tuple[str, ...] = ()) -> Path:
         "-filter_complex", f"{chain}concat=n={len(sources)}:v=1:a=0[v]", "-map", "[v]",
         "-c:v", "libx264", "-pix_fmt", "yuv420p", *extra, str(path),
     ]  # fmt: skip
-    subprocess.run(command, check=True)
+    subprocess.run(command, check=True, timeout=30)
     return path
+
+
+@pytest.fixture(scope="module")
+def make_video(tmp_path_factory):
+    cache = tmp_path_factory.mktemp("encoded-video")
+    encoded = {}
+
+    def make(path, *sources, extra=()):
+        key = (sources, extra)
+        if key not in encoded:
+            encoded[key] = _encode_video(cache / f"{len(encoded)}.mp4", *sources, extra=extra)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(encoded[key], path)
+        return path
+
+    return make
 
 
 def reencode(source: Path, target: Path) -> Path:
@@ -69,7 +85,7 @@ def fingerprint(view, observations):
 
 
 @ffmpeg
-def test_key_frames_and_metadata(store, tmp_path):
+def test_key_frames_and_metadata(store, tmp_path, make_video):
     clip = make_video(tmp_path / "case" / "ad.mp4", "testsrc", "smptebars", "mandelbrot")
     view, ctx = video_view(store, tmp_path / "case")
     out = VideoMedia().run(view, ctx)
@@ -84,11 +100,13 @@ def test_key_frames_and_metadata(store, tmp_path):
     assert values(out, "video.fps") == [10.0]
     assert any(e.startswith("Lavf") for e in values(out, "video.encoder"))
     assert {o.signal_id for o in out} == {"M1", "M5"}
+    assert all(o.purpose is Purpose.RISK for o in out if o.signal_id == "M5")
+    assert all(o.purpose is Purpose.LINKAGE for o in out if o.signal_id == "M1")
     assert clip.is_file()
 
 
 @ffmpeg
-def test_reencoded_copy_matches_and_another_video_does_not(store, tmp_path):
+def test_reencoded_copy_matches_and_another_video_does_not(store, tmp_path, make_video):
     # rgbtestsrc's thin bands do not survive a 240-px CRF-35 re-encode; natural pictures do
     original = make_video(tmp_path / "a" / "ad.mp4", "testsrc", "smptebars", "mandelbrot")
     reencode(original, tmp_path / "b" / "ad-small.mp4")
@@ -103,9 +121,9 @@ def test_reencoded_copy_matches_and_another_video_does_not(store, tmp_path):
 
 
 @ffmpeg
-def test_single_shot_video_still_gets_a_fingerprint(store, tmp_path):
+def test_single_shot_video_still_gets_a_fingerprint(store, tmp_path, make_video):
     """A talking head samples to near-identical frames; they are kept, not collapsed to one."""
-    make_video(tmp_path / "case" / "head.mp4", "testsrc", extra=("-t", "3"))
+    make_video(tmp_path / "case" / "head.mp4", "testsrc")
     view, ctx = video_view(store, tmp_path / "case")
     assert fingerprint(view, VideoMedia().run(view, ctx)) is not None
 
@@ -132,7 +150,7 @@ def test_a_broken_file_is_not_observable(store, tmp_path):
 
 
 @ffmpeg
-def test_the_same_video_is_read_once(store, tmp_path, monkeypatch):
+def test_the_same_video_is_read_once(store, tmp_path, monkeypatch, make_video):
     """A second view of the same bytes, under another name, costs no ffmpeg run."""
     clip = make_video(tmp_path / "a" / "ad.mp4", "testsrc", "smptebars")
     (tmp_path / "b").mkdir()
@@ -149,7 +167,7 @@ def test_the_same_video_is_read_once(store, tmp_path, monkeypatch):
 
 
 @ffmpeg
-def test_a_failed_reading_is_tried_again(store, tmp_path, monkeypatch):
+def test_a_failed_reading_is_tried_again(store, tmp_path, monkeypatch, make_video):
     make_video(tmp_path / "case" / "ad.mp4", "testsrc")
     view, ctx = video_view(store, tmp_path / "case")
     monkeypatch.setattr(video_media, "key_frames", lambda path, duration: [])
@@ -183,17 +201,7 @@ def test_container_facts_from_a_phone_screen_recording():
 
 
 @ffmpeg
-def test_container_metadata_never_drives_grouping(store, tmp_path):
-    make_video(tmp_path / "case" / "ad.mp4", "testsrc")
-    view, ctx = video_view(store, tmp_path / "case")
-    out = VideoMedia().run(view, ctx)
-    m5 = [o for o in out if o.signal_id == "M5"]
-    assert m5 and all(o.purpose is Purpose.RISK for o in m5)
-    assert all(o.purpose is Purpose.LINKAGE for o in out if o.signal_id == "M1")
-
-
-@ffmpeg
-def test_frames_lost_are_said_even_when_metadata_was_read(store, tmp_path, monkeypatch):
+def test_frames_lost_are_said_even_when_metadata_was_read(store, tmp_path, monkeypatch, make_video):
     make_video(tmp_path / "case" / "ad.mp4", "testsrc")
     view, ctx = video_view(store, tmp_path / "case")
     monkeypatch.setattr(video_media, "key_frames", lambda path, duration: [])
@@ -220,7 +228,7 @@ def test_an_ffmpeg_that_cannot_run_does_not_stop_the_run(store, tmp_path, monkey
 
 
 @ffmpeg
-def test_non_utf8_tags_keep_the_frames(store, tmp_path):
+def test_non_utf8_tags_keep_the_frames(store, tmp_path, make_video):
     clip = make_video(tmp_path / "src.mp4", "testsrc", "smptebars")
     folder = tmp_path / "case"
     folder.mkdir()
@@ -234,7 +242,7 @@ def test_non_utf8_tags_keep_the_frames(store, tmp_path):
 
 
 @ffmpeg
-def test_frames_written_before_ffmpeg_failed_are_kept(store, tmp_path, monkeypatch):
+def test_frames_written_before_ffmpeg_failed_are_kept(store, tmp_path, monkeypatch, make_video):
     make_video(tmp_path / "case" / "ad.mp4", "testsrc", "smptebars", "mandelbrot")
     view, ctx = video_view(store, tmp_path / "case")
     real = video_media._run

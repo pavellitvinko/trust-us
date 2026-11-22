@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -56,8 +57,7 @@ def settings(tmp_path):
     )
 
 
-@pytest.fixture
-def model_off_cli(tmp_path):
+def _guarded_cli(tmp_path):
     """Run the real CLI in a subprocess that fails on any model import or network call.
 
     The data directory is `tmp_path / "data"`; the audit of forbidden attempts must be empty."""
@@ -90,18 +90,71 @@ def model_off_cli(tmp_path):
     return cli
 
 
+@pytest.fixture
+def model_off_cli(tmp_path):
+    return _guarded_cli(tmp_path)
+
+
 @pytest.fixture(scope="session")
-def sample_store():
-    """The organiser sample, ingested and run once. Skipped where the sample is absent."""
+def _sample_cli_database(tmp_path_factory):
+    """Exercise CLI ingestion once; consumers get independent copies of its result."""
     if not SAMPLE.is_dir():
         pytest.skip("testing_sample/ not present")
-    from ftf import pipeline
-    from ftf.ingest import ingest_path
+    work = tmp_path_factory.mktemp("sample-cli")
+    assert "relations:" in _guarded_cli(work)("ingest", str(SAMPLE), timeout=240)
+    return work / "data" / "ftf.sqlite"
 
-    s = Store(":memory:")
-    ingest_path(SAMPLE, s)
-    pipeline.run_extract(s)
+
+@pytest.fixture
+def model_off_sample(tmp_path, model_off_cli, _sample_cli_database):
+    data = tmp_path / "data"
+    data.mkdir(exist_ok=True)
+    # The CLI process has exited and closed SQLite. Never share writable databases.
+    shutil.copyfile(_sample_cli_database, data / "ftf.sqlite")
+    return model_off_cli
+
+
+@pytest.fixture(scope="session")
+def sample_observations():
+    """Decode the sample media once; callers clone observations before deriving state."""
+    if not SAMPLE.is_dir():
+        pytest.skip("testing_sample/ not present")
+    from ftf.eval import sample
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("FTF_ENRICH", "off")
+        s = sample.extracted(SAMPLE)
+    yield s
+    s.close()
+
+
+@pytest.fixture(scope="module")
+def sample_store(sample_observations):
+    """Build fingerprints and comparisons on a fresh module copy of the extracted sample."""
+    from ftf import pipeline
+    from ftf.eval import sample
+
+    s = sample.clone(sample_observations)
     pipeline.run_fingerprint(s)
     pipeline.run_compare_all(s)
     yield s
     s.close()
+
+
+@pytest.fixture(scope="session")
+def chromium():
+    from playwright.sync_api import Error, sync_playwright
+
+    try:
+        with sync_playwright() as pw:
+            pw.chromium.launch(headless=True).close()
+    except Error as exc:
+        pytest.skip(f"Chromium unavailable: {exc}")
+
+
+def pytest_collection_modifyitems(items):
+    for item in items:
+        # fixturenames includes transitive dependencies, so pure helper tests in
+        # sample-validation modules remain selectable without the sample.
+        if {"sample_observations", "_sample_cli_database"}.intersection(item.fixturenames):
+            item.add_marker(pytest.mark.sample)

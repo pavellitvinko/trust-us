@@ -38,6 +38,11 @@ packages = ["src/ftf"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "--durations=15 --durations-min=0.5"
+markers = [
+    "sample: requires the untracked organiser testing_sample directory",
+    "browser: real Chromium capture and replay tests (local HTTP servers)",
+]
 
 [tool.ruff]
 line-length = 100
