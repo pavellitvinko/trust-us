@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import itertools
 import json
+import re
 import string
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -39,6 +40,8 @@ KIND_TITLES = {
     "persuasion": "Persuasion",
 }
 META_FILE = "library.json"
+# The Ad Library's own ID (not the Ads Manager ad ID a landing URL carries).
+_LIBRARY_URL = re.compile(r"facebook\.com/ads/library/?\?(?:[^#]*&)?id=(\d+)")
 
 
 @dataclass
@@ -77,6 +80,7 @@ class Journey:
     ads: list[str]  # ad IDs the entry page carries, when the ad itself is not in the library
     steps: list[tuple[str, str]]  # (view_id, title), in the order a visitor meets them
     proofs: list[str]  # why step i leads to step i + 1
+    host: str | None = None  # the entry page's host, for an Ad Library search
 
 
 @dataclass
@@ -90,6 +94,7 @@ class Item:
     risk: Risk
     step: Step | None = None
     thumbnail: str | None = None  # absolute path of an image to show
+    library_id: str | None = None  # Meta Ad Library ID, when the item is a Library ad
     note: str | None = None  # what the latest add changed for this item
 
 
@@ -177,6 +182,28 @@ def view_title(view: View) -> tuple[str, str | None]:
         label = view.label.split(" · ", 1)[-1]
         name = host or label
     return name, host
+
+
+def library_id(view: View, root: str) -> str | None:
+    """The Meta Ad Library ID of an ad that came from the Library, if the material says so.
+
+    Landing URLs carry the Ads Manager ad ID instead, which the Library cannot look up.
+    """
+    if view.meta.get("ad_library_id"):  # an ad saved by discovery
+        return str(view.meta["ad_library_id"])
+    for key in _URL_KEYS:  # an Ad Library page captured from its link
+        if match := _LIBRARY_URL.search(str(view.meta.get(key) or "")):
+            return match.group(1)
+    for name in view.attachments:  # a video downloaded from the Library, with its metadata
+        if not name.endswith(".info.json"):
+            continue
+        try:
+            data = json.loads((Path(root) / name).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if match := _LIBRARY_URL.search(str(data.get("webpage_url") or "")):
+            return match.group(1)
+    return None
 
 
 def case_title(incident_id: str) -> str:
@@ -318,7 +345,10 @@ def build_library(
                         if o.namespace in AD_ID and o.value
                     }
                 )
-            journey = Journey(ads=ads, steps=[(v, titles[v][0]) for v in chain], proofs=proofs)
+            host = next((titles[v][1] for v in chain if titles[v][1]), None)
+            journey = Journey(
+                ads=ads, steps=[(v, titles[v][0]) for v in chain], proofs=proofs, host=host
+            )
             for position, vid in enumerate(chain, start=1):
                 journeys[vid] = journey
                 steps[vid] = Step(chain=number, position=position, total=len(chain))
@@ -366,6 +396,7 @@ def build_library(
                     risk=risk_for(vid, store.observations(vid)),
                     step=steps.get(vid),
                     thumbnail=thumbnail,
+                    library_id=library_id(view, incident.root),
                     note=note,
                 )
             )

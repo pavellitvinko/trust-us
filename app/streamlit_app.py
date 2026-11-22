@@ -424,7 +424,8 @@ def journey_html(library: Library, item: Item) -> str:
     for ad in journey.ads:
         row(
             f'{META}<span class="bar dash"></span>',
-            f'<div class="txt">Meta ad {html.escape(ad)}<br><small>Not in the library</small></div>',
+            f'<div class="txt">Meta ad {html.escape(ad)}<br>'
+            "<small>Ads Manager ID · not in the library</small></div>",
         )
         row('<span class="bar"></span>', '<div class="proof">Its ID is in the landing URL</div>')
     last = len(journey.steps) - 1
@@ -444,17 +445,33 @@ def journey_html(library: Library, item: Item) -> str:
     return f'<div class="ftf-j">{"".join(rows)}</div>'
 
 
+def meta_link(label: str, url: str, title: str) -> None:
+    """A link styled as a button, with Meta's mark (Streamlit buttons take only their icons)."""
+    st.markdown(
+        f'<a class="ftf-btn" href="{html.escape(url)}" target="_blank" rel="noopener" '
+        f'title="{html.escape(title)}">{META} {html.escape(label)}</a>',
+        unsafe_allow_html=True,
+        width="content",
+    )
+
+
 def journey_actions(library: Library, item: Item) -> None:
     journey = library.journeys[item.view_id]
+    on_path = [library.get(view_id) for view_id, _ in journey.steps]
+    library_ids = [i.library_id for i in on_path if i and i.library_id]
     with st.container(horizontal=True):
-        if journey.ads:
-            url = html.escape(ad_library_url(ad_id=journey.ads[0]))
-            st.markdown(
-                f'<a class="ftf-btn" href="{url}" target="_blank" rel="noopener" title="Opens '
-                "Meta's Ad Library. An ID from a landing URL may not match a Library entry; "
-                f'then search by the advertiser instead.">{META} Find the Meta ad in Ad Library</a>',
-                unsafe_allow_html=True,
-                width="content",
+        if library_ids:
+            meta_link(
+                "Find the Meta ad in Ad Library",
+                ad_library_url(ad_id=library_ids[0]),
+                "Opens this ad in Meta's Ad Library by its Library ID.",
+            )
+        elif journey.ads and journey.host:
+            meta_link(
+                f"Search Ad Library for {journey.host}",
+                ad_library_url(terms=journey.host),
+                "The landing URL carries the Ads Manager ad ID, which the Ad Library cannot "
+                "look up. This searches the Library for ads that mention the landing domain.",
             )
         st.button(
             "Continue with victim visitor",
@@ -487,6 +504,12 @@ def panel(library: Library, item: Item) -> None:
         else:
             st.markdown("**Journey**")
             st.caption("No proven step to or from this item.")
+            if item.library_id:
+                meta_link(
+                    "Find the Meta ad in Ad Library",
+                    ad_library_url(ad_id=item.library_id),
+                    "Opens this ad in Meta's Ad Library by its Library ID.",
+                )
 
         st.markdown("**Findings**")
         if item.risk.findings:

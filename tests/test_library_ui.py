@@ -268,3 +268,47 @@ def test_library_rows_render_and_select(tmp_path, monkeypatch):
     assert not app.exception
     assert app.session_state["selected"] == "7:second"
     assert any("second.example" in m.value for m in app.markdown if m.value.startswith("#####"))
+
+
+def test_library_ids_come_only_from_the_ad_library(tmp_path):
+    from ftf.library import library_id
+
+    (tmp_path / "ad.info.json").write_text(
+        json.dumps({"webpage_url": "https://www.facebook.com/ads/library/?id=1111222233334444"})
+    )
+    video = View(
+        view_id="v", incident_id="1", kind=ViewKind.VIDEO, label="1 · ad.mp4",
+        primary="ad.mp4", attachments=["ad.info.json"],
+    )  # fmt: skip
+    assert library_id(video, str(tmp_path)) == "1111222233334444"
+    captured = View(
+        view_id="p", incident_id="1", kind=ViewKind.PAGE, label="1 · facebook.com",
+        meta={"final_url": "https://www.facebook.com/ads/library/?active_status=all&id=55"},
+    )  # fmt: skip
+    assert library_id(captured, str(tmp_path)) == "55"
+    landing = View(
+        view_id="l", incident_id="1", kind=ViewKind.PAGE, label="1 · shop.example",
+        meta={"saved_from": "https://shop.example/?ad_id=120200000000000000"},
+    )  # fmt: skip
+    assert library_id(landing, str(tmp_path)) is None  # an Ads Manager ID is not a Library ID
+
+
+def test_a_journey_knows_its_entry_host(store, tmp_path):
+    views = [
+        View(
+            view_id=v,
+            incident_id="7",
+            kind=ViewKind.PAGE,
+            label=f"7 · {v}",
+            primary=f"{v}.html",
+            meta={"saved_from": f"https://{v}.example/"},
+        )
+        for v in ("landing", "chat")
+    ]
+    _store_with(store, views)
+    edge = FunnelEdge("landing", "chat", "funnel", ["stored navigation names the landing: u1"])
+    groups = Groups(
+        campaign_of={}, campaigns={}, family_of={}, families={},
+        funnel_edges={"7": ([edge], [])},
+    )  # fmt: skip
+    assert build_library(store, groups, tmp_path).journeys["chat"].host == "landing.example"
