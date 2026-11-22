@@ -46,7 +46,6 @@ Both APIs are used with the operator's own keys. Rate limits and data-use terms 
 | Reference photos | CC0, public domain, CC BY, CC BY-SA | Author, licence and source for each are in `src/ftf/faces/reference_people.json`. |
 
 InsightFace-based CompreFace builds are not used: their models are for non-commercial research only.
-Use of face recognition has not been confirmed by the organiser.
 
 ## Public data sources
 
