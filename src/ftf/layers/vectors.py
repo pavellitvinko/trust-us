@@ -20,6 +20,8 @@ from ._text import TEXT_NAMESPACES, body_text
 MIN_WORDS = 20
 
 # Seed lists: enough for the sample; the Perception track's entity observations extend them.
+# Bare first names ("Rafał", "Tomasz") are listed on purpose: the sample refers to its cast by
+# first name alone, and masking an unrelated namesake costs the skeleton nothing.
 CELEBRITIES = (
     "Rafał Brzoska",
     "Rafała Brzoskę",
@@ -106,10 +108,11 @@ _NUMBER = re.compile(r"\b\d+([.,]\d+)?\b")
 # tokens are Capitalised-then-lowercase, so an all-caps agency credit ("fot. PAP") and the
 # sentence after it are left alone (a capitalised agency, "fot. Reuters", is masked like a
 # name, which costs the skeleton nothing). A full stop or a line break after the first token
-# ends the byline: the second token must sit on the same line.
+# ends the byline: the second token must sit on the same line. The name must also sit on the
+# keyword's line, so a bare "Fot." ending a line does not mask the next line's first word.
 _NAME_TOKEN = r"[A-ZĄĆĘŁŃÓŚŹŻ][a-ząćęłńóśźż-]+"
 _BYLINE = re.compile(
-    rf"\b([Oo]prac\.|[Aa]utor(?:ka)?:|[Tt]ekst:|[Ff]ot\.)\s+{_NAME_TOKEN}"
+    rf"\b([Oo]prac\.|[Aa]utor(?:ka)?:|[Tt]ekst:|[Ff]ot\.)[ \t]+{_NAME_TOKEN}"
     rf"(?:[ \t]+{_NAME_TOKEN})?(?![\w-])"
 )
 _DATE = re.compile(

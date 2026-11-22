@@ -291,6 +291,9 @@ def test_mask_catches_capitalised_bylines_and_stops_at_a_line_break():
     assert _BYLINE.sub(r"\1 [PERSON]", "oprac. Natalia Pacholczyk\nPoseł") == (
         "oprac. [PERSON]\nPoseł"
     )
+    # a keyword with no name on its line is not a byline: the next line is left alone
+    assert mask("Fot.\nPremier zapytał") == "Fot. Premier zapytał"
+    assert mask("Autor:\nPoseł zapytał") == "Autor: Poseł zapytał"
 
 
 def test_mask_covers_the_inflections_the_sample_uses():
