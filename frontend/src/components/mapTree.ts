@@ -322,7 +322,3 @@ export function filterTree(nodes: TreeNode[], query: string, repeats: string[][]
   };
   return nodes.map(prune).filter((n): n is TreeNode => n !== null);
 }
-
-export function groupKeys(nodes: TreeNode[]): string[] {
-  return nodes.flatMap((n) => (n.kind === "case" ? [] : [n.key, ...groupKeys(n.children)]));
-}
