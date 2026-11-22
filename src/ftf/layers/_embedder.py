@@ -80,6 +80,8 @@ class GatewayEmbedder:
         for result in embed(list(texts), settings=self.settings, client=self.client):
             self.texts += 1
             if result.value is None:
+                # the chunks embedded before the failing one were calls (and cache writes) too
+                self.chunks += result.calls_made
                 self.failures[result.reason or "error"] += 1
                 out.append(None)
             else:

@@ -9,7 +9,7 @@ are mechanics evidence only.
 
 ## Run record
 
-- Commit: `788d857`
+- Commit: `ecae859+changes`
 - Date: 2026-11-22
 - Corpus: `testing_sample`: 10 incident folders, 37 views (21 image, 13 page, 3 video), 1316 observations; 3 views carry no fingerprint at all
 - Execution mode: model-off: no gateway call; vector layers use the local hashed-word embedder; no screenshot, video, pattern or expected-element reading
@@ -21,7 +21,7 @@ are mechanics evidence only.
 
 | Vector layer | Model | Scoring | μ | σ | k | floor μ+kσ | Background pairs |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `narrative.skeleton` | `fake-stem-256` | calibrated | 0.422 | 0.171 | 2 | 0.764 | 69 |
+| `narrative.skeleton` | `fake-stem-256` | calibrated | 0.423 | 0.171 | 2 | 0.766 | 69 |
 | `text.semantic` | `fake-stem-256` | calibrated | 0.286 | 0.171 | 2 | 0.627 | 69 |
 
 ## Reference agreement
@@ -145,14 +145,14 @@ Raw cosine and calibrated score for the three stories (Brzoska, Olejnik, Lis), t
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | same text | 1:page | 2:page | Brzoska, two domains | 0.999 | 0.998 | 1.000 | 1.000 |
 | same text | 2:healthlinkq | 3:page | Olejnik, two captures | 1.000 | 0.999 | 1.000 | 1.000 |
-| same text | 48:page | 61:article | Lis, two domains | 0.684 | 0.153 | 0.887 | 0.521 |
-| same story | 1:page | 3:page | Brzoska / Olejnik | 0.659 | 0.086 | 0.779 | 0.064 |
-| same story | 1:page | 48:page | Brzoska / Lis | 0.590 | 0.000 | 0.665 | 0.000 |
-| same story | 3:page | 48:page | Olejnik / Lis | 0.622 | 0.000 | 0.749 | 0.000 |
+| same text | 48:page | 61:article | Lis, two domains | 0.684 | 0.153 | 0.886 | 0.514 |
+| same story | 1:page | 3:page | Brzoska / Olejnik | 0.659 | 0.086 | 0.780 | 0.059 |
+| same story | 1:page | 48:page | Brzoska / Lis | 0.590 | 0.000 | 0.664 | 0.000 |
+| same story | 3:page | 48:page | Olejnik / Lis | 0.622 | 0.000 | 0.750 | 0.000 |
 | unrelated | 1:page | 10:page | news story / casino app | 0.359 | 0.000 | 0.438 | 0.000 |
-| unrelated | 3:page | 36:page | news story / investment summit | 0.315 | 0.000 | 0.518 | 0.000 |
-| unrelated | 48:page | 14:page | news story / diet lander | 0.274 | 0.000 | 0.574 | 0.000 |
-| unrelated | 1:page | 47:page | news story / prostate lander | 0.218 | 0.000 | 0.248 | 0.000 |
+| unrelated | 3:page | 36:page | news story / investment summit | 0.315 | 0.000 | 0.529 | 0.000 |
+| unrelated | 48:page | 14:page | news story / diet lander | 0.274 | 0.000 | 0.575 | 0.000 |
+| unrelated | 1:page | 47:page | news story / prostate lander | 0.218 | 0.000 | 0.250 | 0.000 |
 | unrelated | 3:page | 61:chat | news story / investment chat | 0.163 | 0.000 | 0.445 | 0.000 |
 
 Ordering the design claims (architecture §8):
