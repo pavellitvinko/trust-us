@@ -30,6 +30,7 @@ from ftf.intake import (
 )
 from ftf.material import expectation_profiles, material_summary
 from ftf.method_settings import apply_saved, current_values, reset, save
+from ftf.narrative import pair_narrative, render_narrative
 from ftf.patterns.analyst import (
     LibraryEditError,
     merge_patterns,
@@ -108,6 +109,11 @@ def add_material() -> None:
         f"Added {result['views']} views in {len(result['incidents'])} incident(s). "
         f"Campaigns: {result['campaigns']}, families: {result['families']}."
     )
+
+
+def _escape_markdown(text: str) -> str:
+    """Model text repeats hostile page content, so it must not render as links or images."""
+    return "".join(f"\\{c}" if c in "\\`*_{}[]()<>#+!|$~" else c for c in text)
 
 
 def show_status_table(title: str, section: dict) -> None:
@@ -404,6 +410,22 @@ with tab_match:
                 "Download Markdown", markdown, file_name="comparison.md", mime="text/markdown"
             )
             st.markdown(markdown)
+            st.subheader("Narrative")
+            st.caption("Written by the model from the table above. Each sentence cites its facts.")
+            pair_key = (view.view_id, other.view_id)
+            if st.button("Write narrative"):
+                with st.spinner("Writing from the evidence table"):
+                    st.session_state["narrative"] = {
+                        "pair": pair_key,
+                        "result": pair_narrative(
+                            store, view.view_id, other.view_id, report=report
+                        ),
+                    }
+            written = st.session_state.get("narrative")
+            if written and written["pair"] == pair_key:
+                st.markdown(_escape_markdown(render_narrative(written["result"])))
+                with st.expander("Facts given to the model"):
+                    st.json(written["result"]["facts"])
 
 with tab_material:
     summary = material_summary(store, view.view_id)

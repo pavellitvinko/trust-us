@@ -157,6 +157,16 @@ An element missing on every genuine page is dropped, one missing on some counts 
 and one that every page carries is added. A kind needs pages from two different operators; consent
 walls, bot checks and redirects to another domain do not count. Results apply only to the profile version they checked.
 
+## Narrative
+
+```bash
+uv run ftf narrate <view_a> <view_b>       # or: uv run ftf narrate --campaign <id>
+```
+
+The model writes two or three paragraphs from the evidence table only. Each sentence cites its
+facts, and code removes any sentence with a number, identifier or name those facts do not contain.
+The Match screen has the same action under the evidence table. Without a key, it says it is unavailable.
+
 ## Rehearse the demo
 
 ```bash
