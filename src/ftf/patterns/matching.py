@@ -7,6 +7,7 @@ text. Anything unverified or failed is not_observable, and never counts as absen
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from typing import Any, Literal
 
 import numpy as np
@@ -202,6 +203,7 @@ def run_matching(
     *,
     settings: Settings | None = None,
     client: Any = None,
+    on_view: Callable[[str, dict | None], None] | None = None,
 ) -> dict[str, int]:
     """Judge views. A passing failure never replaces an earlier verified vector."""
     summary = {"views": 0, "matched": 0, "not_observable": 0, "kept": 0, "present": 0}
@@ -211,6 +213,8 @@ def run_matching(
         if view_ids is not None and view.view_id not in view_ids:
             continue
         stored = ctx.store.observations(view.view_id)
+        if on_view:
+            on_view(view.view_id, None)
         rows, reason = judge_view(view, version, stored, settings=settings, client=client)
         summary["views"] += 1
         earlier = any(
@@ -218,8 +222,12 @@ def run_matching(
         )
         if reason and reason not in STABLE_FAILURES and earlier:
             summary["kept"] += 1
+            if on_view:
+                on_view(view.view_id, {"kept": 1})
             continue
         ctx.store.put_observations(view.view_id, MATCHING_NAME, rows)
         summary["not_observable" if reason else "matched"] += 1
         summary["present"] += sum(o.state is State.PRESENT for o in rows)
+        if on_view:
+            on_view(view.view_id, {"not_observable": int(bool(reason)), "matched": int(not reason)})
     return summary

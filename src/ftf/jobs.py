@@ -7,6 +7,7 @@ The worker opens its own store: SQLite connections stay in the thread that made 
 
 from __future__ import annotations
 
+import json
 import queue
 import shutil
 import threading
@@ -30,9 +31,19 @@ from .intake import (
 )
 from .intake import _capture as guarded_capture
 from .library import record_cases
+from .llm_checks import new_steps
 from .store import Store
 
 STAGE_NAMES = {
+    "image": "Reading images with the model",
+    "page": "Reading pages with the model",
+    "video": "Reading videos with the model",
+    "expectations": "Checking expected page elements",
+    "techniques": "Checking persuasion techniques",
+    "warnings": "Checking warning lists",
+    "rebuild": "Updating evidence and campaigns",
+    "patterns": "Discovering and matching patterns",
+    "finalize": "Updating the Library",
     "capture": "Capturing the link",
     "ingest": "Reading files",
     "extract": "Collecting clues",
@@ -145,6 +156,10 @@ class Job:
     incidents: list[str] = field(default_factory=list)
     created_at: str = field(default_factory=_now)
     finished_at: str | None = None
+    kind: str = "material"
+    results: dict = field(default_factory=dict)
+    issues: list[str] = field(default_factory=list)
+    steps: list[dict] = field(default_factory=new_steps)
 
     @property
     def stage_name(self) -> str:
@@ -185,6 +200,22 @@ class Worker:
         self._queue: queue.Queue[str] = queue.Queue()
         self._thread: threading.Thread | None = None
         self._mutex = threading.Lock()
+        self.item_checks: dict[str, dict] = {}
+        try:
+            self.item_checks = json.loads((self.data_dir / "item-checks.json").read_text())
+        except (OSError, ValueError):
+            pass
+        for checks in self.item_checks.values():
+            for check in checks.values():
+                if check["state"] in ("queued", "running"):
+                    check.update(state="failed", message="The server stopped before this check finished.")
+        self.last_llm_run: dict | None = None
+        try:
+            self.last_llm_run = json.loads((self.data_dir / "llm-run.json").read_text())
+        except (OSError, ValueError):
+            pass
+        if self.last_llm_run and self.last_llm_run["status"] in ("queued", "running"):
+            self.last_llm_run.update(status="failed", error="The server stopped before this run finished.")
 
     @property
     def uploads(self) -> Path:
@@ -195,13 +226,104 @@ class Worker:
 
     def submit(self, path: Path, names: list[str], urls: list[str] | None = None) -> Job:
         job = Job(job_id=uuid.uuid4().hex[:12], path=Path(path), names=names, urls=urls or [])
-        self.jobs[job.job_id] = job
-        self._queue.put(job.job_id)
         with self._mutex:
-            if self._thread is None or not self._thread.is_alive():
-                self._thread = threading.Thread(target=self._loop, daemon=True, name="ftf-jobs")
-                self._thread.start()
+            return self._enqueue(job)
+
+    def submit_llm(self, skipped: list[str] | None = None) -> Job:
+        from .llm_checks import require_model_keys
+
+        require_model_keys()
+        with self._mutex:
+            if any(j.kind == "llm" for j in self.active()):
+                raise IntakeError("LLM checks are already queued or running.")
+            job = Job(
+                job_id=uuid.uuid4().hex[:12], path=self.data_dir,
+                names=["All library LLM checks"], kind="llm",
+            )
+            allowed = {s["id"] for s in job.steps if s["skippable"]}
+            if set(skipped or []) - allowed:
+                raise IntakeError("Unknown or required processing step.")
+            for step in job.steps:
+                if step["id"] in (skipped or []):
+                    step.update(skipRequested=True, status="skipped")
+            return self._enqueue(job)
+
+    def skip_llm_step(self, job_id: str, step_id: str) -> None:
+        with self._mutex:
+            job = self.jobs.get(job_id)
+            if job is None or job.kind != "llm" or job.status not in ("queued", "running"):
+                raise IntakeError("This processing run is no longer active.")
+            step = next((s for s in job.steps if s["id"] == step_id), None)
+            if (step is None or not step["skippable"]
+                    or step["status"] not in ("pending", "running")
+                    or (step["status"] == "running" and not step["itemwise"])):
+                raise IntakeError("This step can no longer be skipped.")
+            step["skipRequested"] = True
+            if step["status"] == "pending":
+                step["status"] = "skipped"
+            for checks in self.item_checks.values():
+                check = checks.get(step_id)
+                if check and check.get("runId") == job_id:
+                    if check["state"] == "queued":
+                        check.update(state="skipped", message="Skipped in this run.", updatedAt=_now())
+                    elif check["state"] == "running":
+                        check.update(message="Stop requested; finishing the current item's check.")
+            self._save_llm(job)
+
+    def _enqueue(self, job: Job) -> Job:
+        self.jobs[job.job_id] = job
+        if job.kind == "llm":
+            from .processing import applicable_checks, check_result
+
+            reader = Store(self.db_path)
+            try:
+                for view in reader.views():
+                    if view.meta.get("shipped"):
+                        continue
+                    observations = reader.observations(view.view_id)
+                    checks = self.item_checks.setdefault(view.view_id, {})
+                    for spec in applicable_checks(view):
+                        name = spec["id"]
+                        skipped = next(s for s in job.steps if s["id"] == name)["skipRequested"]
+                        checks[name] = {
+                            "state": "skipped" if skipped else "queued",
+                            "message": "Excluded from this run." if skipped else "Waiting for this check.",
+                            "runId": job.job_id, "updatedAt": _now(),
+                            "hasResult": check_result(name, observations)["hasResult"]
+                            or checks.get(name, {}).get("hasResult", False),
+                        }
+            finally:
+                reader.close()
+            self._save_llm(job)
+        self._queue.put(job.job_id)
+        if self._thread is None or not self._thread.is_alive():
+            self._thread = threading.Thread(target=self._loop, daemon=True, name="ftf-jobs")
+            self._thread.start()
         return job
+
+    def _save_llm(self, job: Job) -> None:
+        from .llm_checks import result_issues
+
+        job.issues = result_issues(job.results)
+        self.last_llm_run = {
+            "id": job.job_id, "status": job.status, "stage": job.stage_name,
+            "error": job.error, "results": job.results.copy(), "issues": job.issues,
+            "createdAt": job.created_at, "finishedAt": job.finished_at,
+            "steps": [s.copy() for s in job.steps],
+        }
+        path = self.data_dir / "llm-run.json"
+        temp = path.with_suffix(".tmp")
+        temp.write_text(json.dumps(self.last_llm_run, indent=2))
+        temp.replace(path)
+        path = self.data_dir / "item-checks.json"
+        temp = path.with_suffix(".tmp")
+        temp.write_text(json.dumps(self.item_checks, indent=2))
+        temp.replace(path)
+
+    def item_checks_snapshot(self) -> dict:
+        with self._mutex:
+            return {view_id: {name: check.copy() for name, check in checks.items()}
+                    for view_id, checks in self.item_checks.items()}
 
     def invalidate(self) -> None:
         self.generation += 1
@@ -215,6 +337,49 @@ class Worker:
         store = Store(self.db_path)
         try:
             job.status = "running"
+            if job.kind == "llm":
+                from .llm_checks import run_llm_checks
+
+                def on_llm_stage(name: str) -> None:
+                    with self._mutex:
+                        job.stage = name
+                        step = next(s for s in job.steps if s["id"] == name)
+                        if not step["skipRequested"]:
+                            step["status"] = "running"
+                        self._save_llm(job)
+
+                def on_progress(name: str, done: int, total: int, current: str | None) -> None:
+                    with self._mutex:
+                        next(s for s in job.steps if s["id"] == name).update(
+                            done=done, total=total, current=current,
+                        )
+                        self._save_llm(job)
+
+                def on_complete(name: str, skipped: bool) -> None:
+                    with self._mutex:
+                        next(s for s in job.steps if s["id"] == name).update(
+                            status="skipped" if skipped else "done", current=None,
+                        )
+                        self._save_llm(job)
+
+                def on_item(name: str, view_id: str, result: dict) -> None:
+                    with self._mutex:
+                        checks = self.item_checks.setdefault(view_id, {})
+                        previous = checks.get(name, {})
+                        checks[name] = {
+                            **result, "updatedAt": _now(), "runId": job.job_id,
+                            "hasResult": result.get("hasResult", previous.get("hasResult", False)),
+                        }
+                        self._save_llm(job)
+
+                run_llm_checks(
+                    store, on_llm_stage, job.results,
+                    should_skip=lambda name: next(s for s in job.steps if s["id"] == name)["skipRequested"],
+                    on_progress=on_progress, on_complete=on_complete,
+                    on_item=on_item,
+                )
+                job.status = "done"
+                return job
             before = {i.incident_id for i in store.incidents()}
             if job.urls:
                 job.stage = "capture"
@@ -240,6 +405,17 @@ class Worker:
             store.close()
             job.finished_at = _now()
             self.generation += 1
+            if job.kind == "llm":
+                for checks in self.item_checks.values():
+                    for check in checks.values():
+                        if check.get("runId") == job.job_id and check["state"] in ("queued", "running"):
+                            check.update(state="failed" if job.status == "failed" else "unavailable",
+                                         message="Processing stopped before this check finished." if job.status == "failed"
+                                         else "No result was recorded for this check.")
+                for step in job.steps:
+                    if step["status"] == "running":
+                        step.update(status="failed", current=None)
+                self._save_llm(job)
         return job
 
     @staticmethod
