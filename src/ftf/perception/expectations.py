@@ -547,6 +547,13 @@ def _links(view: View, ctx: Context) -> list[str] | None:
     return visible_links(material.html.text) if material.html is not None else None
 
 
+def _mark_weak(o: Observation, weak: dict[str, str]) -> Observation:
+    """An absence that genuine pages also show is reported as weak evidence."""
+    if o.namespace != ELEMENT_NAMESPACE or o.state is not State.ABSENT or o.value not in weak:
+        return o
+    return o.model_copy(update={"raw": f"{o.raw} [{weak[o.value]}]", "confidence": 0.5})
+
+
 def run_expectations(
     ctx: Context,
     view_ids: list[str] | None = None,
@@ -574,6 +581,9 @@ def run_expectations(
         client=client,
     )
     profiles: dict[str, tuple[dict[str, ProfileElement], str, str | None]] = {}
+    from .grounding import apply_grounding, load_grounding
+
+    grounding = load_grounding(settings)
 
     def write(view: View, observations: list[Observation], reason: str | None) -> None:
         prior = earlier[view.view_id]
@@ -603,6 +613,7 @@ def run_expectations(
         if failure:
             write(view, _unavailable(view, failure), failure)
             continue
+        elements, weak = apply_grounding(kind, elements, profile_hash, grounding)
         observations, reason = check_view(
             view,
             kind,
@@ -612,6 +623,7 @@ def run_expectations(
             settings=settings,
             client=client,
         )
+        observations = [_mark_weak(o, weak) for o in observations]
         prior = earlier[view.view_id]
         if not reason or not prior or prior.get("named") != name:
             _assign_kind(ctx, view, name, kind, profile_hash)

@@ -145,6 +145,17 @@ Model keys are optional for the deterministic path:
 
 Libraries, models, services and data sources are listed in [docs/licences.md](docs/licences.md).
 
+## Ground expectation profiles
+
+```bash
+uv run ftf ground          # capture genuine pages and check each profile (model, network)
+uv run ftf ground --show   # decisions and false-alarm rates
+uv run ftf perceive        # later checks use the grounded profiles
+```
+
+An element missing on every genuine page is dropped, one missing on some is kept as weak evidence,
+and one that every page carries is added. Results apply only to the profile version they checked.
+
 ## Rehearse the demo
 
 ```bash
