@@ -108,7 +108,6 @@ def create_app() -> FastAPI:
 
     def patterns_ready() -> bool:
         from ..patterns.library import PatternLibraryStore
-
         version = PatternLibraryStore(settings.data_dir / "patterns/library").latest_version()
         return bool(version and version.patterns)
 
@@ -142,12 +141,7 @@ def create_app() -> FastAPI:
         try:
             for row in payload["items"]:
                 view = reader.get_view(row["id"])
-                row["processing"] = item_processing(
-                    view,
-                    reader.observations(view.view_id),
-                    tracked.get(view.view_id),
-                    patterns_available=patterns_ready(),
-                )
+                row["processing"] = item_processing(view, reader.observations(view.view_id), tracked.get(view.view_id), patterns_available=patterns_ready())
         finally:
             reader.close()
         return {
@@ -212,31 +206,15 @@ def create_app() -> FastAPI:
         reader = Store(settings.db_path)
         try:
             view = reader.get_view(view_id)
-            processing = item_processing(
-                view,
-                reader.observations(view_id),
-                worker.item_checks_snapshot().get(view_id),
-                patterns_available=patterns_ready(),
-            )
+            processing = item_processing(view, reader.observations(view_id), worker.item_checks_snapshot().get(view_id), patterns_available=patterns_ready())
         finally:
             reader.close()
-        video_runs = [
-            j for j in worker.jobs.values() if j.kind == "video" and j.view_ids == [view_id]
-        ]
+        video_runs = [j for j in worker.jobs.values() if j.kind == "video" and j.view_ids == [view_id]]
         video_run = video_runs[-1] if video_runs else None
-        return {
-            **views.detail(lib, found),
-            "processing": processing,
-            "busy": bool(worker.active()),
-            "videoAnalysis": {
-                **job_payload(video_run),
-                "steps": video_run.steps,
-                "results": video_run.results,
-                "issues": video_run.issues,
-            }
-            if video_run
-            else None,
-        }
+        return {**views.detail(lib, found), "processing": processing, "busy": bool(worker.active()),
+                "videoAnalysis": {**job_payload(video_run), "steps": video_run.steps,
+                                  "results": video_run.results, "issues": video_run.issues}
+                if video_run else None}
 
     @app.post("/api/items/{view_id}/checks", status_code=202)
     def run_item_checks(view_id: str, checks: Annotated[list[str] | None, Body()] = None) -> dict:
@@ -258,9 +236,7 @@ def create_app() -> FastAPI:
 
     @app.post("/api/items/{view_id}/video-analysis/cancel")
     def cancel_video(view_id: str) -> dict:
-        active = next(
-            (j for j in worker.active() if j.kind == "video" and j.view_ids == [view_id]), None
-        )
+        active = next((j for j in worker.active() if j.kind == "video" and j.view_ids == [view_id]), None)
         if active is None:
             raise HTTPException(409, "No active video analysis for this item.")
         worker.scheduler.cancel(active.job_id)
@@ -345,17 +321,11 @@ def create_app() -> FastAPI:
                 headers={"Content-Disposition": 'attachment; filename="comparison.json"'},
             )
         shared_refs = {
-            ref
-            for layer in report["layers"]
-            for shared in layer["shared"]
-            for refs in shared["sources"].values()
-            for ref in refs
+            ref for layer in report["layers"] for shared in layer["shared"]
+            for refs in shared["sources"].values() for ref in refs
         }
-        return {
-            "markdown": clean_b(clean_a(markdown)),
-            "sources": sources,
-            "sharedRefs": sorted(shared_refs),
-        }
+        return {"markdown": clean_b(clean_a(markdown)), "sources": sources,
+                "sharedRefs": sorted(shared_refs)}
 
     @app.get("/api/report/{name}")
     def report(name: str):
