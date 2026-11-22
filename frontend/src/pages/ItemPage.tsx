@@ -6,6 +6,7 @@ import { ItemEvidence } from "../components/evidence";
 import { VideoInspection } from "../components/video";
 import { itemUrl, LinkPair, PathView } from "../components/links";
 import { Band, Crumbs } from "../components/pagetop";
+import ItemChecks from "../components/ItemChecks";
 import { campaignUrl, kitUrl } from "../hooks";
 
 function Pair({ item, match }: { item: ItemData; match: MatchInfo }) {
@@ -28,14 +29,29 @@ export default function ItemPage() {
   const [item, setItem] = useState<ItemData | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
+    let alive = true;
+    let timer: number | undefined;
     setItem(null);
     setError(null);
-    api
-      .item(id)
-      .then(setItem)
-      .catch((e) => setError(e.message));
-    window.scrollTo(0, 0);
+    function load() {
+      api.item(id).then((data) => {
+        if (!alive) return;
+        setItem(data);
+        setError(null);
+        timer = window.setTimeout(load, data.busy ? 1500 : 10000);
+      }).catch((e) => {
+        if (alive) { setError(e.message); timer = window.setTimeout(load, 10000); }
+      });
+    }
+    load();
+    if (!window.location.hash) window.scrollTo(0, 0);
+    return () => { alive = false; window.clearTimeout(timer); };
   }, [id]);
+  useEffect(() => {
+    if (item?.id === id && window.location.hash === "#checks") {
+      document.getElementById("checks")?.scrollIntoView({ block: "start" });
+    }
+  }, [id, item?.id]);
 
   const back = (here?: { case: string; type: string }) => (
     <Crumbs
@@ -124,6 +140,8 @@ export default function ItemPage() {
           )}
         </div>
       </div>
+
+      <ItemChecks processing={item.processing} />
 
       <h2>Where the link leads</h2>
       <Path item={item} />

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 export function usePolled<T extends { busy: boolean }>(fetcher: () => Promise<T>) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [revision, setRevision] = useState(0);
   useEffect(() => {
     let alive = true;
     let timer: number | undefined;
@@ -13,7 +14,7 @@ export function usePolled<T extends { busy: boolean }>(fetcher: () => Promise<T>
           if (!alive) return;
           setData(d);
           setError(null);
-          if (d.busy) timer = window.setTimeout(load, 1500);
+          timer = window.setTimeout(load, d.busy ? 1500 : 10000);
         })
         .catch((e) => alive && setError(String(e.message ?? e)));
     load();
@@ -21,8 +22,8 @@ export function usePolled<T extends { busy: boolean }>(fetcher: () => Promise<T>
       alive = false;
       window.clearTimeout(timer);
     };
-  }, [fetcher]);
-  return { data, error };
+  }, [fetcher, revision]);
+  return { data, error, refresh: () => setRevision((r) => r + 1) };
 }
 
 export const campaignUrl = (id: string) => `/campaigns/${encodeURIComponent(id)}`;
