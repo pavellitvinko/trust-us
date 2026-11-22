@@ -119,7 +119,7 @@ def _stored_relation(store, view_a, view_b, rtype, confidence):
     Rarity is counted over campaigns at both times, so the two normally agree. When they
     do not, the stored result is older than the corpus it was computed on and the report
     says so rather than letting the two drift apart unnoticed."""
-    stored = next((r for r in store.relations() if {r.view_a, r.view_b} == {view_a, view_b}), None)
+    stored = store.get_relation(view_a, view_b)
     if stored is None:
         return {
             "relation": None,
@@ -488,7 +488,8 @@ def _display(value):
 
 def _basis_lines(basis: dict) -> list[str]:
     """The decision path and the numbers it compared, one per line."""
-    lines = [f"Decision path: **{basis.get('path', 'unknown')}** — {_display(basis['rule'])}."]
+    path, rule = basis.get("path", "unknown"), _display(basis.get("rule", "unknown"))
+    lines = [f"Decision path: **{path}** — {rule}."]
     numbers = {
         k: v
         for k, v in basis.items()

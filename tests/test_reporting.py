@@ -24,7 +24,7 @@ from ftf.eval.reference import resolve_view
 from ftf.fusion import run_method
 from ftf.layers._embedder import FakeEmbedder, set_embedder
 from ftf.registry import layers, load_plugins
-from ftf.reporting import build_pair_report, render_pair_report
+from ftf.reporting import _basis_lines, build_pair_report, render_pair_report
 from ftf.store import Store
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -281,3 +281,8 @@ def test_report_does_not_write_funnel_rows(report_store):
     before = report_store.db.execute(count).fetchone()
     build_pair_report(report_store, *views)
     assert report_store.db.execute(count).fetchone() == before
+
+
+def test_basis_lines_degrade_without_a_rule():
+    lines = _basis_lines({"path": "identity_solo", "score": 0.9})
+    assert lines[0].startswith("Decision path: **identity_solo** — unknown")

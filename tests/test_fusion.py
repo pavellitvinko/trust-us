@@ -21,8 +21,13 @@ def fused_store():
 
 
 def relation(store, a, b):
-    a, b = sorted((a, b))
-    return next(r for r in store.relations() if (r.view_a, r.view_b) == (a, b))
+    return store.get_relation(a, b)
+
+
+def test_get_relation_is_order_free_and_none_when_absent(fused_store):
+    forward = fused_store.get_relation("1:page", "2:page")
+    assert forward is not None and forward == fused_store.get_relation("2:page", "1:page")
+    assert fused_store.get_relation("1:page", "no:such") is None
 
 
 def test_same_campaign_across_different_domains(fused_store):

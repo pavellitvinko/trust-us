@@ -160,14 +160,18 @@ def summarise(
 # Confidence label thresholds, shared by the tiers that use the graded label.
 HIGH_SCORE = 0.9
 HIGH_AGREEING = 2
-HIGH_COVERAGE = 0.4
-MEDIUM_COVERAGE = 0.5
+# High needs score and agreement as well, so its coverage bar is the lower of the two;
+# medium can be reached on coverage alone, so that alternative route asks for more.
+HIGH_MIN_COVERAGE = 0.4
+MEDIUM_COVERAGE_ALTERNATIVE = 0.5
 
 
 def _confidence(score: float, coverage: float, agreeing: int, threshold: float) -> str:
-    if score >= HIGH_SCORE and agreeing >= HIGH_AGREEING and coverage >= HIGH_COVERAGE:
+    if score >= HIGH_SCORE and agreeing >= HIGH_AGREEING and coverage >= HIGH_MIN_COVERAGE:
         return "high"
-    if score >= threshold and (agreeing >= HIGH_AGREEING or coverage >= MEDIUM_COVERAGE):
+    if score >= threshold and (
+        agreeing >= HIGH_AGREEING or coverage >= MEDIUM_COVERAGE_ALTERNATIVE
+    ):
         return "medium"
     return "low"
 
@@ -177,11 +181,11 @@ def _label_rule(threshold: float) -> dict[str, str]:
     return {
         "high": (
             f"score >= {HIGH_SCORE} and at least {HIGH_AGREEING} agreeing groups "
-            f"and coverage >= {HIGH_COVERAGE}"
+            f"and coverage >= {HIGH_MIN_COVERAGE}"
         ),
         "medium": (
             f"score >= {threshold} and (at least {HIGH_AGREEING} agreeing groups "
-            f"or coverage >= {MEDIUM_COVERAGE})"
+            f"or coverage >= {MEDIUM_COVERAGE_ALTERNATIVE})"
         ),
         "low": "otherwise",
     }

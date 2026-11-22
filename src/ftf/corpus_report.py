@@ -496,6 +496,8 @@ def build_corpus_report(store: Store, config: FusionConfig = DEFAULT) -> dict[st
             "b": p["objects"]["b"]["view_id"],
             "stored": p["stored_relation"]["relation"],
             "recomputed": p["relation"],
+            "stored_confidence": p["stored_relation"]["confidence"],
+            "recomputed_confidence": p["confidence"]["label"],
         }
         for p in pairs
         if p["stored_relation"]["agrees"] is False
