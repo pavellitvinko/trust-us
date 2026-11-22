@@ -26,7 +26,15 @@ def _store() -> Store:
 
 
 def cmd_ingest(args) -> None:
+    from .intake import IntakeError, refuse_known_overwrite
+
     store = _store()
+    if not args.replace_known:
+        try:
+            refuse_known_overwrite(store, Path(args.path))
+        except IntakeError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            raise SystemExit(1) from exc
     total = 0
     for incident, views in ingest_path(Path(args.path), store):
         total += len(views)
@@ -515,6 +523,9 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--no-run", action="store_true", help="only ingest; do not extract and compare")
     p.add_argument("--candidates", action="store_true", help="compare candidate pairs only")
     p.add_argument("--no-enrich", action="store_true", help="skip DNS and RDAP lookups")
+    p.add_argument(
+        "--replace-known", action="store_true", help="let this folder replace shipped incidents"
+    )
     p.set_defaults(func=cmd_ingest)
 
     p = sub.add_parser("run", help="extract, enrich, fingerprint and compare everything stored")

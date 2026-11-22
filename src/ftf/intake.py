@@ -99,14 +99,31 @@ def allowed_folder(text: str, root: str | None) -> Path:
     return path
 
 
-def _check_new_material(store: Store, path: Path) -> None:
-    """Dry-run ingestion, so a rejected folder never touches stored incidents."""
+def _probe(path: Path):
     with tempfile.TemporaryDirectory() as scratch:
         probe = Store(Path(scratch) / "probe.sqlite")
         try:
-            found = ingest_path(path, probe)
+            return ingest_path(path, probe)
         finally:
             probe.close()
+
+
+def refuse_known_overwrite(store: Store, path: Path) -> None:
+    """Stop a new folder from replacing a shipped incident that has the same name."""
+    shipped = {v.incident_id for v in store.views() if v.meta.get("shipped")}
+    if not shipped:
+        return
+    repeated = sorted(i.incident_id for i, _ in _probe(path) if i.incident_id in shipped)
+    if repeated:
+        raise IntakeError(
+            f"would replace known incidents: {', '.join(repeated)}. Rename the folder, "
+            "or use --replace-known with your own copy of the sample."
+        )
+
+
+def _check_new_material(store: Store, path: Path) -> None:
+    """Dry-run ingestion, so a rejected folder never touches stored incidents."""
+    found = _probe(path)
     if not sum(len(views) for _, views in found):
         raise IntakeError("no views found in this material")
     existing = {i.incident_id for i in store.incidents()}
@@ -140,11 +157,11 @@ def run_stages(
         observations = pipeline.run_extract(store)
         stage("enrich")
         if enrich:
-            pipeline.run_enrich(store)
+            pipeline.run_enrich(store, [v.view_id for _, found in added for v in found])
         run_warning_lists(
             store,
             get_settings().data_dir / "warning_lists",
-            view_ids=[v.view_id for _, found in added for v in found],
+            view_ids=[v.view_id for v in store.views() if not v.meta.get("shipped")],
         )
         stage("fingerprint")
         fingerprints = pipeline.run_fingerprint(store)

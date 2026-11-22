@@ -131,6 +131,9 @@ uv run ftf corpus build testing_sample       # rebuild it from your own copy of 
 
 The shipped corpus is deterministic and has no model output or model cache, so model-based
 sections show as not run until `ftf perceive` and `ftf patterns discover` run on your material.
+While known views are loaded, text vectors use the same local embedder as the corpus, so new
+pages stay comparable with it. A new folder cannot replace a known incident unless you pass
+`ftf ingest --replace-known`.
 **This repository must stay private: organiser material must not be redistributed.**
 
 Model keys are optional for the deterministic path:

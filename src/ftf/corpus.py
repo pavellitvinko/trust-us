@@ -9,6 +9,7 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json
+import logging
 import os
 import subprocess
 import tempfile
@@ -18,18 +19,21 @@ from typing import Any
 
 from .contracts import Evidence, Fingerprint, Incident, Observation, Relation, View
 from .corpus_report import (
-    MIN_GLOBAL_SECRET_CHARS,
     TEXT_NAMESPACES,
     _cleaner,
     _hash,
-    _secret_name,
+    _walk,
+    is_secret_namespace,
+    sensitive_values,
 )
-from .store import Store
+from .store import Store, ordered, value_key
 
-SCHEMA = 1
+log = logging.getLogger(__name__)
+
+SCHEMA = 2
 DATA_FILE = "corpus.jsonl.gz"
 MANIFEST_FILE = "manifest.json"
-MAX_VALUE_CHARS = 2000
+MAX_TOTAL_CHARS = 10_000  # structural lists such as DOM class sets are long but not prose
 MAX_RAW_CHARS = 300
 
 
@@ -71,16 +75,8 @@ def _strings(value: Any):
             yield from _strings(item)
 
 
-def _secret_values(rows: list[Observation]) -> list[str]:
-    found = set()
-    for o in rows:
-        if _secret_name(o.namespace.rsplit(".", 1)[-1]):
-            found.update(v for v in _strings(o.value) if len(v) >= MIN_GLOBAL_SECRET_CHARS)
-    return sorted(found, key=len, reverse=True)
-
-
 def _too_long(value: Any) -> bool:
-    return any(len(s) > MAX_VALUE_CHARS for s in _strings(value))
+    return sum(len(s) for s in _strings(value)) > MAX_TOTAL_CHARS
 
 
 def _input_hash(store: Store) -> str:
@@ -96,7 +92,7 @@ def export_corpus(store: Store, out_dir: Path, mode: str) -> dict[str, Any]:
     """Write the sanitised corpus and its manifest, and check the result before returning."""
     views = store.views()
     observations = {v.view_id: store.observations(v.view_id) for v in views}
-    secrets = _secret_values([o for rows in observations.values() for o in rows])
+    secrets, _ = sensitive_values([o for rows in observations.values() for o in rows])
 
     clean = _cleaner(store)
     records: list[dict[str, Any]] = []
@@ -111,14 +107,13 @@ def export_corpus(store: Store, out_dir: Path, mode: str) -> dict[str, Any]:
         for o in observations[view.view_id]:
             if o.namespace in TEXT_NAMESPACES or _too_long(o.value):
                 continue
-            raw = o.raw[:MAX_RAW_CHARS] if isinstance(o.raw, str) else o.raw
-            value = o.value
-            if _secret_name(o.namespace.rsplit(".", 1)[-1]) and isinstance(value, str):
-                value = _hash(value)
-            add(
-                "observation",
-                o.model_copy(update={"raw": clean(raw) if raw else raw, "value": value}),
-            )
+            value, raw = o.value, o.raw
+            if is_secret_namespace(o.namespace):
+                value = _walk(value, _hash)
+                raw = _hash(raw) if isinstance(raw, str) else raw
+            elif isinstance(raw, str):
+                raw = clean(raw)[:MAX_RAW_CHARS]
+            add("observation", o.model_copy(update={"raw": raw, "value": value}))
         for fingerprint in store.fingerprints(view_id=view.view_id):
             add("fingerprint", fingerprint)
     for evidence in store.evidence():
@@ -177,41 +172,84 @@ def build_corpus(sample: Path, out_dir: Path) -> dict[str, Any]:
             store.close()
 
 
-def load_corpus(store: Store, source: Path) -> int:
-    """Load the shipped corpus into an empty store. Returns the number of views."""
+def _read_records(source: Path) -> dict[str, list]:
     path = Path(source) / DATA_FILE
     if not path.is_file():
         raise CorpusError(f"no corpus at {path}")
-    if store.incidents():
-        raise CorpusError("the store already has incidents; load needs an empty store")
-    manifest = json.loads((Path(source) / MANIFEST_FILE).read_text(encoding="utf-8"))
-    if manifest.get("schema") != SCHEMA:
-        raise CorpusError(f"unsupported corpus schema: {manifest.get('schema')}")
-    grouped: dict[str, list[dict]] = defaultdict(list)
-    with gzip.open(path, "rt", encoding="utf-8") as fh:
-        for line in fh:
-            record = json.loads(line)
-            grouped[record["kind"]].append(record["body"])
-    views = [View.model_validate(b) for b in grouped["view"]]
-    by_incident: dict[str, list[View]] = defaultdict(list)
-    for view in views:
-        by_incident[view.incident_id].append(view)
-    for body in grouped["incident"]:
-        incident = Incident.model_validate(body)
-        store.put_incident(incident, [], by_incident[incident.incident_id])
-    rows: dict[tuple[str, str], list[Observation]] = defaultdict(list)
-    for body in grouped["observation"]:
-        o = Observation.model_validate(body)
-        rows[(o.view_id, o.extractor)].append(o)
-    for (view_id, extractor), observations in rows.items():
-        store.put_observations(view_id, extractor, observations)
-    for body in grouped["fingerprint"]:
-        store.put_fingerprint(Fingerprint.model_validate(body))
-    for body in grouped["evidence"]:
-        store.put_evidence(Evidence.model_validate(body))
-    for body in grouped["relation"]:
-        store.put_relation(Relation.model_validate(body))
-    return len(views)
+    try:
+        manifest = json.loads((Path(source) / MANIFEST_FILE).read_text(encoding="utf-8"))
+        if manifest.get("schema") != SCHEMA:
+            raise CorpusError(f"unsupported corpus schema: {manifest.get('schema')}")
+        models = {
+            "incident": Incident,
+            "view": View,
+            "observation": Observation,
+            "fingerprint": Fingerprint,
+            "evidence": Evidence,
+            "relation": Relation,
+        }
+        out: dict[str, list] = defaultdict(list)
+        with gzip.open(path, "rt", encoding="utf-8") as fh:
+            for line in fh:
+                record = json.loads(line)
+                out[record["kind"]].append(models[record["kind"]].model_validate(record["body"]))
+        return out
+    except CorpusError:
+        raise
+    except (OSError, EOFError, ValueError, KeyError, TypeError, AttributeError) as exc:
+        raise CorpusError(f"damaged corpus at {source}: {type(exc).__name__}") from exc
+
+
+def load_corpus(store: Store, source: Path) -> int:
+    """Load the shipped corpus into an empty store, all or nothing. Returns the view count."""
+    records = _read_records(source)
+    db = store.db
+    db.execute("BEGIN IMMEDIATE")  # also stops two first sessions from seeding at once
+    try:
+        if db.execute("SELECT 1 FROM incidents LIMIT 1").fetchone():
+            raise CorpusError("the store already has incidents; load needs an empty store")
+        db.executemany(
+            "INSERT INTO incidents VALUES (?,?)",
+            [(i.incident_id, i.model_dump_json()) for i in records["incident"]],
+        )
+        db.executemany(
+            "INSERT INTO views VALUES (?,?,?,?)",
+            [
+                (v.view_id, v.incident_id, v.kind.value, v.model_dump_json())
+                for v in records["view"]
+            ],
+        )
+        db.executemany(
+            "INSERT INTO observations (view_id, extractor, namespace, value_key, body) "
+            "VALUES (?,?,?,?,?)",
+            [
+                (o.view_id, o.extractor, o.namespace, value_key(o.value), o.model_dump_json())
+                for o in records["observation"]
+            ],
+        )
+        db.executemany(
+            "INSERT INTO fingerprints VALUES (?,?,?)",
+            [(f.view_id, f.layer_id, f.model_dump_json()) for f in records["fingerprint"]],
+        )
+        db.executemany(
+            "INSERT INTO evidence VALUES (?,?,?,?,?)",
+            [
+                (*ordered(e.view_a, e.view_b), e.layer_id, e.score, e.model_dump_json())
+                for e in records["evidence"]
+            ],
+        )
+        db.executemany(
+            "INSERT INTO relations VALUES (?,?,?,?)",
+            [
+                (*ordered(r.view_a, r.view_b), r.type.value, r.model_dump_json())
+                for r in records["relation"]
+            ],
+        )
+        db.commit()
+    except BaseException:
+        db.rollback()
+        raise
+    return len(records["view"])
 
 
 def ensure_seeded(store: Store) -> bool:
@@ -221,5 +259,9 @@ def ensure_seeded(store: Store) -> bool:
     source = corpus_dir()
     if not (source / DATA_FILE).is_file():
         return False
-    load_corpus(store, source)
+    try:
+        load_corpus(store, source)
+    except CorpusError as exc:
+        log.warning("known corpus not loaded: %s", exc)
+        return False
     return True
