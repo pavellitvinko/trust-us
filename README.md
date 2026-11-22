@@ -51,6 +51,7 @@ uv run ftf ablate [--degrade]             # layer ablation / degradation tables
 uv run ftf ablate [--degrade] --sample testing_sample   # the same on real files, model off
 uv run ftf loio --sample testing_sample   # leave-one-out on real files, weights frozen
 uv run ftf validate testing_sample --out docs/method-results-real-sample.md   # the whole real-file validation
+uv run ftf validate testing_sample --model gateway --out docs/method-results-real-sample-gateway.md   # the same on real Gemini embeddings; needs GEMINI_API_KEY
 uv run streamlit run app/streamlit_app.py
 uv run pytest
 ```

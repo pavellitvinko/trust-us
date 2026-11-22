@@ -1390,14 +1390,14 @@ def narrative_checks(pairs: list[VectorPair]) -> dict[str, bool | None]:
     text = [p for p in pairs if p.group == "same text"]
     other = [p for p in pairs if p.group == "unrelated"]
     needed = (
-        [p.raw[ske] for p in story + other]
+        [p.raw[ske] for p in story + other + text]
         + [p.raw[sem] for p in story]
         + [p.score[ske] for p in story + other]
     )
     keys = ("skeleton_above_text", "story_above_unrelated_raw", "story_scored", "same_text_on_top")
     if any(v is None for v in needed) or not (story and text and other):
         return dict.fromkeys(keys)
-    text_raw = [p.raw[ske] for p in text if p.raw[ske] is not None]
+    text_raw = [p.raw[ske] for p in text]
     return {
         # masking brings the same story closer than the name-keeping text does
         "skeleton_above_text": all(p.raw[ske] >= p.raw[sem] - 0.02 for p in story),
@@ -1408,7 +1408,7 @@ def narrative_checks(pairs: list[VectorPair]) -> dict[str, bool | None]:
         # (all-zero scores would pass a >= check while separating nothing)
         "story_scored": min(p.score[ske] for p in story) > max(p.score[ske] for p in other),
         # the same text stays the closest of all
-        "same_text_on_top": bool(text_raw) and min(text_raw) >= max(p.raw[ske] for p in story),
+        "same_text_on_top": min(text_raw) >= max(p.raw[ske] for p in story),
     }
 
 
@@ -1505,7 +1505,9 @@ def validation_report(
     gateway = model == "gateway"
     if embedder is not None and not gateway:
         raise ValueError("an injected embedder needs model='gateway'; model-off ignores it")
-    settings = get_settings()
+    # The cache is counted where the embedder writes it: an injected embedder's own settings
+    # when it has them, else the environment's.
+    settings = getattr(embedder, "settings", None) or get_settings()
     if gateway and embedder is None:
         embedder = gateway_embedder(settings)
     with embedding_mode(embedder) if gateway else nullcontext():
@@ -1531,9 +1533,9 @@ def _validation_report(
             calls = getattr(get_embedder(), "chunks", 0)
             state = "cold" if cached_before == 0 else ("warm" if new == 0 else "partly warm")
             cache = (
-                f"{state}: {cached_before} chunk entries before the run, {new} written by it, "
-                f"{max(calls - new, 0)} of {calls} chunk calls served from the cache "
-                f"(`{settings.model_cache_dir / 'embed'}`)"
+                f"{state}: {cached_before} chunk entries before the run (all embedding models), "
+                f"{new} written by it, {max(calls - new, 0)} of {calls} chunk calls served from "
+                f"the cache (`{settings.model_cache_dir / 'embed'}`)"
             )
         info = manifest(base, Path(sample_dir), store, config, cache=cache)
         narrative = format_narrative(store)

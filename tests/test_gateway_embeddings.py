@@ -176,6 +176,28 @@ def test_calibration_is_per_model_and_stale_vectors_are_not_comparable(store):
         set_embedder(None)
 
 
+def test_a_missing_same_text_vector_makes_the_check_unmeasurable_not_lost():
+    """One side of a same-text pair without a vector (a refused or timed-out embed) must read
+    as not measurable, never as a lost ordering."""
+    sem, ske = sample.VECTOR_LAYERS
+
+    def pair(group, raw_sem, raw_ske, score_ske):
+        return sample.VectorPair(
+            "a",
+            "b",
+            group,
+            group,
+            raw={sem: raw_sem, ske: raw_ske},
+            score={sem: 0.0, ske: score_ske},
+        )
+
+    good = [pair("same text", 0.9, 0.95, 0.9), pair("same story", 0.6, 0.7, 0.3)]
+    good.append(pair("unrelated", 0.2, 0.3, 0.0))
+    assert all(v is True for v in sample.narrative_checks(good).values())
+    missing = [pair("same text", None, None, None), good[1], good[2]]
+    assert all(v is None for v in sample.narrative_checks(missing).values())
+
+
 def test_active_model_is_the_installed_embedder():
     set_embedder(FakeEmbedder())
     try:
@@ -223,3 +245,7 @@ def test_gateway_report_runs_every_part_on_the_injected_embedder(settings):
     # the ablation runs after the baseline reused the cache: no new client call, more chunk uses
     assert emb.chunks > client.calls > 0
     assert sample.cache_entries(settings) == client.calls
+    # the cache is counted where this embedder wrote it, not in the environment's data dir
+    cache_line = next(line for line in text.splitlines() if line.startswith("- Embedding cache:"))
+    assert f"{client.calls} written by it" in cache_line
+    assert str(settings.model_cache_dir / "embed") in cache_line

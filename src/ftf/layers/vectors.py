@@ -93,8 +93,9 @@ _CAP_NAME = re.compile(
 _AMOUNT = re.compile(r"\b\d[\d\s.,]*\s?(zł|złotych|PLN|%|kg|tys\.?|mln|miejsc|opakowań|osób)\b")
 _NUMBER = re.compile(r"\b\d+([.,]\d+)?\b")
 # Editorial bylines name the (invented) author, which is cast, not story: "oprac. Jan Nowak".
-# Name tokens are Capitalised-then-lowercase, so an agency credit ("fot. PAP") and the
-# sentence after it are left alone; a full stop after the first token ends the byline.
+# Name tokens are Capitalised-then-lowercase, so an all-caps agency credit ("fot. PAP") and
+# the sentence after it are left alone (a capitalised agency, "fot. Reuters", is masked like a
+# name, which costs the skeleton nothing); a full stop after the first token ends the byline.
 _NAME_TOKEN = r"[A-ZĄĆĘŁŃÓŚŹŻ][a-ząćęłńóśźż-]+"
 _BYLINE = re.compile(
     rf"\b(oprac\.|autor:|autorka:|tekst:|fot\.)\s+{_NAME_TOKEN}(?:\s+{_NAME_TOKEN})?(?![\w-])"
