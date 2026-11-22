@@ -141,7 +141,11 @@ def run_stages(
         stage("enrich")
         if enrich:
             pipeline.run_enrich(store)
-        run_warning_lists(store, get_settings().data_dir / "warning_lists")
+        run_warning_lists(
+            store,
+            get_settings().data_dir / "warning_lists",
+            view_ids=[v.view_id for _, found in added for v in found],
+        )
         stage("fingerprint")
         fingerprints = pipeline.run_fingerprint(store)
         stage("compare")

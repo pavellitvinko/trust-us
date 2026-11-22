@@ -835,6 +835,8 @@ def run_techniques(
     """Observe stored views. A passing failure never replaces earlier good cards."""
     summary = {"views": 0, "with_cards": 0, "not_observable": 0, "kept": 0, "cards": 0}
     for view in ctx.store.views():
+        if view.meta.get("shipped"):  # processed results only: there is no material to re-read
+            continue
         if view_ids is not None and view.view_id not in view_ids:
             continue
         try:

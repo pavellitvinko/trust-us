@@ -18,7 +18,11 @@ from .store import Store
 
 
 def _store() -> Store:
-    return Store(get_settings().db_path)
+    from .corpus import ensure_seeded
+
+    store = Store(get_settings().db_path)
+    ensure_seeded(store)
+    return store
 
 
 def cmd_ingest(args) -> None:
@@ -238,6 +242,24 @@ def cmd_patterns(args) -> None:
     if summary.get("reason"):
         raise SystemExit(1)
     print("run `ftf run` to rebuild fingerprints, comparisons and groups with pattern.score")
+
+
+def cmd_corpus(args) -> None:
+    from .corpus import CorpusError, build_corpus, corpus_dir, load_corpus
+
+    target = Path(args.dir) if args.dir else corpus_dir()
+    try:
+        if args.action == "build":
+            if not args.sample:
+                raise CorpusError("build needs the sample folder")
+            manifest = build_corpus(Path(args.sample), target)
+            print(f"corpus written to {target}: {manifest['counts']}")
+        else:
+            store = Store(get_settings().db_path)
+            print(f"loaded {load_corpus(store, target)} known views")
+    except CorpusError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
 
 
 def cmd_views(args) -> None:
@@ -500,6 +522,12 @@ def main(argv: list[str] | None = None) -> None:
     )
     p.add_argument("--snapshot-date", metavar="YYYY-MM-DD", help="date of the manual export")
     p.set_defaults(func=cmd_enrich)
+
+    p = sub.add_parser("corpus", help="build or load the shipped known corpus")
+    p.add_argument("action", choices=("build", "load"))
+    p.add_argument("sample", nargs="?", help="sample folder, for build")
+    p.add_argument("--dir", help="corpus folder (default: ./corpus)")
+    p.set_defaults(func=cmd_corpus)
 
     sub.add_parser("views", help="list views").set_defaults(func=cmd_views)
 

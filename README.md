@@ -107,6 +107,31 @@ bundle with `status` (`dns_failed`, `connection_failed`, `tls_failed`, `timeout`
 still run. Replay serves the browser only from the archive (`not_in_archive` when it lacks
 the page); the archive is kept as `page.har` and its own time stays the capture time.
 
+## Known corpus
+
+`corpus/` holds processed results for the organiser sample: observations, fingerprints, evidence
+and relations. It has no organiser files or whole-page text, secrets are hashed, and
+`corpus/manifest.json` records the commit, input hash and execution mode. The Docker image loads
+it into an empty store, so new material is compared with the known campaigns straight away.
+
+```bash
+uv run ftf corpus load                       # local: load it into an empty store
+uv run ftf corpus build testing_sample       # rebuild it from your own copy of the sample
+```
+
+The shipped corpus is deterministic and has no model output or model cache, so model-based
+sections show as not run until `ftf perceive` and `ftf patterns discover` run on your material.
+**This repository must stay private: organiser material must not be redistributed.**
+
+Model keys are optional for the deterministic path:
+
+| Key | Used for | Get it from |
+| --- | --- | --- |
+| `OPENAI_API_KEY` | page and image reading, patterns, expectation profiles | <https://platform.openai.com/api-keys> |
+| `GEMINI_API_KEY` | embeddings, video | <https://aistudio.google.com/> |
+
+Libraries, models, services and data sources are listed in [docs/licences.md](docs/licences.md).
+
 ## Run in Docker
 
 ```bash

@@ -18,6 +18,8 @@ def run_extract(store: Store, view_ids: list[str] | None = None) -> int:
     for view in store.views():
         if view_ids is not None and view.view_id not in view_ids:
             continue
+        if view.meta.get("shipped"):  # processed results only: there is no material to re-read
+            continue
         for extractor in extractors.all():
             observations = extractor.run(view, ctx)
             store.put_observations(view.view_id, extractor.name, observations)
@@ -36,6 +38,8 @@ def run_enrich(store: Store, view_ids: list[str] | None = None) -> Counter:
     counts: Counter = Counter()
     for view in store.views():
         if view_ids is not None and view.view_id not in view_ids:
+            continue
+        if view.meta.get("shipped"):  # processed results only: there is no material to re-read
             continue
         observations = store.observations(view.view_id)
         for enricher in enrichers.all():
@@ -56,6 +60,8 @@ def run_fingerprint(store: Store, view_ids: list[str] | None = None) -> int:
     count = 0
     for view in store.views():
         if view_ids is not None and view.view_id not in view_ids:
+            continue
+        if view.meta.get("shipped"):  # processed results only: there is no material to re-read
             continue
         observations = store.observations(view.view_id)
         for layer in layers.all():
