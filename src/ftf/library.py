@@ -42,6 +42,10 @@ _PROOFS = (
     ("shared brand or offer: ", "Same brand or offer: {}"),
     ("shared named person: ", "Same person named: {}"),
     ("stored navigation names the landing: ", "Stored navigation names the earlier page: {}"),
+    ("brand named on the page or its campaign: ", "The page or its campaign names the brand: {}"),
+    ("same Ad Library ID: ", "Same Ad Library ID: {}"),
+    ("same advertiser: ", "Same advertiser: {}"),
+    ("same brand or offer in both ads: ", "Both ads show the same brand or offer: {}"),
 )
 KIND_TITLES = {
     "domain": "Domain",
@@ -845,7 +849,10 @@ def build_library(
     journeys: dict[str, Journey] = {}
     steps: dict[str, Step] = {}
     for incident_id, (funnel, _co) in (groups.funnel_edges or {}).items():
-        edges = [e for e in funnel if e.source in views and e.target in views]
+        # A journey is ad -> page -> page; two views of one ad are not a step of it.
+        edges = [
+            e for e in funnel if e.kind == "funnel" and e.source in views and e.target in views
+        ]
         for number, chain in enumerate(_chains(edges), start=1):
             proofs = []
             for a, b in itertools.pairwise(chain):
