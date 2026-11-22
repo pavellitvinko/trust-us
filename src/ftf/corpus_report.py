@@ -43,6 +43,9 @@ TEXT_NAMESPACES = frozenset(
         "expect.read_text",
         "page.comments",
         "dom.comments",
+        "video.transcript",
+        "video.on_screen_text",
+        "video.scene",
     }
 )
 MODEL_SECTIONS = {

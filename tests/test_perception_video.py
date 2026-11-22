@@ -64,7 +64,7 @@ def test_reading_reaches_text_and_entities(ctx, monkeypatch):
     assert _text.body_text(rows) == SPEECH
     assert values(ctx, "page.entity.person")[0]["role"] == "endorser"
     assert values(ctx, "page.entity.organisation")[0]["role"] == "regulator_invoked"
-    assert view_text(rows) == SPEECH
+    assert view_text(rows) == f"{SPEECH}\nZarabiaj dziś"
 
 
 def test_name_without_a_real_quote_is_dropped(ctx, monkeypatch):
@@ -104,3 +104,41 @@ def test_missing_file_makes_no_model_call(ctx, monkeypatch, tmp_path):
     calls = fake(monkeypatch, ModelResult.ok(reading()))
     assert vi.run_perceive_videos(ctx)["not_observable"] == 1
     assert calls == []
+
+
+def test_caption_only_video_can_be_matched(ctx, monkeypatch):
+    fake(monkeypatch, ModelResult.ok(reading(transcript="", entities=[])))
+    vi.run_perceive_videos(ctx)
+    assert view_text(ctx.store.observations("v")) == "Zarabiaj dziś"
+
+
+def test_empty_reading_replaces_the_earlier_one(ctx, monkeypatch):
+    fake(monkeypatch, ModelResult.ok(reading()))
+    vi.run_perceive_videos(ctx)
+    silent = reading(transcript="", on_screen_text=[], scenes=[], entities=[])
+    fake(monkeypatch, ModelResult.ok(silent))
+    assert vi.run_perceive_videos(ctx)["kept"] == 0
+    assert values(ctx, "video.transcript") == [None]
+
+
+def test_missing_file_keeps_the_earlier_reading(ctx, monkeypatch, tmp_path):
+    fake(monkeypatch, ModelResult.ok(reading()))
+    vi.run_perceive_videos(ctx)
+    (tmp_path / "ad.mp4").unlink()
+    assert vi.run_perceive_videos(ctx)["kept"] == 1
+
+
+def test_unreadable_file_does_not_stop_the_run(ctx, monkeypatch):
+    def denied(*args, **kwargs):
+        raise PermissionError
+
+    monkeypatch.setattr(vi, "read_video", denied)
+    assert vi.run_perceive_videos(ctx)["not_observable"] == 1
+
+
+def test_video_text_is_not_a_script_fact_and_stays_out_of_exports():
+    from ftf.corpus_report import TEXT_NAMESPACES
+    from ftf.perception.techniques import _NOT_SCRIPT_FACTS
+
+    assert vi.NAME in _NOT_SCRIPT_FACTS
+    assert {"video.transcript", "video.on_screen_text", "video.scene"} <= TEXT_NAMESPACES
