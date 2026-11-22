@@ -539,3 +539,13 @@ def test_video_client_makes_one_attempt(settings, monkeypatch):
     keyed = Settings(settings.data_dir, "", "key", "c", "e", "v")
     gemini._make_client(keyed, 1000, 1)
     assert seen["http_options"].retry_options.attempts == 1
+
+
+def test_polish_video_name_is_uploaded_under_an_ascii_name(tmp_path):
+    from ftf.models.gemini import _as_uploadable
+
+    video = tmp_path / "Czytać [1].mp4"
+    video.write_bytes(b"video")
+    with _as_uploadable(video) as (path, mime_type):
+        assert path.name.isascii() and mime_type == "video/mp4"
+        assert path.read_bytes() == b"video"
