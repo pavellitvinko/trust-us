@@ -18,11 +18,23 @@ from .store import Store
 
 
 def _store() -> Store:
-    return Store(get_settings().db_path)
+    from .corpus import ensure_seeded
+
+    store = Store(get_settings().db_path)
+    ensure_seeded(store)
+    return store
 
 
 def cmd_ingest(args) -> None:
+    from .intake import IntakeError, refuse_known_overwrite
+
     store = _store()
+    if not args.replace_known:
+        try:
+            refuse_known_overwrite(store, Path(args.path))
+        except IntakeError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            raise SystemExit(1) from exc
     total = 0
     for incident, views in ingest_path(Path(args.path), store):
         total += len(views)
@@ -238,6 +250,24 @@ def cmd_patterns(args) -> None:
     if summary.get("reason"):
         raise SystemExit(1)
     print("run `ftf run` to rebuild fingerprints, comparisons and groups with pattern.score")
+
+
+def cmd_corpus(args) -> None:
+    from .corpus import CorpusError, build_corpus, corpus_dir, load_corpus
+
+    target = Path(args.dir) if args.dir else corpus_dir()
+    try:
+        if args.action == "build":
+            if not args.sample:
+                raise CorpusError("build needs the sample folder")
+            manifest = build_corpus(Path(args.sample), target)
+            print(f"corpus written to {target}: {manifest['counts']}")
+        else:
+            store = Store(get_settings().db_path)
+            print(f"loaded {load_corpus(store, target)} known views")
+    except CorpusError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
 
 
 def cmd_report(args) -> None:
@@ -493,6 +523,9 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--no-run", action="store_true", help="only ingest; do not extract and compare")
     p.add_argument("--candidates", action="store_true", help="compare candidate pairs only")
     p.add_argument("--no-enrich", action="store_true", help="skip DNS and RDAP lookups")
+    p.add_argument(
+        "--replace-known", action="store_true", help="let this folder replace shipped incidents"
+    )
     p.set_defaults(func=cmd_ingest)
 
     p = sub.add_parser("run", help="extract, enrich, fingerprint and compare everything stored")
@@ -514,6 +547,12 @@ def main(argv: list[str] | None = None) -> None:
     )
     p.add_argument("--snapshot-date", metavar="YYYY-MM-DD", help="date of the manual export")
     p.set_defaults(func=cmd_enrich)
+
+    p = sub.add_parser("corpus", help="build or load the shipped known corpus")
+    p.add_argument("action", choices=("build", "load"))
+    p.add_argument("sample", nargs="?", help="sample folder, for build")
+    p.add_argument("--dir", help="corpus folder (default: ./corpus)")
+    p.set_defaults(func=cmd_corpus)
 
     p = sub.add_parser("report", help="corpus report (Markdown) and JSON/CSV export")
     p.add_argument("--out", help="output folder (default: $FTF_DATA_DIR/export)")

@@ -18,6 +18,8 @@ def run_extract(store: Store, view_ids: list[str] | None = None) -> int:
     for view in store.views():
         if view_ids is not None and view.view_id not in view_ids:
             continue
+        if view.meta.get("shipped"):  # processed results only: there is no material to re-read
+            continue
         for extractor in extractors.all():
             observations = extractor.run(view, ctx)
             store.put_observations(view.view_id, extractor.name, observations)
@@ -37,6 +39,7 @@ def run_enrich(store: Store, view_ids: list[str] | None = None) -> Counter:
     for view in store.views():
         if view_ids is not None and view.view_id not in view_ids:
             continue
+        # Enrichers read stored domains, so shipped views can use them too.
         observations = store.observations(view.view_id)
         for enricher in enrichers.all():
             try:
@@ -53,17 +56,42 @@ def run_enrich(store: Store, view_ids: list[str] | None = None) -> Counter:
 
 def run_fingerprint(store: Store, view_ids: list[str] | None = None) -> int:
     load_plugins()
+    all_views = store.views()
+    has_shipped = any(v.meta.get("shipped") for v in all_views)
+    if has_shipped:
+        _use_corpus_embedder()
     count = 0
-    for view in store.views():
+    for view in all_views:
         if view_ids is not None and view.view_id not in view_ids:
             continue
         observations = store.observations(view.view_id)
         for layer in layers.all():
+            # A shipped view has no page text, so only layers fed by enrichment are rebuilt.
+            if view.meta.get("shipped") and not _uses_enrichment(layer):
+                continue
             fingerprint = layer.build(view, observations)
-            if fingerprint is not None:
-                store.put_fingerprint(fingerprint)
-                count += 1
+            if fingerprint is None:
+                continue
+            if has_shipped:
+                from .corpus_report import clean_payload
+
+                payload = clean_payload(fingerprint.payload, observations)
+                fingerprint = fingerprint.model_copy(update={"payload": payload})
+            store.put_fingerprint(fingerprint)
+            count += 1
     return count
+
+
+def _uses_enrichment(layer) -> bool:
+    return any(ns.startswith(("dns.", "rdap.")) for ns in getattr(layer, "namespaces", ()))
+
+
+def _use_corpus_embedder() -> None:
+    """Shipped vectors come from the local embedder; other models would not be comparable."""
+    from .layers._embedder import FakeEmbedder, get_embedder, set_embedder
+
+    if not isinstance(get_embedder(), FakeEmbedder):
+        set_embedder(FakeEmbedder())
 
 
 def compare_views(store: Store, view_a: str, view_b: str) -> list[Evidence]:

@@ -561,7 +561,11 @@ def run_expectations(
     named = {v.view_id: _named_kind(stored[v.view_id]) for v in pages}
     earlier = {v.view_id: _kind_row(stored[v.view_id]) for v in pages}
     known = {r["named"]: r["canonical"] for r in earlier.values() if r}
-    selected = [v for v in pages if view_ids is None or v.view_id in view_ids]
+    selected = [
+        v
+        for v in pages
+        if (view_ids is None or v.view_id in view_ids) and not v.meta.get("shipped")
+    ]
     # Only selected names are mapped; stored mappings keep other pages comparable.
     mapping, kind_failures = _canonical_kinds(
         sorted({named[v.view_id] for v in selected if named[v.view_id]}),

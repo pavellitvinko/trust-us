@@ -197,6 +197,8 @@ def run_matching(
     """Judge views. A passing failure never replaces an earlier verified vector."""
     summary = {"views": 0, "matched": 0, "not_observable": 0, "kept": 0, "present": 0}
     for view in ctx.store.views():
+        if view.meta.get("shipped"):  # processed results only: there is no material to re-read
+            continue
         if view_ids is not None and view.view_id not in view_ids:
             continue
         stored = ctx.store.observations(view.view_id)

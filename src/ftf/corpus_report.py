@@ -35,7 +35,15 @@ LINKED = (
     RelationType.SAME_PLAYBOOK,
 )
 TEXT_NAMESPACES = frozenset(
-    {"page.clean_text", "page.body_text", "text.body", "page.read_text", "expect.read_text"}
+    {
+        "page.clean_text",
+        "page.body_text",
+        "text.body",
+        "page.read_text",
+        "expect.read_text",
+        "page.comments",
+        "dom.comments",
+    }
 )
 MODEL_SECTIONS = {
     "page_reading": "page.read_text",
@@ -110,27 +118,39 @@ def _walk(value: Any, clean) -> Any:
     return value
 
 
-def _cleaner(store: Store):
-    """Hash secrets and remove local folders from any exported string."""
-    secrets, roots = set(), {}
-    for incident in store.incidents():
-        if incident.root not in (".", ""):
-            roots[incident.root] = f"<incident:{incident.incident_id}>"
-    for view in store.views():
-        for o in store.observations(view.view_id):
-            if _secret_name(o.namespace.rsplit(".", 1)[-1]):
-                # `raw` can be a whole URL, which is cleaned by parameter instead.
-                secrets.update(v for v in _strings(o.value) if len(v) >= MIN_GLOBAL_SECRET_CHARS)
+def _secret_param(name: str) -> bool:
+    return name.lower() == "key" or _secret_name(name)
+
+
+def is_secret_namespace(namespace: str) -> bool:
+    return _secret_name(namespace.rsplit(".", 1)[-1])
+
+
+def sensitive_values(observations) -> tuple[set[str], set[str]]:
+    """Secret values to replace anywhere, and page-text items to replace as whole strings."""
+    secrets, text_items = set(), set()
+    for o in observations:
+        if is_secret_namespace(o.namespace):
+            # `raw` can be a whole URL, which is cleaned by parameter instead.
+            secrets.update(v for v in _strings(o.value) if len(v) >= MIN_GLOBAL_SECRET_CHARS)
+        if o.namespace in TEXT_NAMESPACES:
+            text_items.update(_strings(o.value))
+    return secrets, text_items
+
+
+def make_cleaner(secrets: set[str], text_items: set[str], roots: dict[str, str] | None = None):
+    """A string cleaner. Equal values stay equal, so hashed identifiers can still be compared."""
+    roots = roots or {}
     ordered = sorted(secrets, key=len, reverse=True)
     ordered_roots = sorted(roots, key=len, reverse=True)
 
     def param(match: re.Match[str]) -> str:
         name, value = match.groups()
-        return f"{name}={_hash(value)}" if _secret_name(name) else match.group(0)
+        return f"{name}={_hash(value)}" if _secret_param(name) else match.group(0)
 
     def encoded(match: re.Match[str]) -> str:
         mark, name, value = match.groups()
-        return f"{mark}{name}%3D{_hash(value)}" if _secret_name(name) else match.group(0)
+        return f"{mark}{name}%3D{_hash(value)}" if _secret_param(name) else match.group(0)
 
     def truncated(match: re.Match[str]) -> str:
         token = match.group(1).rsplit("=", 1)[-1]
@@ -138,6 +158,8 @@ def _cleaner(store: Store):
         return match.group(0) if full is None else match.group(0).replace(token, _hash(full))
 
     def clean(text: str) -> str:
+        if text in text_items:
+            return _hash(text)
         for secret in ordered:
             text = text.replace(secret, _hash(secret))
         for root in ordered_roots:
@@ -146,6 +168,24 @@ def _cleaner(store: Store):
         return _TRUNCATED.sub(truncated, text)
 
     return clean
+
+
+def _cleaner(store: Store):
+    """Hash secrets and page-text items and remove local folders from any exported string."""
+    roots = {
+        incident.root: f"<incident:{incident.incident_id}>"
+        for incident in store.incidents()
+        if incident.root not in (".", "")
+    }
+    rows = [o for view in store.views() for o in store.observations(view.view_id)]
+    secrets, text_items = sensitive_values(rows)
+    return make_cleaner(secrets, text_items, roots)
+
+
+def clean_payload(payload: Any, observations) -> Any:
+    """Apply the export's hashing to one view's fingerprint, so it can match shipped ones."""
+    secrets, text_items = sensitive_values(observations)
+    return _walk(payload, make_cleaner(secrets, text_items))
 
 
 def _strip_page_text(pair: dict[str, Any]) -> dict[str, Any]:
@@ -694,8 +734,9 @@ def export_files(store: Store, config: FusionConfig = DEFAULT) -> dict[str, str]
                 omitted += 1
                 continue
             row = o.model_dump(mode="json")
-            if _secret_name(o.namespace.rsplit(".", 1)[-1]) and isinstance(row["value"], str):
-                row["value"] = _hash(row["value"])
+            if is_secret_namespace(o.namespace):
+                row["value"] = _walk(row["value"], _hash)
+                row["raw"] = _hash(row["raw"]) if isinstance(row["raw"], str) else row["raw"]
             source = row.pop("source") or {}
             row["source_file"], row["source_locator"] = source.get("file"), source.get("locator")
             observations.append(_walk(row, clean))

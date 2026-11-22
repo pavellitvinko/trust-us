@@ -20,9 +20,11 @@ RUN uv sync --locked --no-dev --no-install-project --no-cache
 
 COPY src ./src
 COPY app ./app
+COPY corpus ./corpus
 RUN uv sync --locked --no-dev --no-editable --no-cache
 
 ENV FTF_DATA_DIR=/data \
+    FTF_SEED_CORPUS=1 \
     STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
 VOLUME /data
 EXPOSE 8501

@@ -9,6 +9,7 @@ import streamlit as st
 
 from ftf.campaign_map import TOGGLES, map_data, to_dot
 from ftf.config import get_settings
+from ftf.corpus import ensure_seeded
 from ftf.corpus_report import export_files, export_zip
 from ftf.enrich.warning_lists import (
     related_listed_views,
@@ -50,6 +51,7 @@ st.title("Follow the Fake")
 
 settings = get_settings()
 store = Store(settings.db_path)
+ensure_seeded(store)
 load_plugins()
 # A running analysis already holds the current settings, so never wait for it here.
 if ANALYSIS_LOCK.acquire(blocking=False):
