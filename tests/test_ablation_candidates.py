@@ -87,6 +87,23 @@ def test_skipped_pairs_carry_the_fusion_reasons_and_a_marker():
     s.close()
 
 
+def test_cheap_relation_reads_comparability_from_the_comparator():
+    """Review of HAC-36: the cheap path and fusion must agree on which layers are comparable,
+    so the cheap path asks the comparator (`Evidence.comparable`), the same input fusion
+    reads, rather than a separate `compatible` check that can drift from `compare`."""
+    from ftf.pipeline import compare_views
+
+    s = store_from_fixtures()
+    pipeline.run_fingerprint(s)
+    layer_group = {layer.name: layer.group for layer in layers.all()}
+    views = sorted(v.view_id for v in s.views())
+    for a, b in list(combinations(views, 2))[:40]:
+        seen = {layer_group[e.layer_id] for e in compare_views(s, a, b) if e.comparable}
+        total = {layer.group for layer in layers.all()}
+        assert cheap_relation(s, a, b).coverage == pytest.approx(len(seen) / len(total), abs=1e-4)
+    s.close()
+
+
 def test_disabled_layers_restores_the_registry():
     before = layers.names()
     with disabled_layers(["ids.campaign", "kit.dom"]):

@@ -76,9 +76,12 @@ def candidate_pairs(store: Store, band_size: int = 4) -> set[Pair]:
 
 
 def cheap_relation(store: Store, a: str, b: str, config: FusionConfig = DEFAULT) -> Relation:
-    """The relation of a non-candidate pair, from layer presence alone. A layer counts as
-    comparable only if its comparator would accept the pair (`compatible`, where defined):
-    a three-state vector of another page kind, or a vector from another model, does not."""
+    """The relation of a non-candidate pair, from layer comparability alone. A layer counts
+    as comparable exactly when its comparator says so for this pair (`Evidence.comparable`,
+    the same input fusion reads): a three-state vector of another page kind, or a vector
+    from another model, does not. The layers a non-candidate pair shares hold no common
+    index key, so asking each comparator is a set intersection, not a scoring pass; the
+    scores it returns are discarded, nothing is written as compared."""
     from ..fusion.fuse import active_groups, separation
     from ..registry import comparators
 
@@ -88,8 +91,8 @@ def cheap_relation(store: Store, a: str, b: str, config: FusionConfig = DEFAULT)
     tiers_seen: set[Tier] = set()
     for layer_id in fps_a.keys() & fps_b.keys():
         layer = layers.get(layer_id)
-        check = getattr(comparators.get(layer.comparator), "compatible", None)
-        if check is None or check(fps_a[layer_id], fps_b[layer_id]):
+        evidence = comparators.get(layer.comparator).compare(fps_a[layer_id], fps_b[layer_id])
+        if evidence.comparable:
             comparable_groups.add(layer.group)
             tiers_seen.add(layer.tier)
     total = {layer.group for layer in layers.all()}

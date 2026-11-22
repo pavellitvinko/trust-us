@@ -398,4 +398,70 @@ def test_candidate_report_wording_follows_the_measurement():
     assert "No pair across view kinds is compared." in text
     assert "All 4 skipped pairs are unrelated or insufficient evidence" in text
     assert "find every linked pair here (1 of 1) while proposing 1 pairs instead of 3." in text
+    assert "No skipped pair reaches a tier score of 0.1" in text
     assert "Scaling is therefore not demonstrated" in text
+
+
+def test_scored_but_skipped_pairs_are_measured_not_counted_as_broken_parity():
+    """Review of HAC-36: a pair the index did not propose but that scored in the all-pairs
+    run is a recall measure of the index. Both runs store the same relation for it, so it
+    must not flip the verdict; it gets its own sentence instead."""
+    p = sample.CandidateParity(
+        views=4,
+        all_pairs=6,
+        compared=4,
+        by_kind={"page-page": (4, 6)},
+        by_key=[("identity", 4)],
+        differences=[],
+        reasons_differ=0,
+        groups_equal=True,
+        variants=[sample.IndexVariant("as built: all index keys", 4, 4, 2, 2, [])],
+        skipped_types={"unrelated": 2},
+        scored_skipped=[("c ~ d", 0.3), ("a ~ b", 0.12)],
+    )
+    assert p.holds
+    text = "\n".join(sample.format_candidates(p))
+    assert "**holds**" in text
+    assert "2 skipped pairs reach a tier score of 0.1 or more" in text
+    assert "(highest 0.30, c ~ d)" in text and "same relation for them" in text
+
+
+def test_group_comparison_covers_the_audit_trail_and_both_edge_lists():
+    """Review of HAC-36: a candidate run that differs only in a rejected merge, a co-captured
+    edge or an edge's evidence is not 'identical'."""
+    from ftf.grouping.funnel import FunnelEdge
+    from ftf.grouping.levels import Groups
+
+    def groups(**over):
+        base = {
+            "campaign_of": {"a": "c1", "b": "c1"},
+            "campaigns": {"c1": ["a", "b"]},
+            "family_of": {"c1": "f1"},
+            "families": {"f1": ["c1"]},
+            "playbooks_of": {},
+            "playbooks": {},
+            "rejected_merges": [("a", "x", "merge guard")],
+            "funnel_edges": {"1": ([FunnelEdge("a", "b", "funnel", ["e"])], [])},
+        }
+        base.update(over)
+        return Groups(**base)
+
+    same = sample._groups_as_tuples
+    assert same(groups()) == same(groups())
+    assert same(groups()) != same(groups(rejected_merges=[]))
+    assert same(groups()) != same(groups(campaign_of={"a": "c1", "b": "c2"}))
+    co = ([FunnelEdge("a", "b", "funnel", ["e"])], [FunnelEdge("a", "b", "co_captured", [])])
+    assert same(groups()) != same(groups(funnel_edges={"1": co}))
+    assert same(groups()) != same(
+        groups(funnel_edges={"1": ([FunnelEdge("a", "b", "funnel", ["other"])], [])})
+    )
+
+
+def test_identifier_only_variant_drops_every_catch_all_bucket():
+    """Review of HAC-36: the three-state pattern layers key on the page kind, a bucket like
+    the perceptual and vector layers'. The 'identifier keys only' variant must drop it too,
+    or a model-on run would credit identifiers with pairs the kind bucket proposed."""
+    assert sample._is_bucket_key(("perceptual.image", "*"))
+    assert sample._is_bucket_key(("playbook.pattern", "kind", "landing"))
+    assert not sample._is_bucket_key(("ids.domain", "domain.registrable", "x.example"))
+    assert not sample._is_bucket_key(("kit.text", "band", "0:abc"))

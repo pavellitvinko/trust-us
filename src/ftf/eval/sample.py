@@ -761,10 +761,22 @@ class CandidateParity:
     groups_equal: bool
     variants: list[IndexVariant]
     skipped_types: dict[str, int]  # relation type (all-pairs run) -> skipped pairs of that type
+    # pairs the index did not propose although a tier scored >= 0.1 in the all-pairs run; a
+    # recall measure of the index, not a disagreement between the runs, so not in `holds`
+    scored_skipped: list[tuple[str, float]] = field(default_factory=list)
 
     @property
     def holds(self) -> bool:
         return not self.differences and self.groups_equal and not self.reasons_differ
+
+
+# index keys that bucket every holder rather than match a value: `(layer, "*")` for the
+# perceptual and vector layers, `(layer, "kind", page_kind)` for the three-state vectors
+_BUCKET_LABEL = {"*": " (every holder)", "kind": " (every holder of a page kind)"}
+
+
+def _is_bucket_key(key: tuple) -> bool:
+    return key[1] in _BUCKET_LABEL
 
 
 def _kind_pair(kinds: dict[str, str], a: str, b: str) -> str:
@@ -780,26 +792,32 @@ def candidate_parity(base: Store, config: FusionConfig = DEFAULT) -> CandidatePa
     from ..grouping.candidates import NOT_COMPARED, build_index, candidate_pairs
 
     load_plugins()
-    with model_off():
-        full = clone(base)
-        pipeline.run_fingerprint(full)
-        groups_full = run_method(full, config)
-        rel_full = {(r.view_a, r.view_b): r for r in full.relations()}
+    full = cand = None
+    try:
+        with model_off():
+            full = clone(base)
+            pipeline.run_fingerprint(full)
+            groups_full = run_method(full, config)
+            rel_full = {(r.view_a, r.view_b): r for r in full.relations()}
+            weights.reset()
+
+            cand = clone(base)
+            pipeline.run_fingerprint(cand)
+            groups_cand = run_method(cand, config, candidates=True)
+            rel_cand = {(r.view_a, r.view_b): r for r in cand.relations()}
+            proposed = candidate_pairs(cand)
+            index = build_index(cand)
+            kinds = {v.view_id: v.kind.value for v in cand.views()}
+            labels = view_labels(cand)
+    finally:
+        # whatever happened, the process-wide weights must not keep this sample's fit
+        for store in (cand, full):
+            if store is not None:
+                store.close()
         weights.reset()
 
-        cand = clone(base)
-        pipeline.run_fingerprint(cand)
-        groups_cand = run_method(cand, config, candidates=True)
-        rel_cand = {(r.view_a, r.view_b): r for r in cand.relations()}
-        proposed = candidate_pairs(cand)
-        index = build_index(cand)
-        kinds = {v.view_id: v.kind.value for v in cand.views()}
-        labels = view_labels(cand)
-        cand.close()
-        full.close()
-    weights.reset()
-
     differences = []
+    scored_skipped = []
     reasons_differ = 0
     for key in sorted(set(rel_full) | set(rel_cand)):
         a, b = rel_full.get(key), rel_cand.get(key)
@@ -815,10 +833,8 @@ def candidate_parity(base: Store, config: FusionConfig = DEFAULT) -> CandidatePa
             differences.append(f"{name}: coverage {a.coverage} vs {b.coverage}")
         elif key in proposed and a.tier_scores != b.tier_scores:
             differences.append(f"{name}: tier scores differ on a compared pair")
-        elif key not in proposed and max(a.tier_scores.values()) >= 0.1:
-            differences.append(
-                f"{name}: skipped although a tier scores {max(a.tier_scores.values()):.2f}"
-            )
+        if key not in proposed and max(a.tier_scores.values()) >= 0.1:
+            scored_skipped.append((name, max(a.tier_scores.values())))
         if key not in proposed and [*a.reasons, NOT_COMPARED] != b.reasons:
             reasons_differ += 1
         if key in proposed and a.reasons != b.reasons:
@@ -830,7 +846,7 @@ def candidate_parity(base: Store, config: FusionConfig = DEFAULT) -> CandidatePa
     got_by_kind: Counter = Counter(_kind_pair(kinds, a, b) for a, b in proposed)
     pairs_by_key: dict[str, set] = defaultdict(set)
     for key, members in index.items():
-        family = key[0] + (" (every holder)" if key[1] == "*" else "")
+        family = key[0] + _BUCKET_LABEL.get(key[1], "")
         pairs_by_key[family] |= {tuple(sorted(p)) for p in combinations(sorted(members), 2)}
     by_key = sorted(
         ((family, len(pairs)) for family, pairs in pairs_by_key.items() if pairs),
@@ -871,24 +887,35 @@ def candidate_parity(base: Store, config: FusionConfig = DEFAULT) -> CandidatePa
         by_key=by_key,
         differences=differences,
         reasons_differ=reasons_differ,
-        groups_equal=(
-            groups_full.campaigns == groups_cand.campaigns
-            and groups_full.families == groups_cand.families
-            and groups_full.playbooks == groups_cand.playbooks
-            and {
-                i: [(e.source, e.target) for e in edges[0]]
-                for i, edges in groups_full.funnel_edges.items()
-            }
-            == {
-                i: [(e.source, e.target) for e in edges[0]]
-                for i, edges in groups_cand.funnel_edges.items()
-            }
-        ),
+        groups_equal=_groups_as_tuples(groups_full) == _groups_as_tuples(groups_cand),
         variants=[
             variant("as built: all index keys", lambda key: True),
-            variant("identifier, set and MinHash keys only", lambda key: key[1] != "*"),
+            variant("identifier, set and MinHash keys only", lambda key: not _is_bucket_key(key)),
         ],
         skipped_types=dict(sorted(skipped_types.items())),
+        scored_skipped=sorted(scored_skipped, key=lambda x: (-x[1], x[0])),
+    )
+
+
+def _groups_as_tuples(g: Groups) -> tuple:
+    """Every field of `Groups`, including the audit trail (rejected merges) and both edge
+    lists with their kind and evidence, so a run that differs only there is not 'identical'."""
+    edges = {
+        incident: tuple(
+            tuple((e.source, e.target, e.kind, tuple(e.evidence)) for e in edge_list)
+            for edge_list in pair
+        )
+        for incident, pair in g.funnel_edges.items()
+    }
+    return (
+        g.campaign_of,
+        g.campaigns,
+        g.family_of,
+        g.families,
+        g.playbooks_of,
+        g.playbooks,
+        sorted(g.rejected_merges),
+        edges,
     )
 
 
@@ -953,6 +980,14 @@ def format_candidates(p: CandidateParity) -> list[str]:
             f" Across view kinds, {cross_compared} of "
             f"{sum(total for _, total in cross_kind.values())} pairs are compared."
         )
+    if p.scored_skipped:
+        saving += (
+            f" {len(p.scored_skipped)} skipped pairs reach a tier score of 0.1 or more in the "
+            f"all-pairs run (highest {p.scored_skipped[0][1]:.2f}, {p.scored_skipped[0][0]}); "
+            "both runs still store the same relation for them."
+        )
+    else:
+        saving += " No skipped pair reaches a tier score of 0.1 in the all-pairs run."
     skipped_n = sum(p.skipped_types.values())
     if skipped_n and set(p.skipped_types) <= weak:
         saving += (
