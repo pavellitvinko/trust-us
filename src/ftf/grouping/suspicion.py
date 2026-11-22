@@ -20,7 +20,7 @@ YOUNG_DOMAIN_DAYS = 365
 # A kind counts as checked when one of these inputs was observed.
 _INPUTS = {
     "domain": ("rdap.", "warning.", "ct.prior_life_days"),  # host alone: no age or listing
-    "impersonation": ("page.read_text", "image.text"),
+    "impersonation": ("page.read_text", "image.text", "video.transcript", "video.on_screen_text"),
     "absent_elements": ("expect.element",),
     "evasion": ("page.clean_text", "page.body_text", "cloak."),
     "persuasion": ("pattern.score", "markup."),
@@ -52,6 +52,9 @@ class SuspicionSummary(BaseModel):
     level: int
     reasons_by_kind: dict[str, list[SuspicionReason]] = Field(default_factory=dict)
     unchecked_kinds: list[str] = Field(default_factory=list)
+    # Shown as context and not counted in the level: a real news photo of a public figure is
+    # not suspicious by itself.
+    face_matches: list[SuspicionReason] = Field(default_factory=list)
 
 
 def _compact(text: str) -> str:
@@ -173,9 +176,28 @@ def reason_summary_for_view(view_id: str, observations: list[Observation]) -> Su
             )
         )
     ordered = {kind: grouped[kind] for kind in KINDS if kind in grouped}
+    faces = [
+        SuspicionReason(
+            kind="face_context",
+            signal_id="G1",
+            namespace=o.namespace,
+            summary=(
+                f"possible face match to {o.value.get('person')} "
+                f"({float(o.value.get('similarity', 0)):.0%}), needs verification"
+            ),
+            value=o.value,
+            observation_ref=f"{o.extractor}/{o.namespace}#{position}",
+            source=o.source,
+        )
+        for position, o in enumerate(observations)
+        if o.namespace == "face.reference"
+        and o.state is State.PRESENT
+        and isinstance(o.value, dict)
+    ]
     return SuspicionSummary(
         view_id=view_id,
         level=len(ordered),
         reasons_by_kind=ordered,
+        face_matches=faces,
         unchecked_kinds=[k for k in KINDS if k not in ordered and not _checked(k, observations)],
     )

@@ -8,7 +8,7 @@ HackNation challenge "Kolekcjoner fejków", set by NASK.
 - **NEW**: [Pattern Library](PATTERN_LIBRARY.md) — Pattern discovery, library versioning, novelty tracking
 
 **Status: Method track built; identifier, kit, asset and perception extractors landing.**
-Twenty-three fingerprint layers, five comparator families with rarity weighting and a stoplist,
+Twenty-four fingerprint layers, five comparator families with rarity weighting and a stoplist,
 typed fusion with the contradiction and demotion rules, three-level grouping, funnel edges,
 open-set assignment, candidate generation and the evaluation harness run on
 `tests/fixtures/observations.json` with no model call (architecture §8a, §9a, §10a, §13a). The
@@ -24,6 +24,41 @@ and the basic interface are available below; broader enrichment remains to be bu
 Pattern discovery (architecture §6) includes a versioned library with stable IDs and
 merge/split history, embedding and clustering, pattern induction and matching, novelty
 tracking, and pattern-based playbook evidence. See [Pattern Library](PATTERN_LIBRARY.md).
+
+## Methodology
+
+The method is documented in one place, [docs/architecture.md](docs/architecture.md): the
+design (§1–§17, written before the build) and the as-built account that is authoritative where
+they differ: §8a layers and namespaces, §9a comparators, weights, thresholds, coverage and the
+decision table, §10a grouping and open-set assignment, §11a the pair and corpus reports, §13a
+measurements. The status banner at its top says which commit it describes. The signals it
+consumes are in [docs/signal-catalogue.md](docs/signal-catalogue.md); the observation
+namespaces each layer reads, with the aliases accepted from the other tracks, are in
+[docs/method-namespaces.md](docs/method-namespaces.md).
+
+Measurements are kept in three kinds and never mixed: fixture runs, real-sample runs with no
+model call, and real-model runs. The real-sample tables are generated, not typed,
+into [docs/method-results-real-sample.md](docs/method-results-real-sample.md); its run record
+names the commit. No gateway-embedding run exists yet; `ftf validate --model gateway` produces it
+with a key (architecture §13a, HAC-32). Agreement figures
+are agreement with one analyst's reading of the sample, not classifier accuracy.
+
+To reproduce the account with the organiser sample in `testing_sample/` and no key:
+
+```bash
+FTF_EMBEDDER=fake OPENAI_API_KEY= GEMINI_API_KEY= uv run pytest -q          # the suite, model off
+uv run ftf ingest testing_sample                                             # observations, fingerprints, relations, groups
+uv run ftf explain <view_a> <view_b>                                         # one pair: decision path, evidence, ignored and missing items
+uv run ftf report --out export                                               # corpus report, pair reports, JSON/CSV
+uv run ftf eval                                                              # agreement with docs/baseline-report.md
+uv run ftf validate testing_sample --out docs/method-results-real-sample.md  # every real-sample table, fresh store, about a minute
+uv run ftf load-fixtures && uv run ftf eval --fixtures                       # the fixture numbers of architecture §13a
+uv run ftf demo testing_sample                                               # the jury sequence on a temporary store, no model calls
+```
+
+The **Method** tab in the interface shows the same layer registry, group and tier weights and
+thresholds as architecture §9a, loaded from `FusionConfig`; edits there recompute the stored
+relations and can be restored to the shipped values.
 
 ## Run locally
 
@@ -51,6 +86,7 @@ uv run ftf ablate [--degrade]             # layer ablation / degradation tables
 uv run ftf ablate [--degrade] --sample testing_sample   # the same on real files, model off
 uv run ftf loio --sample testing_sample   # leave-one-out on real files, weights frozen
 uv run ftf validate testing_sample --out docs/method-results-real-sample.md   # the whole real-file validation
+uv run ftf validate testing_sample --model gateway --out docs/method-results-real-sample-gateway.md   # the same on real Gemini embeddings; needs GEMINI_API_KEY
 uv run pytest
 ```
 
@@ -69,6 +105,8 @@ side and open http://localhost:5173: Vite reloads on every change and forwards `
 
 - **Add material**: paste links, drop files or a whole folder (it keeps its structure; a folder of
   folders becomes one case each). Analysis runs in the background and the Library shows its progress.
+  Links are captured like `ftf capture`, in a separate browser process that reaches public addresses
+  only: a link to localhost or a private network is refused (`FTF_UI_ALLOW_PRIVATE=1` allows it in a lab).
 - **Library**: every item with a picture, as a table or as a map of linked items. Saved pages get
   their picture by being rendered offline in Chromium (JavaScript off, only files from the page's
   own folder), kept in `$FTF_DATA_DIR/previews`. Case, campaign, kit and duplicate are explained on
@@ -132,7 +170,14 @@ A capture writes `<incident>/bundle/` with `dom.html` (rendered after scrolling)
 and `manifest.json`: requested and final URL, capture time, mode, egress, user agent, the
 ordered redirect trace (`http`, `meta_refresh`, `script`, `history`, each citing its HAR
 entry), the final response's IP, TLS certificate and headers, failed and blocked requests.
-Default location: `$FTF_DATA_DIR/captures/<host>-<UTC time>/`.
+Default location: `$FTF_DATA_DIR/captures/<host>-<UTC time>-<id>/`.
+
+The interface does the same from **Add material**: enter a URL (a bare host gets `https://`;
+only http and https are opened), or upload an archived HAR to replay, then **Analyse
+material**. The capture becomes a new incident and runs through every stage like an uploaded
+folder; the result line says what the browser reached, and a failed capture is still added
+as evidence. A live capture needs Chromium (`uv run playwright install chromium`; it is in
+the Docker image).
 
 Each capture uses a fresh browser context with service workers blocked and downloads
 refused; forms are never submitted (blocked in the page, and any non-GET navigation is
@@ -141,6 +186,26 @@ bundle with `status` (`dns_failed`, `connection_failed`, `tls_failed`, `timeout`
 `http_error`) and becomes a view whose page layers are not observable, while DNS and RDAP
 still run. Replay serves the browser only from the archive (`not_in_archive` when it lacks
 the page); the archive is kept as `page.har` and its own time stays the capture time.
+
+## Start from a bare identifier
+
+```bash
+uv run ftf start example.com                 # a domain or URL: capture, enrich, compare
+uv run ftf start 2012165449475163            # anything else: look it up in processed material
+uv run ftf lookup "Świtowin Zyskarnia"       # views carrying a value, and the namespaces it sits in
+uv run ftf lookup 2012165449475163 --namespace fb_pixel --json
+```
+
+`ftf start` reads a URL, or a bare host whose suffix is on the public-suffix list, as a page
+to capture (a bare host gets `https://`; only http and https are opened). It first lists views
+already holding that registrable domain, then runs `ftf capture --ingest`; `--out`,
+`--proxy` and `--timeout` apply to that capture only. Any other hint (a pixel ID, an
+ad-library ID, a product name, including dotted ones like `Bitcoin.Era`) goes to
+`ftf lookup`, which searches the stored observations in every namespace, or only those given
+with `--namespace`. An exact match wins; when there is none, letter case is ignored and the
+output says so. Observations recorded as absent never match, and structured values (such as
+`page.entity.person`) cannot be typed in. It exits with 1 when no view carries the value
+(`--json` then prints `[]`).
 
 ## Known corpus
 
@@ -191,6 +256,18 @@ uv run ftf narrate <view_a> <view_b>       # or: uv run ftf narrate --campaign <
 The model writes two or three paragraphs from the evidence table only. Each sentence cites its
 facts, and code removes any sentence with a number, identifier or name those facts do not contain.
 The Match screen has the same action under the evidence table. Without a key, it says it is unavailable.
+
+## Face reference matching
+
+`docker compose up` also starts a private CompreFace service with no published port and loads a
+closed list of public figures from `src/ftf/faces/reference_people.json`. `ftf perceive` then
+reports "possible face match, needs verification" as context. It is not counted in the suspicion
+level, because a real news photo of a public figure is not suspicious by itself.
+
+- Matching runs only against that list. Unmatched faces are not stored, and a match cannot link campaigns.
+- Photos come from Wikimedia Commons under free licences, are not stored in the repository, and
+  CompreFace is set not to keep them. Face templates are biometric data: keep the volume private.
+- If the service is down, faces are `not_observable` and the rest of the app works.
 
 ## Rehearse the demo
 

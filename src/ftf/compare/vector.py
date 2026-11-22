@@ -8,12 +8,19 @@ background distribution (mean and spread of cosine over pairs assumed unrelated)
 
 Swapping the model means re-running `calibrate`, not moving thresholds. Uncalibrated
 layers fall back to clip(cos, 0, 1), which is honest but model-dependent.
+
+A calibration belongs to one model: `calibrate` fits over the vectors of the active embedder
+only and counts vectors of any other model as stale. A pair whose vectors come from a model
+other than the calibrated one is reported as not comparable, never scored against the wrong
+background.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import math
+from collections import Counter
 from dataclasses import asdict, dataclass
 from itertools import combinations
 from pathlib import Path
@@ -25,6 +32,8 @@ from ..registry import comparators
 if TYPE_CHECKING:
     from ..store import Store
 
+log = logging.getLogger(__name__)
+
 
 @dataclass
 class Calibration:
@@ -33,6 +42,7 @@ class Calibration:
     sigma: float
     pairs: int
     k: float = 2.0
+    stale: int = 0  # fingerprints of another model found in the store and left out
 
     def score(self, cos: float) -> float:
         floor = self.mu + self.k * self.sigma
@@ -85,13 +95,43 @@ def load_calibration(data_dir: Path, layer_id: str, model: str) -> Calibration |
     return cal
 
 
+def active_model() -> str:
+    """The model of the embedder this process builds vectors with."""
+    from ..layers._embedder import get_embedder
+
+    return get_embedder().model
+
+
 def calibrate(
-    store: Store, layer_id: str, background_pairs: set[tuple[str, str]] | None = None
+    store: Store,
+    layer_id: str,
+    background_pairs: set[tuple[str, str]] | None = None,
+    model: str | None = None,
 ) -> Calibration | None:
     """Fit mu and sigma of cosine over background pairs: by default, pairs of views from
-    different incidents that share no identity-tier evidence."""
-    fps = {f.view_id: f for f in store.fingerprints(layer_id=layer_id)}
+    different incidents that share no identity-tier evidence. Only vectors of one model take
+    part: `model` if given, else the active embedder's when it built at least two of the
+    stored vectors, else the model that built most of the store (a report over a store
+    another embedder built, such as the shipped corpus, keeps that store's calibration).
+    Vectors of any other model are counted as stale. Without two vectors of the chosen model
+    the layer's calibration is cleared, not kept from an earlier fit."""
+    all_fps = list(store.fingerprints(layer_id=layer_id))
+    present = Counter(f.payload.get("model") for f in all_fps)
+    if model is None:
+        model = active_model()
+        if present.get(model, 0) < 2 and present:
+            model = present.most_common(1)[0][0]
+    fps = {f.view_id: f for f in all_fps if f.payload.get("model") == model}
+    stale = len(all_fps) - len(fps)
+    if stale:
+        log.warning(
+            "%s: %d vectors of another model than %s are stale and not comparable",
+            layer_id,
+            stale,
+            model,
+        )
     if len(fps) < 2:
+        set_calibration(layer_id, None)
         return None
     incident_of = {v.view_id: v.incident_id for v in store.views()}
     if background_pairs is None:
@@ -111,11 +151,11 @@ def calibrate(
         cosine(fps[a].payload["values"], fps[b].payload["values"]) for a, b in background_pairs
     ]
     if not cosines:
+        set_calibration(layer_id, None)
         return None
     mu = sum(cosines) / len(cosines)
     sigma = math.sqrt(sum((c - mu) ** 2 for c in cosines) / len(cosines))
-    model = next(iter(fps.values())).payload.get("model", "?")
-    cal = Calibration(model=model, mu=mu, sigma=sigma, pairs=len(cosines))
+    cal = Calibration(model=model, mu=mu, sigma=sigma, pairs=len(cosines), stale=stale)
     set_calibration(layer_id, cal)
     return cal
 
@@ -130,7 +170,10 @@ class CalibratedCosine:
 
     def compare(self, a: Fingerprint, b: Fingerprint) -> Evidence:
         ma, mb = a.payload.get("model"), b.payload.get("model")
-        if ma != mb:
+        cal = _calibrations.get(a.layer_id)
+        # Vectors of two models, or of a model other than the calibrated one (stale vectors
+        # left by an earlier run), are not comparable: never scored against the wrong background.
+        if ma != mb or (cal is not None and cal.model != ma):
             return Evidence(
                 view_a=a.view_id,
                 view_b=b.view_id,
@@ -140,7 +183,6 @@ class CalibratedCosine:
                 version=self.version,
             )
         cos = cosine(a.payload.get("values", []), b.payload.get("values", []))
-        cal = _calibrations.get(a.layer_id)
         score = cal.score(cos) if cal else max(0.0, min(1.0, cos))
         return Evidence(
             view_a=a.view_id,

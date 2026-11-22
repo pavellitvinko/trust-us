@@ -1,4 +1,4 @@
-"""Command line: ftf capture | ingest | run | enrich | perceive | views | suspicions | observations |
+"""Command line: ftf start | lookup | capture | ingest | run | enrich | perceive | views | suspicions | observations |
 compare | pairs | relations | explain | groups | incidents | assign | eval | loio | ablate |
 validate | load-fixtures."""
 
@@ -56,21 +56,23 @@ def cmd_ingest(args) -> None:
 
 
 def _capture_dir(url: str | None, replay: Path | None) -> Path:
-    from datetime import UTC, datetime
-    from urllib.parse import urlsplit
+    from .intake import capture_dir
 
-    host = urlsplit(url if url and "//" in url else f"//{url or ''}").hostname
-    name = host or (replay.stem if replay else "capture")
-    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    return get_settings().data_dir / "captures" / f"{name}-{stamp}"
+    return capture_dir(url, replay)
 
 
 def cmd_capture(args) -> None:
     """Capture a URL (or replay an archived HAR) into a bundle; optionally ingest and run it."""
     from .capture import capture_url
     from .ingest import ingest_folder
+    from .intake import IntakeError, check_url
 
     replay = Path(args.replay) if args.replay else None
+    try:
+        args.url = check_url(args.url or "") or None  # a bare domain gets https://
+    except IntakeError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        raise SystemExit(2) from exc
     if not args.url and replay is None:
         print("error: give a URL, or --replay with an archived HAR", file=sys.stderr)
         raise SystemExit(2)
@@ -109,6 +111,57 @@ def cmd_capture(args) -> None:
         cmd_run(args)
     if not result.ok:
         raise SystemExit(3)
+
+
+def _print_hits(hits) -> None:
+    for h in hits:
+        label = f"  {h.label}" if h.label else ""
+        print(f"{h.view_id}  [{h.incident_id}]{label}  via {', '.join(h.namespaces)}")
+    if hits and not hits[0].exact:
+        print("(matched ignoring letter case)")
+
+
+def cmd_lookup(args) -> None:
+    """Views in the processed material that carry a value: pixel ID, ad ID, product name."""
+    from dataclasses import asdict
+
+    from .lookup import lookup
+
+    hits = lookup(_store(), args.value, args.namespace)
+    if args.json:
+        print(json.dumps([asdict(h) for h in hits], ensure_ascii=False, indent=2))
+    else:
+        _print_hits(hits)
+    if not hits:
+        if not args.json:
+            print(f"no stored view carries {args.value!r}", file=sys.stderr)
+        raise SystemExit(1)
+
+
+def cmd_start(args) -> None:
+    """Start from a bare hint: a domain or URL is captured, enriched and compared; any other
+    value is looked up among the views already processed."""
+    from .intake import IntakeError, check_url
+    from .lookup import is_address, lookup, registrable
+
+    hint = args.hint.strip()
+    if not is_address(hint):
+        args.value, args.namespace, args.json = hint, None, False
+        cmd_lookup(args)
+        return
+    try:
+        url = check_url(hint)  # refuse ftp:// and the like before anything runs
+    except IntakeError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        raise SystemExit(2) from exc
+    known = lookup(_store(), registrable(url))
+    if known:
+        print(f"already seen ({len(known)} views):")
+        _print_hits(known)
+    print(f"capturing {url}")
+    args.url, args.replay, args.ingest = url, None, True
+    args.cloaking = args.crawler = False
+    cmd_capture(args)
 
 
 def _capture_cloaking(args, incident_dir: Path) -> None:
@@ -195,13 +248,19 @@ def cmd_load_fixtures(args) -> None:
 
 def cmd_perceive(args) -> None:
     from .perception.expectations import run_expectations
+    from .perception.faces import run_perceive_faces
     from .perception.image import run_perceive
     from .perception.page import run_perceive_pages
     from .perception.techniques import run_techniques
+    from .perception.video import run_perceive_videos
     from .registry import Context
 
     ctx = Context(_store())
-    for label, run in (("image", run_perceive), ("page", run_perceive_pages)):
+    for label, run in (
+        ("image", run_perceive),
+        ("page", run_perceive_pages),
+        ("video", run_perceive_videos),
+    ):
         summary = run(ctx, args.view or None)
         print(
             f"{label} views: {summary['views']}, read: {summary['read']}, "
@@ -216,6 +275,8 @@ def cmd_perceive(args) -> None:
         f"not observable: {checks['not_observable']}, "
         f"failed but kept earlier check: {checks['kept']}, profiles: {checks['profiles']}"
     )
+    faces = run_perceive_faces(ctx, args.view or None)
+    print(f"faces: {faces}")
     # After image and page reading, so a screenshot's text can be quoted as technique evidence.
     cards = run_techniques(ctx, args.view or None)
     print(
@@ -395,6 +456,29 @@ def cmd_narrate(args) -> None:
         print(f"\n({result['rejected']} unsupported sentence(s) removed)")
 
 
+def cmd_faces(args) -> None:
+    """Set up the private face service and load the closed reference list."""
+    from .faces.client import FaceServiceError, bootstrap, service_url
+    from .faces.enroll import enroll
+
+    url = service_url()
+    if not url:
+        print("error: FTF_COMPREFACE_URL is not set", file=sys.stderr)
+        raise SystemExit(1)
+    try:
+        report = enroll(bootstrap(url))
+    except FaceServiceError as exc:
+        print(f"error: face service: {exc.reason}", file=sys.stderr)
+        raise SystemExit(1) from exc
+    print(f"added {report['added']}, already loaded {report['already']}")
+    print(f"ready: {', '.join(report['people_ready']) or 'nobody'}")
+    for item in report["skipped"]:
+        print(f"skipped {item['person']}: {item['title']} ({item['why']})")
+    if report["people_missing"]:
+        print(f"error: no photo for {', '.join(report['people_missing'])}", file=sys.stderr)
+        raise SystemExit(1)
+
+
 def cmd_views(args) -> None:
     for v in _store().views():
         print(f"{v.view_id}  {v.kind.value:5}  {v.label}")
@@ -413,6 +497,8 @@ def cmd_suspicions(args) -> None:
             print(f"  {kind}:")
             for r in reasons:
                 print(f"    [{r.signal_id}] {r.summary} ({r.source.file}:{r.source.locator})")
+        for r in summary.face_matches:
+            print(f"  context: {r.summary} ({r.source.file}:{r.source.locator})")
         if summary.unchecked_kinds:
             print(f"  not checked: {', '.join(summary.unchecked_kinds)}")
 
@@ -585,7 +671,12 @@ def cmd_validate(args) -> None:
 
     parts = [p for p in ("candidates", "degrade", "ablate", "loio") if p not in (args.skip or [])]
     workdir = get_settings().data_dir / "tmp"
-    text = sample.validation_report(Path(args.path), workdir=workdir, parts=parts)
+    try:
+        text = sample.validation_report(
+            Path(args.path), workdir=workdir, parts=parts, model=args.model
+        )
+    except sample.MissingKeyError as exc:  # refuse; never fall back to model-off silently
+        raise SystemExit(f"error: {exc}") from exc
     if args.out:
         Path(args.out).write_text(text, encoding="utf-8")
         print(f"wrote {args.out}")
@@ -623,8 +714,30 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="ftf", description="Follow the Fake")
     sub = parser.add_subparsers(dest="command", required=True)
 
+    p = sub.add_parser(
+        "start", help="start from a hint: a domain or URL is captured, anything else looked up"
+    )
+    p.add_argument("hint", help="domain, URL, pixel ID, ad-library ID or product name")
+    p.add_argument("--out", help="incident folder to write (default: $FTF_DATA_DIR/captures/…)")
+    p.add_argument("--incident", help="incident id (default: the folder name)")
+    p.add_argument("--proxy", help="proxy server, e.g. http://host:3128 (egress is recorded)")
+    p.add_argument("--timeout", type=float, default=30.0, help="navigation timeout, seconds")
+    p.add_argument("--candidates", action="store_true", help="compare candidate pairs only")
+    p.add_argument("--no-enrich", action="store_true", help="skip DNS, RDAP and crt.sh lookups")
+    p.set_defaults(func=cmd_start)
+
+    p = sub.add_parser("lookup", help="views in the processed material that carry a value")
+    p.add_argument("value", help="pixel ID, ad-library ID, product name, domain, …")
+    p.add_argument("--namespace", action="append", help="only this namespace; repeatable")
+    p.add_argument("--json", action="store_true", help="print the matches as JSON")
+    p.set_defaults(func=cmd_lookup)
+
     p = sub.add_parser("capture", help="capture a URL with a headless browser into a bundle")
-    p.add_argument("url", nargs="?", help="page to capture; optional with --replay")
+    p.add_argument(
+        "url",
+        nargs="?",
+        help="page or bare domain to capture (https:// is added); optional with --replay",
+    )
     p.add_argument("--replay", metavar="HAR", help="serve the browser from this archived HAR")
     p.add_argument("--out", help="incident folder to write (default: $FTF_DATA_DIR/captures/…)")
     p.add_argument("--proxy", help="proxy server, e.g. http://host:3128 (egress is recorded)")
@@ -702,6 +815,10 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--campaign", help="a campaign id, instead of two views")
     p.set_defaults(func=cmd_narrate)
 
+    p = sub.add_parser("faces", help="face reference list in the private CompreFace service")
+    p.add_argument("action", choices=("setup",))
+    p.set_defaults(func=cmd_faces)
+
     sub.add_parser("views", help="list views").set_defaults(func=cmd_views)
 
     p = sub.add_parser("suspicions", help="show why a view is suspicious")
@@ -771,6 +888,13 @@ def main(argv: list[str] | None = None) -> None:
     )
     p.add_argument("path", help="a folder of incident folders")
     p.add_argument("--out", help="write the Markdown report here instead of printing it")
+    p.add_argument(
+        "--model",
+        choices=["off", "gateway"],
+        default="off",
+        help="off: local hashed-word embedder, no model call (default); gateway: real Gemini "
+        "embeddings through the cache, needs GEMINI_API_KEY (HAC-32)",
+    )
     p.add_argument(
         "--skip",
         action="append",

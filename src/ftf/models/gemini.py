@@ -248,10 +248,16 @@ def _convert_to_mp4(source: Path, target: Path) -> None:
 def _as_uploadable(path: Path) -> Iterator[tuple[Path, str]]:
     """Yield a file Gemini accepts, converting to a temporary MP4 when needed."""
     mime_type = VIDEO_MIME_TYPES.get(path.suffix.lower())
-    if mime_type is not None:
+    if mime_type is not None and path.name.isascii():
         yield path, mime_type
         return
     with tempfile.TemporaryDirectory(prefix="ftf-video-") as folder:
+        if mime_type is not None:
+            # The SDK sends the file name in an HTTP header, which must be ASCII.
+            link = Path(folder) / f"video{path.suffix.lower()}"
+            link.symlink_to(path.resolve())
+            yield link, mime_type
+            return
         target = Path(folder) / "video.mp4"
         _convert_to_mp4(path, target)
         yield target, "video/mp4"

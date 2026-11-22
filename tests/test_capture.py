@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import ClassVar
@@ -323,6 +324,15 @@ class _Handler(BaseHTTPRequestHandler):
         pass
 
     def do_GET(self):
+        if self.path == "/to-private":  # a public page sending the browser inward
+            self.send_response(302)
+            port = self.server.server_address[1]
+            self.send_header("Location", f"http://metadata.test:{port}/final")
+            self.end_headers()
+            return
+        if self.path == "/hang":
+            time.sleep(30)
+            return
         if self.path == "/r":
             self.send_response(302)
             self.send_header("Location", "/meta")
@@ -530,3 +540,147 @@ def test_cli_capture_ingests_and_runs(tmp_path, monkeypatch, site, capsys):
     with pytest.raises(SystemExit) as exc:
         main(["capture", f"http://127.0.0.1:{_closed_port()}/", "--out", str(tmp_path / "x")])
     assert exc.value.code == 3
+
+
+@browser
+def test_interface_replay_runs_inside_an_event_loop(tmp_path, store, monkeypatch):
+    """The interface path: replay a HAR into a new incident and run every stage. Called from a
+    thread with a running event loop, as Streamlit may, where Playwright's sync API refuses."""
+    import asyncio
+
+    from ftf import intake
+
+    monkeypatch.setenv("FTF_EMBEDDER", "fake")
+    monkeypatch.setenv("FTF_DATA_DIR", str(tmp_path / "data"))
+    har = tmp_path / "archive.har"
+    body = "<html><body><h1>Archived offer</h1><script>fbq('init','2012165449475163')</script>"
+    _write_har(har, [_entry("https://gone-offer.live/", body=body + "</body></html>")])
+
+    async def in_loop():
+        return intake.capture_and_run(store, None, replay_har=har, enrich=False, timeout=15)
+
+    result = asyncio.run(in_loop())
+    assert result["capture"]["mode"] == "replay" and result["capture"]["ok"]
+    assert result["views"] == 1 and result["incidents"][0].startswith("archive-")
+    (view,) = [v for v in store.views() if v.incident_id == result["incidents"][0]]
+    assert [o.value for o in _obs(store, view.view_id, "fb_pixel")] == ["2012165449475163"]
+
+
+@browser
+def test_public_only_capture_never_reaches_a_local_address(tmp_path, site):
+    from ftf.capture import capture_url
+
+    result = capture_url(f"{site}/final", tmp_path / "b", timeout=10, settle=1, public_only=True)
+    assert not result.ok and "private address" in result.manifest.error
+    assert any(b.error == "private address 127.0.0.1" for b in result.manifest.blocked)
+    assert not (tmp_path / "b" / "dom.html").exists()
+
+
+@pytest.fixture
+def fake_dns(monkeypatch):
+    """public.test is the test site on loopback, counted as public; metadata.test is inside."""
+    from ftf.capture import gate
+
+    names = {"public.test": ["127.0.0.1"], "metadata.test": ["127.0.0.9"]}
+    monkeypatch.setattr(gate, "resolve", lambda host: names.get(host, []))
+    monkeypatch.setattr(gate, "is_public", lambda address: address == "127.0.0.1")
+
+
+@browser
+def test_public_only_capture_goes_through_the_gate(tmp_path, site, fake_dns):
+    from ftf.capture import capture_url
+
+    port = site.rsplit(":", 1)[1]
+    result = capture_url(
+        f"http://public.test:{port}/final", tmp_path / "b", timeout=10, settle=1, public_only=True
+    )
+    assert result.ok and "Final offer" in (tmp_path / "b" / "dom.html").read_text()
+    assert result.manifest.server.ip == "127.0.0.1"  # the address the gate pinned, not its own
+
+
+@browser
+def test_redirect_to_a_private_address_is_refused(tmp_path, site, fake_dns):
+    """route() never sees redirect hops; the gate does."""
+    from ftf.capture import capture_url
+
+    port = site.rsplit(":", 1)[1]
+    result = capture_url(
+        f"http://public.test:{port}/to-private",
+        tmp_path / "b",
+        timeout=10,
+        settle=1,
+        public_only=True,
+    )
+    man = result.manifest
+    assert man.status is Status.FAILED and "metadata.test" in man.error
+    assert [b.url for b in man.blocked] == ["metadata.test"]
+    assert not (tmp_path / "b" / "dom.html").exists()
+
+
+@browser
+def test_unresolved_host_through_the_gate_is_a_dns_failure(tmp_path, fake_dns):
+    from ftf.capture import capture_url
+
+    result = capture_url(
+        "https://gone.test/", tmp_path / "b", timeout=10, settle=1, public_only=True
+    )
+    assert result.manifest.status is Status.DNS_FAILED
+
+
+@browser
+def test_hung_capture_is_killed(tmp_path, store, site, monkeypatch):
+    import time as clock
+
+    from ftf import intake
+
+    monkeypatch.setenv("FTF_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("FTF_UI_ALLOW_PRIVATE", "1")
+    monkeypatch.setattr(intake, "_deadline", lambda timeout: 5)
+    started = clock.monotonic()
+    with pytest.raises(intake.IntakeError, match="did not finish"):
+        intake.capture_and_run(store, f"{site}/hang", enrich=False, timeout=60)
+    assert clock.monotonic() - started < 25
+    assert not list((tmp_path / "data" / "captures").iterdir())
+
+
+@browser
+def test_replay_with_a_url_needs_no_document_in_the_archive(tmp_path):
+    from ftf.capture import capture_url
+
+    har = tmp_path / "api.har"
+    _write_har(har, [_entry("https://gone-offer.live/api", body="{}", mime="application/json")])
+    result = capture_url(
+        "https://gone-offer.live/", tmp_path / "b", replay_har=har, timeout=10, settle=1
+    )
+    assert result.manifest.mode == "replay" and result.manifest.status is Status.NOT_IN_ARCHIVE
+
+
+@browser
+def test_interface_captures_a_live_url(tmp_path, monkeypatch, site):
+    """Add material → link in the web interface: the background worker captures it through
+    the guarded child process (HAC-45), and the capture becomes a stored view."""
+    import time
+
+    from fastapi.testclient import TestClient
+
+    from ftf.store import Store
+    from ftf.web.app import create_app
+
+    monkeypatch.setenv("FTF_EMBEDDER", "fake")
+    monkeypatch.setenv("FTF_ENRICH", "off")
+    monkeypatch.setenv("FTF_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("FTF_WEB_DIST", str(tmp_path / "no-dist"))
+    monkeypatch.setenv("FTF_UI_ALLOW_PRIVATE", "1")  # the test site is on 127.0.0.1
+    client = TestClient(create_app())
+    job = client.post("/api/material", data={"links": [f"{site}/r"]})
+    assert job.status_code == 200, job.text
+    for _ in range(240):
+        library = client.get("/api/library").json()
+        if not library["busy"]:
+            break
+        time.sleep(0.5)
+    assert not library["busy"] and not library["jobs"], library["jobs"]  # finished, not failed
+    store = Store(tmp_path / "data" / "ftf.sqlite")
+    (view,) = [v for v in store.views() if v.meta.get("capture_status") == "ok"]
+    assert "/final" in (view.meta.get("final_url") or "")
+    assert any(i["id"] == view.view_id for i in library["items"])

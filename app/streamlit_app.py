@@ -25,7 +25,7 @@ from ftf.enrich.warning_lists import (
 from ftf.fusion import run_method
 from ftf.grouping import build_groups
 from ftf.intake import ANALYSIS_LOCK, IntakeError
-from ftf.jobs import link_case, save_files, worker_for
+from ftf.jobs import check_link, link_case, save_files, worker_for
 from ftf.library import (
     KIND_NAMES,
     LAYER_NAMES,
@@ -198,6 +198,7 @@ def submit() -> None:
         st.session_state["intake_error"] = "Add a link or choose files first."
         return
     try:
+        links = [check_link(x) for x in links]  # never the server's own networks (HAC-45)
         if folder and all("/" not in f.name for f in folder):
             raise IntakeError("the folder arrived without its structure: use Browse to choose it")
         uploads = folder + files

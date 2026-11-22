@@ -9,11 +9,9 @@ from __future__ import annotations
 import io
 import json
 import os
-import re
 import threading
 from pathlib import Path
 from typing import Annotated
-from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response
@@ -27,7 +25,7 @@ from ..corpus import ensure_seeded
 from ..corpus_report import export_files, export_zip
 from ..grouping import build_groups
 from ..intake import ANALYSIS_LOCK, IntakeError
-from ..jobs import Job, link_case, save_files, worker_for
+from ..jobs import Job, check_link, link_case, save_files, worker_for
 from ..library import Library, build_library
 from ..method_settings import apply_saved
 from ..previews import render_missing
@@ -36,21 +34,7 @@ from ..reporting import build_pair_report, render_pair_report
 from ..store import Store
 from . import views
 
-_AD_LIBRARY = re.compile(r"facebook\.com/ads/library/?\?(?:.*&)?id=\d+")
-_DOMAIN = re.compile(r"^[a-z0-9-]+(\.[a-z0-9-]+)+$", re.IGNORECASE)
-MAX_UPLOAD_FILES = 50_000
-
-
-def link_kind(text: str) -> str | None:
-    """What a pasted link is, or None when it cannot be opened."""
-    text = text.strip()
-    if _AD_LIBRARY.search(text):
-        return "Meta ad · captured from the Ad Library"
-    if text.startswith(("http://", "https://")) and urlsplit(text).hostname:
-        return "Webpage · captured live"
-    if _DOMAIN.match(text):
-        return "Domain · captured live"
-    return None
+MAX_UPLOAD_FILES = 50_000  # parts in one upload: a saved site is hundreds of files
 
 
 class LibraryCache:
@@ -182,12 +166,11 @@ def create_app() -> FastAPI:
             await form.close()
 
     def submit_material(files: list, links: list[str]) -> dict:
-        bad = [x for x in links if not link_kind(x)]
-        if bad:
-            raise HTTPException(400, f"Not a link or a domain: {bad[0]}")
         if not (files or links):
             raise HTTPException(400, "Add a link or choose files first.")
         try:
+            # http(s) only and never the server's own networks (HAC-45); the capture checks again.
+            links = [check_link(x) for x in links]
             if files:
                 path = save_files(((f.filename or "file", f.file) for f in files), worker.uploads)
             else:

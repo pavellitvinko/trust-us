@@ -18,7 +18,17 @@ from pathlib import Path, PurePosixPath
 from typing import IO
 from urllib.parse import urlsplit
 
-from .intake import MAX_ZIP_BYTES, MAX_ZIP_FILES, IntakeError, run_stages
+from .intake import (
+    MAX_ZIP_BYTES,
+    MAX_ZIP_FILES,
+    CaptureTimeout,
+    IntakeError,
+    check_public,
+    check_url,
+    private_allowed,
+    run_stages,
+)
+from .intake import _capture as guarded_capture
 from .library import record_cases
 from .store import Store
 
@@ -142,12 +152,27 @@ class Job:
 
 
 Capture = Callable[[str, Path], object]
+CAPTURE_TIMEOUT = 30.0  # navigation timeout; the whole capture gets intake's longer deadline
+
+
+def check_link(text: str) -> str:
+    """A pasted link as a capturable address: http(s) only, never the server's own networks
+    (HAC-45). Raises IntakeError; returns the normalised URL (a bare host gets https://)."""
+    url = check_url(text)
+    if not url:
+        raise IntakeError("paste a full link or a domain first")
+    check_public(url)
+    return url
 
 
 def _capture(url: str, out_dir: Path) -> object:
-    from .capture import capture_url
-
-    return capture_url(url, out_dir)
+    """Capture through HAC-45's guard: the address is checked again, and the browser runs in a
+    child process behind an egress gate that only reaches public addresses, with a deadline."""
+    url = check_link(url)
+    try:
+        return guarded_capture(url, out_dir, None, CAPTURE_TIMEOUT, not private_allowed())
+    except CaptureTimeout as exc:
+        raise IntakeError("the browser did not finish in time; try again later") from exc
 
 
 class Worker:

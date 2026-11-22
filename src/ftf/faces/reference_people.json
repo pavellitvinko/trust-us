@@ -1,0 +1,106 @@
+{
+ "schema": 1,
+ "source": "Wikimedia Commons",
+ "people": {
+  "Karol Nawrocki": {
+   "files": [
+    {
+     "title": "File:Karol Nawrocki (2025) (cropped).jpg",
+     "page": "https://commons.wikimedia.org/wiki/File:Karol_Nawrocki_(2025)_(cropped).jpg",
+     "url": "https://upload.wikimedia.org/wikipedia/commons/d/dd/Karol_Nawrocki_%282025%29_%28cropped%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail_unscaled",
+     "licence": "Public domain",
+     "licence_url": "",
+     "author": "The White House"
+    },
+    {
+     "title": "File:Karol Nawrocki cropped.jpg",
+     "page": "https://commons.wikimedia.org/wiki/File:Karol_Nawrocki_cropped.jpg",
+     "url": "https://upload.wikimedia.org/wikipedia/commons/3/33/Karol_Nawrocki_cropped.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail_unscaled",
+     "licence": "CC BY-SA 4.0",
+     "licence_url": "https://creativecommons.org/licenses/by-sa/4.0",
+     "author": "Artur Andrzej"
+    },
+    {
+     "title": "File:01 Karol Nawrocki.jpg",
+     "page": "https://commons.wikimedia.org/wiki/File:01_Karol_Nawrocki.jpg",
+     "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/7/71/01_Karol_Nawrocki.jpg/1280px-01_Karol_Nawrocki.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+     "licence": "CC BY 3.0 pl",
+     "licence_url": "https://creativecommons.org/licenses/by/3.0/pl/deed.en",
+     "author": "Chancellery of the Prime Minister of Poland"
+    }
+   ]
+  },
+  "Donald Tusk": {
+   "files": [
+    {
+     "title": "File:Donald Franciszek Tusk - Wojciech Grzegorz Domagała - DSCF9868.jpg",
+     "page": "https://commons.wikimedia.org/wiki/File:Donald_Franciszek_Tusk_-_Wojciech_Grzegorz_Domaga%C5%82a_-_DSCF9868.jpg",
+     "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/9/9e/Donald_Franciszek_Tusk_-_Wojciech_Grzegorz_Domaga%C5%82a_-_DSCF9868.jpg/1280px-Donald_Franciszek_Tusk_-_Wojciech_Grzegorz_Domaga%C5%82a_-_DSCF9868.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+     "licence": "CC BY 4.0",
+     "licence_url": "https://creativecommons.org/licenses/by/4.0",
+     "author": "24april1975"
+    },
+    {
+     "title": "File:Donald Tusk KPRM HQ 2023.jpg",
+     "page": "https://commons.wikimedia.org/wiki/File:Donald_Tusk_KPRM_HQ_2023.jpg",
+     "url": "https://upload.wikimedia.org/wikipedia/commons/c/ce/Donald_Tusk_KPRM_HQ_2023.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail_unscaled",
+     "licence": "CC BY 3.0 pl",
+     "licence_url": "https://creativecommons.org/licenses/by/3.0/pl/deed.en",
+     "author": "Chancellery of the Prime Minister of the Republic of Poland"
+    }
+   ]
+  },
+  "Rafał Brzoska": {
+   "files": [
+    {
+     "title": "File:Rafał Brzoska.png",
+     "page": "https://commons.wikimedia.org/wiki/File:Rafa%C5%82_Brzoska.png",
+     "url": "https://upload.wikimedia.org/wikipedia/commons/a/a2/Rafa%C5%82_Brzoska.png?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail_unscaled",
+     "licence": "CC0",
+     "licence_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+     "author": "Warsaw PhotoProton Studio"
+    }
+   ]
+  },
+  "Monika Olejnik": {
+   "files": [
+    {
+     "title": "File:Monika Olejnik.JPG",
+     "page": "https://commons.wikimedia.org/wiki/File:Monika_Olejnik.JPG",
+     "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/1/1f/Monika_Olejnik.JPG/1280px-Monika_Olejnik.JPG?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+     "licence": "CC BY-SA 2.0",
+     "licence_url": "https://creativecommons.org/licenses/by-sa/2.0",
+     "author": "Ja Fryta"
+    },
+    {
+     "title": "File:Monika.Olejnik.JPG",
+     "page": "https://commons.wikimedia.org/wiki/File:Monika.Olejnik.JPG",
+     "url": "https://upload.wikimedia.org/wikipedia/commons/8/84/Monika.Olejnik.JPG?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail_unscaled",
+     "licence": "CC BY 3.0",
+     "licence_url": "https://creativecommons.org/licenses/by/3.0",
+     "author": "Fashion Post"
+    }
+   ]
+  },
+  "Tomasz Lis": {
+   "files": [
+    {
+     "title": "File:Lis Tomasz.jpg",
+     "page": "https://commons.wikimedia.org/wiki/File:Lis_Tomasz.jpg",
+     "url": "https://upload.wikimedia.org/wikipedia/commons/0/0c/Lis_Tomasz.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail_unscaled",
+     "licence": "CC BY-SA 2.0",
+     "licence_url": "https://creativecommons.org/licenses/by-sa/2.0",
+     "author": "Sławek"
+    },
+    {
+     "title": "File:Tomasz Lis (Mar 2007).jpg",
+     "page": "https://commons.wikimedia.org/wiki/File:Tomasz_Lis_(Mar_2007).jpg",
+     "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/b/b5/Tomasz_Lis_%28Mar_2007%29.jpg/1280px-Tomasz_Lis_%28Mar_2007%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+     "licence": "CC BY-SA 2.5",
+     "licence_url": "https://creativecommons.org/licenses/by-sa/2.5",
+     "author": "Stanisław J. Radziński (pl.wiki - en.wiki)"
+    }
+   ]
+  }
+ }
+}

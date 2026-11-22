@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS observations (
     value_key TEXT NOT NULL, body TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS observations_view ON observations (view_id, extractor);
 CREATE INDEX IF NOT EXISTS observations_value ON observations (namespace, value_key);
+CREATE INDEX IF NOT EXISTS observations_value_any ON observations (value_key);
 CREATE TABLE IF NOT EXISTS fingerprints (
     view_id TEXT NOT NULL, layer_id TEXT NOT NULL, body TEXT NOT NULL,
     PRIMARY KEY (view_id, layer_id));
@@ -48,6 +49,10 @@ def value_key(value) -> str:
     )
 
 
+def _casefold(text):
+    return text.casefold() if isinstance(text, str) else text
+
+
 def ordered(a: str, b: str) -> tuple[str, str]:
     """Pairs are stored once, smaller id first."""
     return (a, b) if a <= b else (b, a)
@@ -59,6 +64,8 @@ class Store:
             Path(path).parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(str(path))
         self.db.executescript(_SCHEMA)
+        # SQLite's lower() folds ASCII only; offer names are Polish.
+        self.db.create_function("casefold", 1, _casefold, deterministic=True)
 
     def close(self) -> None:
         self.db.close()
@@ -158,6 +165,24 @@ class Store:
             (namespace, value_key(value)),
         )
         return [r[0] for r in rows]
+
+    def observations_with_value(
+        self, value, namespaces: Iterable[str] | None = None, fold_case: bool = False
+    ) -> list[Observation]:
+        """Every stored observation carrying this value, in any namespace unless `namespaces`
+        narrows it. `fold_case` ignores letter case (product names, `gtm-…` typed by hand)."""
+        key = value_key(value)
+        sql, args = "SELECT body FROM observations WHERE ", []
+        if fold_case:
+            sql, args = sql + "casefold(value_key)=?", [key.casefold()]
+        else:
+            sql, args = sql + "value_key=?", [key]
+        names = list(namespaces or ())
+        if names:
+            sql += f" AND namespace IN ({','.join('?' * len(names))})"
+            args += names
+        rows = self.db.execute(sql + " ORDER BY view_id, namespace, id", args)
+        return [Observation.model_validate_json(r[0]) for r in rows]
 
     # -- fingerprints, evidence, relations -------------------------------------------
 

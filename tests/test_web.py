@@ -57,8 +57,8 @@ def test_item_page_and_pictures(client):
 
 def test_adding_material_needs_something_and_rejects_bad_links(client):
     assert client.post("/api/material").status_code == 400
-    bad = client.post("/api/material", data={"links": ["not a link"]})
-    assert bad.status_code == 400 and "not a link" in bad.json()["detail"]
+    bad = client.post("/api/material", data={"links": ["mailto:x@example.com"]})
+    assert bad.status_code == 400 and "http" in bad.json()["detail"]
     escape = client.post("/api/material", files=[("files", ("../evil.html", b"x", "text/html"))])
     assert escape.status_code == 400
 
@@ -144,3 +144,29 @@ def test_a_folder_of_more_than_a_thousand_files_is_accepted(client, monkeypatch)
     files.append(("files", ("site/page.html", b"<html></html>", "text/html")))
     res = client.post("/api/material", files=files)
     assert res.status_code == 200 and res.json()["names"] == ["site/"]
+
+
+@pytest.mark.parametrize("link", ["http://127.0.0.1:8000/", "http://192.168.1.1/", "localhost"])
+def test_links_to_the_servers_own_networks_are_refused(client, monkeypatch, link):
+    monkeypatch.delenv("FTF_UI_ALLOW_PRIVATE", raising=False)
+    res = client.post("/api/material", data={"links": [link]})
+    assert res.status_code == 400 and "private network" in res.json()["detail"]
+
+
+def test_the_worker_captures_through_the_guarded_child_process(tmp_path, monkeypatch):
+    from ftf import jobs
+    from ftf.intake import IntakeError
+
+    monkeypatch.delenv("FTF_UI_ALLOW_PRIVATE", raising=False)
+    calls = []
+    monkeypatch.setattr(
+        jobs,
+        "guarded_capture",
+        lambda url, out, replay, timeout, public: calls.append((url, public)),
+    )
+    monkeypatch.setattr(jobs, "check_public", lambda url: None)  # no DNS in tests
+    jobs._capture("example.com", tmp_path / "out")
+    assert calls == [("https://example.com", True)]  # normalised, public addresses only
+    monkeypatch.undo()
+    with pytest.raises(IntakeError, match="private network"):
+        jobs._capture("http://10.0.0.1/", tmp_path / "out")
