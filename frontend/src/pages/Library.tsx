@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api, type Row } from "../api";
-import { Chip, Help, Legend, Picture, plural } from "../components/bits";
+import { Chip, Help, Picture, plural } from "../components/bits";
 import MapView from "../components/MapView";
 import { VideoThumbnail } from "../components/video";
 import ProcessingPanel from "../components/ProcessingPanel";
@@ -160,7 +160,6 @@ export default function Library() {
         </div>
       ) : (
         <>
-          <Legend />
           {view === "table" ? (
             <ItemsTable rows={data.items} />
           ) : (
