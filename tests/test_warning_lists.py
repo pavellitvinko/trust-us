@@ -162,6 +162,17 @@ def test_name_normalisation_and_ambiguous_candidates(sources):
     assert len(result.value["matches"]) == 2
 
 
+def test_missing_source_is_fetched_once_without_refreshing_valid_snapshots(tmp_path):
+    calls = []
+    def fetch(url):
+        calls.append(url)
+        return b"phishing.example\n"
+    first = load_sources(tmp_path, fetch_missing=True, fetch=fetch)
+    assert "cert" in first.snapshots and not first.errors
+    second = load_sources(tmp_path, fetch_missing=True, fetch=fetch)
+    assert len(calls) == 1 and "cert" in second.snapshots
+
+
 def test_refresh_once_fallback_archive_and_integrity(tmp_path):
     calls = []
 

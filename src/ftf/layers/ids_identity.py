@@ -79,8 +79,8 @@ set_layer(
         "tracker.host",
         "third_party.host",
     ),
-    prefixes=("contact.", "aff."),
-    doc="A6-A8, A12, I3, B7: where leads and clicks go — affiliate fields, form endpoints, keys, contacts.",
+    prefixes=("contact.", "aff.", "payment.", "company.", "mail."),
+    doc="A6-A8, A12, I3, B7, P1, P2: where leads, clicks and money go — affiliate fields, form endpoints, keys, contacts, payment accounts, company IDs, verified mail senders.",
 )
 
 

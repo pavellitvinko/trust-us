@@ -140,6 +140,28 @@ def _check_new_material(store: Store, path: Path, single: bool = False) -> None:
         raise IntakeError(f"already ingested: {', '.join(repeated)}")
 
 
+def ingest_new_material(store: Store, path: Path, *, recovering: bool = False):
+    """Parse/hash once in a private store, then atomically register a validated submission."""
+    probe = Store(":memory:")
+    try:
+        found = _ingest(path, probe, False)
+        if not sum(len(views) for _, views in found):
+            raise IntakeError("no views found in this material")
+        with ANALYSIS_LOCK, store.batch():
+            existing = {i.incident_id: i for i in store.incidents()}
+            repeated = [i.incident_id for i, _ in found if i.incident_id in existing
+                        and not (recovering and existing[i.incident_id].root == i.root)]
+            if repeated:
+                raise IntakeError(f"already ingested: {', '.join(sorted(repeated))}")
+            for incident, views in found:
+                if recovering and incident.incident_id in existing:
+                    continue
+                store.put_incident(incident, probe.artifacts(incident.incident_id), views)
+        return [(incident, store.views(incident.incident_id)) for incident, _ in found]
+    finally:
+        probe.close()
+
+
 def run_stages(
     store: Store,
     path: Path,
@@ -167,22 +189,24 @@ def run_stages(
         added = _ingest(path, store, single_incident)
         views = sum(len(found) for _, found in added)
         stage("extract")
-        observations = pipeline.run_extract(store)
+        added_ids = [v.view_id for _, found in added for v in found]
+        observations = pipeline.run_extract(store, added_ids)
         stage("enrich")
         if enrich:
             pipeline.run_enrich(store, [v.view_id for _, found in added for v in found])
         run_warning_lists(
             store,
             get_settings().data_dir / "warning_lists",
-            view_ids=[v.view_id for v in store.views() if not v.meta.get("shipped")],
+            view_ids=added_ids,
         )
         stage("fingerprint")
-        fingerprints = pipeline.run_fingerprint(store)
+        fingerprints = pipeline.run_fingerprint(store, added_ids)
         pipeline.run_cloaking(store)
         stage("compare")
-        evidence = pipeline.run_compare_all(store)
+        evidence = 0  # run_method compares with corpus-fitted weights in its two passes
         stage("group")
         groups = run_method(store)
+        evidence = len(store.evidence())
     return {
         "incidents": [incident.incident_id for incident, _ in added],
         "views": views,

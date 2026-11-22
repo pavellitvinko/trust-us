@@ -110,17 +110,29 @@ side and open http://localhost:5173: Vite reloads on every change and forwards `
 - **Library**: every item with a picture, as a table or as a map of linked items. Saved pages get
   their picture by being rendered offline in Chromium (JavaScript off, only files from the page's
   own folder), kept in `$FTF_DATA_DIR/previews`. Case, campaign, kit and duplicate are explained on
-  screen. **Library processing → Run selected checks** reads source images, pages and videos, checks expected
-  elements and persuasion techniques, discovers and matches patterns, then rebuilds links.
-  It requires both model keys, sends material to OpenAI and Gemini, and may incur API costs.
-  Choose checks before starting, skip pending checks, or skip the remaining items in an active
-  reading step after the current item finishes. Pattern discovery runs as a batch and can be
-  skipped before it starts. Campaign refresh and the final library update always run.
-  The panel shows resolved steps, item counts, elapsed time and coverage notes. Skipped checks
-  retain earlier results; they are never presented as freshly checked. It runs in the background;
-  the latest progress, results and unavailable
-  checks survive a server restart in `$FTF_DATA_DIR/llm-run.json`. Existing content-hash model
-  caches are reused. Processed corpus views without source material are skipped. Face matching,
+  screen. New material starts processing automatically. Local clues and campaign links appear
+  first; pages and images are then read concurrently with OpenAI. **Core analysis** targets
+  useful results for the current 41-item library within five minutes. **Additional checks**
+  continue afterward: domain lookups, semantic embeddings, expected elements, persuasion
+  techniques, existing-pattern matching and pattern discovery. Preview rendering runs in the
+  background and never blocks a Library request. OpenAI and Gemini keys are checked separately;
+  a missing Gemini key does not block page/image reads. Provider calls may incur API costs.
+  **Library processing → Run selected checks** schedules a refresh using the same queue.
+  Choose checks before starting, skip pending batches, or skip the remaining items of a reading
+  step (already active requests can finish). Campaign publication always runs. Deferred,
+  unavailable and skipped checks remain explicitly incomplete; earlier valid results are retained.
+  The queue, run milestones, input/output signatures and request timings persist in SQLite and
+  unfinished processing resumes after restart. `$FTF_DATA_DIR/llm-run.json` and `item-checks.json`
+  remain compatibility snapshots of progress. Unchanged tasks and content-hash model caches
+  are reused, and identical requests already in flight share one computation. Set
+  `FTF_MODEL_CONCURRENCY` (default 8) to limit reading concurrency; provider rate limits reduce
+  it automatically. Core reads have a 45-second absolute request budget, including retries;
+  unfinished reads continue in the background and a missed target is reported honestly.
+  Automatic video processing uses file hashes, metadata and available sidecar text. Full frame
+  scans, speech/scene reading and dependent checks run only from **Analyze video** on the video
+  item page. That page shows progress and can cancel the remaining analysis. A request already
+  sent may finish and populate the cache after cancellation, but its results are not published.
+  Processed corpus views without source material are skipped. Face matching,
   live grounding of genuine reference pages and on-demand narratives are separate workflows.
   Each table row has a compact progress ring. Open its dropdown to see the individual checks
   and completion count. The item page uses the same ring and dropdown. Item states update during a run,
@@ -128,12 +140,30 @@ side and open http://localhost:5173: Vite reloads on every change and forwards `
   available earlier results. Existing observations supply coverage for material checked through
   the CLI; missing observations alone do not imply a clean result.
 - **Item page**: warning signs in plain words, where the link leads (as pictures), linked items as
-  picture pairs with what they share, and the full pair report.
+  picture pairs with what they share, and the full pair report. Open **Checks** to run or retry
+  an individual check, or choose **Run all item checks**. Work stays scoped to that item;
+  required reading runs first and cached answers are reused. Item pattern checks match the
+  existing pattern library; discovering new patterns remains a library-wide operation.
 - **How it works**: what the groups and links mean, and the report downloads.
 
 The API is described at http://127.0.0.1:8000/api/docs. The method weights editor, pattern-library
 edits and the graph of every stored relation are still in the classic Streamlit screens:
 `uv run streamlit run app/streamlit_app.py`.
+
+To measure the core pipeline on temporary copies of the current library:
+
+```bash
+uv run python scripts/benchmark_processing.py --output /tmp/processing-local.json
+uv run python scripts/benchmark_processing.py --live --cold-runs 3 --output /tmp/processing-live.json
+```
+
+`--live` makes paid page/image calls. Each cold run uses an empty model cache; the first run
+also measures an unchanged warm refresh and one added duplicate item. The source database and
+its caches are never modified. A live run exits with failure if core coverage or the five-minute
+target is missed. Upload transfer and URL acquisition are outside this benchmark; accepted-run
+queue time, local extraction, model reads and publication are included. Source registration is
+already present in the copied database. Timings, cache hits, retries and coverage are kept in
+the JSON report; a local-only measurement cannot establish model-backed completion.
 
 With the organiser sample in `testing_sample/`, run the deterministic checkpoint with:
 

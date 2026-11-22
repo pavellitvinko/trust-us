@@ -18,6 +18,8 @@ import os
 import re
 from collections import Counter
 from collections.abc import Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
 from itertools import pairwise
 from typing import Any, Protocol
 
@@ -99,10 +101,22 @@ class GatewayEmbedder:
 
 
 _embedder: Embedder | None = None
+_task_embedder: ContextVar[Embedder | None] = ContextVar("task_embedder", default=None)
+
+
+@contextmanager
+def using_embedder(embedder: Embedder):
+    token = _task_embedder.set(embedder)
+    try:
+        yield
+    finally:
+        _task_embedder.reset(token)
 
 
 def get_embedder() -> Embedder:
     global _embedder
+    if current := _task_embedder.get():
+        return current
     if _embedder is None:
         choice = os.environ.get("FTF_EMBEDDER", "").lower()
         settings = get_settings()

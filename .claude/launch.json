@@ -1,0 +1,32 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "ftf-ui-modeloff",
+      "runtimeExecutable": "/bin/zsh",
+      "runtimeArgs": [
+        "-c",
+        ". /private/tmp/claude-501/-Users-pavellitvinko--claude-spares-spare-BMG2cI/b46942f5-6c34-4754-92c3-92be07205113/scratchpad/modeloff.env && exec .venv/bin/streamlit run app/streamlit_app.py --server.port 8765 --server.headless true"
+      ],
+      "port": 8765
+    },
+    {
+      "name": "ftf-web",
+      "runtimeExecutable": "/bin/zsh",
+      "runtimeArgs": [
+        "-c",
+        "FTF_DATA_DIR=/private/tmp/claude-501/-Users-pavellitvinko--claude-spares-spare-KxpvDU/4a9f111b-f1c3-4516-abae-e759901d884a/scratchpad/ftfdata FTF_EMBEDDER=fake FTF_ENRICH=off OPENAI_API_KEY= GEMINI_API_KEY= exec .venv/bin/python -m ftf.cli serve --port 8766"
+      ],
+      "port": 8766
+    },
+    {
+      "name": "ftf-web-campaigns",
+      "runtimeExecutable": "/bin/zsh",
+      "runtimeArgs": [
+        "-c",
+        "FTF_DATA_DIR=/private/tmp/claude-501/-Users-pavellitvinko--claude-spares-spare-KxpvDU/4a9f111b-f1c3-4516-abae-e759901d884a/scratchpad/ftfdata FTF_EMBEDDER=fake FTF_ENRICH=off OPENAI_API_KEY= GEMINI_API_KEY= exec .venv/bin/python -m ftf.cli serve --port 8767"
+      ],
+      "port": 8767
+    }
+  ]
+}
