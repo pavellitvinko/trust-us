@@ -543,7 +543,8 @@ def test_why_prefers_what_only_the_operator_controls():
     ]
     campaign = Campaign("c1", "Campaign x", ["a", "b"], ["1"], "", [])
     lib = Library(cases=[Case("1", "Case 1", "", items)], journeys={}, links={}, campaigns={"c1": campaign})  # fmt: skip
-    text, strength, note = campaign_why(lib, campaign)
+    text, label, strength, note = campaign_why(lib, campaign)
+    assert label == "same Facebook tracking pixel"
     assert text == "Same Facebook tracking pixel 1071875908635809" and strength == "Strong"
     assert note.startswith("Only whoever runs the pages")
     lib.get("a").matches = [files]
@@ -576,6 +577,7 @@ def test_why_falls_back_to_the_journey():
                   links={}, campaigns={"c1": campaign})  # fmt: skip
     assert campaign_why(lib, campaign) == (
         "Ad ID 12 is in the landing URL",
+        "the visitor's path",
         "",
         "A visitor is taken from one to the next.",
     )

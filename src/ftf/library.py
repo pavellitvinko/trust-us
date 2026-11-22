@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from math import prod
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, NamedTuple
 from urllib.parse import urlsplit
 
 from .campaign_map import TOGGLES, _shared_values, link_tiers
@@ -189,6 +189,7 @@ class Kit:
     name: str
     campaigns: list[str]  # campaign ids
     linked_by: list[str]
+    title: str = ""  # what a reader calls it, from its pages' own titles
 
 
 @dataclass
@@ -974,7 +975,13 @@ def name_groups(
             f"Kit {short_value(*clue)}" if clue else f"Kit {short_id(kit_anchors[fid])}"
         )
         ordered = sorted(cs, key=lambda c: (out[c].first_seen, out[c].members[0]))
-        kits[fid] = Kit(kit_id=fid, name="", campaigns=ordered, linked_by=_clues(across))
+        kits[fid] = Kit(
+            kit_id=fid,
+            name="",
+            campaigns=ordered,
+            linked_by=_clues(across),
+            title=campaign_title([v for c in ordered for v in out[c].members], views),
+        )
     for fid, name in _unique(kit_names, kit_anchors).items():
         kits[fid].name = name
     for campaign in out.values():
@@ -1039,8 +1046,15 @@ WHY_NOTE = {
 }
 
 
-def campaign_why(library: Library, campaign: Campaign) -> tuple[str, str, str]:
-    """(what links the members, how strong, what that means): the link a reader should see.
+class Why(NamedTuple):
+    text: str  # what links the members, in a sentence
+    label: str  # the same, short enough for a table cell
+    strength: str  # Strong | Moderate | Weak | ""
+    note: str  # what that means, for a reader who does not know the method
+
+
+def campaign_why(library: Library, campaign: Campaign) -> Why:
+    """The link a reader should see first.
 
     A link only the operator controls comes before reused files, then the stronger, then
     one with a literal value, so the sentence never depends on the order of adding.
@@ -1065,13 +1079,13 @@ def campaign_why(library: Library, campaign: Campaign) -> tuple[str, str, str]:
         )
         strength = "" if best.strength == "Not assessed" else best.strength
         # Matching content is a strong hint, not something only the operator controls.
-        if best.kind == "campaign" and "identity" not in best.tiers:
-            return best.reason, strength, ""
-        return best.reason, strength, WHY_NOTE[best.kind]
+        operator = best.kind != "campaign" or "identity" in best.tiers
+        note = WHY_NOTE[best.kind] if operator else ""
+        return Why(best.reason, best.label, strength, note)
     journey = next((library.journeys[v] for v in campaign.members if v in library.journeys), None)
     if journey and journey.proofs:
-        return visitor_reason(journey.proofs[0]), "", WHY_NOTE["journey"]
-    return "Linked by the analysis", "", ""
+        return Why(visitor_reason(journey.proofs[0]), "the visitor's path", "", WHY_NOTE["journey"])
+    return Why("Linked by the analysis", "the analysis", "", "")
 
 
 def more_text(campaign: Campaign, view_id: str, views: dict[str, View]) -> str:

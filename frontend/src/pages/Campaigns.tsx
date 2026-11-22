@@ -1,113 +1,82 @@
-import { Fragment, useEffect, useState } from "react";
-import { Link, useLocation } from "react-router-dom";
-import { api, type CampaignCard, type KitBox } from "../api";
+import { Link, useNavigate } from "react-router-dom";
+import { api, type Brief, type SignsCell } from "../api";
 import { Chip, Help, Picture, useMeta } from "../components/bits";
-import { campaignUrl, usePolled } from "../hooks";
+import { campaignUrl, kitUrl, usePolled } from "../hooks";
 
-const itemUrl = (id: string) => `/item/${encodeURIComponent(id)}`;
-const SHOWN = 4; // pictures on a card before "+N more"
-
-/** The card or kit the address points at, scrolled into view and briefly marked. */
-function useScrollToHash(ready: boolean) {
-  const { hash } = useLocation();
-  useEffect(() => {
-    if (!ready || !hash) return;
-    const el = document.getElementById(decodeURIComponent(hash.slice(1)));
-    if (!el) return;
-    el.scrollIntoView({ behavior: "smooth", block: "center" });
-    el.classList.add("flash");
-    const timer = window.setTimeout(() => el.classList.remove("flash"), 1600);
-    return () => window.clearTimeout(timer);
-  }, [ready, hash]);
+export function SignsText({ signs }: { signs: SignsCell }) {
+  return signs.count ? <span className="danger">{signs.text}</span> : <span className="muted">{signs.text}</span>;
 }
 
-function Card({ c }: { c: CampaignCard }) {
-  const [all, setAll] = useState(false);
-  const shown = all ? c.members : c.members.slice(0, SHOWN);
+/** One row of a Campaigns table: the whole row opens the campaign or kit. */
+export function GroupRow({
+  url,
+  picture,
+  title,
+  chip,
+  sub,
+  linkedBy,
+  strength,
+  cases,
+  signs,
+}: {
+  url: string;
+  picture: Brief;
+  title: string;
+  chip: React.ReactNode;
+  sub: string;
+  linkedBy: string;
+  strength?: string;
+  cases: string;
+  signs: SignsCell;
+}) {
+  const navigate = useNavigate();
   return (
-    <article className="ccard" id={c.id}>
-      <div className="strip">
-        {shown.map((m, n) => (
-          <Fragment key={m.id}>
-            {c.journey && n > 0 && (
-              <span className="arrow" aria-label="then">
-                →
-              </span>
-            )}
-            <Link to={itemUrl(m.id)} title={m.title}>
-              <Picture id={m.id} has={m.picture} type={m.type} width={168} height={105} />
-            </Link>
-          </Fragment>
-        ))}
-        {c.members.length > SHOWN && !all && (
-          <button className="btn ghost" onClick={() => setAll(true)}>
-            +{c.members.length - SHOWN} more
-          </button>
-        )}
-      </div>
-      <h2 className="ctitle">{c.title}</h2>
-      <div className="small">
-        <Chip kind="campaign">{c.name}</Chip> {c.facts}
-      </div>
-      <div className="why">
-        <div className="label">Why we think it's one operation</div>
-        {c.why.text}
-        {c.why.strength && <span className={`strength s-${c.why.strength.toLowerCase()}`}>{c.why.strength}</span>}
-        {c.why.note && <div className="small">{c.why.note}</div>}
-      </div>
-      <div>
-        {c.signs.count ? (
-          <>
-            <span className="danger">{c.signs.text}</span>
-            <span className="small">, for example: {c.signs.examples.map((x) => x[0].toLowerCase() + x.slice(1)).join("; ")}</span>
-          </>
-        ) : (
-          <span className="muted">{c.signs.text}</span>
-        )}
-      </div>
-      {c.kit && (
-        <div className="small" style={{ marginTop: 6 }}>
-          <Link to={campaignUrl(c.kit.id)}>{c.kit.text}</Link> <Chip kind="kit">{c.kit.name}</Chip>
+    <tr onClick={() => navigate(url)}>
+      <td>
+        <Picture id={picture.id} has={picture.picture} type={picture.type} width={96} height={60} />
+      </td>
+      <td>
+        <Link className="title" to={url} onClick={(e) => e.stopPropagation()}>
+          {title}
+        </Link>
+        <div className="small">
+          {chip} {sub}
         </div>
-      )}
-    </article>
+      </td>
+      <td>
+        {linkedBy}
+        {strength && <span className="small"> · {strength.toLowerCase()}</span>}
+      </td>
+      <td>{cases}</td>
+      <td>
+        <SignsText signs={signs} />
+      </td>
+    </tr>
   );
 }
 
-function Kit({ k }: { k: KitBox }) {
-  const meta = useMeta();
+export function GroupTable({ first, children }: { first: React.ReactNode; children: React.ReactNode }) {
   return (
-    <section className="kitbox" id={k.id}>
-      <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
-        <Chip kind="kit">{k.name}</Chip>
-        <span className="small">{k.facts}</span>
-      </div>
-      {k.why && <div style={{ margin: "6px 0 2px" }}>{k.why}</div>}
-      <div className="small">{meta?.groups.kit}</div>
-      <div className="kitmembers">
-        {k.members.map((m) => (
-          <Link key={m.id} to={itemUrl(m.id)} className="kitmember">
-            <Picture id={m.id} has={m.picture} type={m.type} width={96} height={60} />
-            <span>
-              <span className="title">{m.title}</span>
-              <span className="small">
-                {" "}
-                {m.case}
-                {m.campaign && " · "}
-                {m.campaign && <Chip kind="campaign">{m.campaign}</Chip>}
-              </span>
-            </span>
-          </Link>
-        ))}
-      </div>
-    </section>
+    <table className="items groups">
+      <thead>
+        <tr>
+          <th style={{ width: 112 }} />
+          <th>{first}</th>
+          <th style={{ width: 230 }}>Linked by</th>
+          <th style={{ width: 130 }}>
+            Cases <Help topic="case" />
+          </th>
+          <th style={{ width: 130 }}>Warning signs</th>
+        </tr>
+      </thead>
+      <tbody>{children}</tbody>
+    </table>
   );
 }
 
 export default function Campaigns() {
   const meta = useMeta();
   const { data, error } = usePolled(api.campaigns);
-  useScrollToHash(!!data);
   if (error) return <p className="error">Couldn't load the campaigns: {error}</p>;
   if (!data) return <p className="muted">Loading…</p>;
   const empty = !data.campaigns.length && !data.kits.length;
@@ -137,19 +106,49 @@ export default function Campaigns() {
         </div>
       ) : (
         <>
-          <div className="ccards">
-            {data.campaigns.map((c) => (
-              <Card key={c.id} c={c} />
-            ))}
-          </div>
+          {data.campaigns.length > 0 && (
+            <GroupTable first="Campaign">
+              {data.campaigns.map((c) => (
+                <GroupRow
+                  key={c.id}
+                  url={campaignUrl(c.id)}
+                  picture={c.picture}
+                  title={c.title}
+                  chip={
+                    <>
+                      <Chip kind="campaign">{c.name}</Chip>
+                      {c.kit && <Chip kind="kit">Kit</Chip>}
+                    </>
+                  }
+                  sub={c.sub}
+                  linkedBy={c.linkedBy}
+                  strength={c.strength}
+                  cases={c.cases}
+                  signs={c.signs}
+                />
+              ))}
+            </GroupTable>
+          )}
           {data.kits.length > 0 && (
             <>
               <h2>
                 Shared kits <Help topic="kit" />
               </h2>
-              {data.kits.map((k) => (
-                <Kit key={k.id} k={k} />
-              ))}
+              <GroupTable first="Kit">
+                {data.kits.map((k) => (
+                  <GroupRow
+                    key={k.id}
+                    url={kitUrl(k.id)}
+                    picture={k.picture}
+                    title={k.title}
+                    chip={<Chip kind="kit">{k.name}</Chip>}
+                    sub={k.sub}
+                    linkedBy={k.linkedBy}
+                    cases={k.cases}
+                    signs={k.signs}
+                  />
+                ))}
+              </GroupTable>
             </>
           )}
         </>

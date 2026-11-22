@@ -138,6 +138,22 @@ def create_app() -> FastAPI:
         )
         return {**payload, "generation": worker.generation, "busy": bool(worker.active())}
 
+    @app.get("/api/campaigns/{campaign_id}")
+    def campaign(campaign_id: str) -> dict:
+        lib = library_or_none()
+        found = lib.campaigns.get(campaign_id) if lib else None
+        if found is None or not found.name:
+            raise HTTPException(404, "No such campaign")
+        return views.campaign_detail(lib, found)
+
+    @app.get("/api/kits/{kit_id}")
+    def kit(kit_id: str) -> dict:
+        lib = library_or_none()
+        found = lib.kits.get(kit_id) if lib else None
+        if found is None:
+            raise HTTPException(404, "No such kit")
+        return views.kit_detail(lib, found)
+
     @app.get("/api/items/{view_id}")
     def item(view_id: str) -> dict:
         lib, found = item_or_404(view_id)

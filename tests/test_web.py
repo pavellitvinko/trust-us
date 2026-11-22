@@ -50,11 +50,13 @@ def test_campaigns_screen_counts_what_is_left_over(client):
     assert data["campaigns"] == [] and data["kits"] == [] and data["repeats"] == ""
     assert data["unlinked"] == "2 items aren't linked to anything yet."
     assert "busy" in data and "generation" in data
+    assert client.get("/api/campaigns/nope").status_code == 404
+    assert client.get("/api/kits/nope").status_code == 404
 
 
-def test_a_campaign_card_says_what_it_is_and_why():
+def test_a_campaign_row_and_page_say_what_it_is_and_why():
     from ftf.library import UNCHECKED_PLAIN, Campaign, Case, Item, Library, Match, Risk
-    from ftf.web.views import campaigns_payload
+    from ftf.web.views import campaign_detail, campaigns_payload
 
     blank = list(UNCHECKED_PLAIN)  # nothing was looked at
 
@@ -80,16 +82,51 @@ def test_a_campaign_card_says_what_it_is_and_why():
     lib = Library(cases=[Case("1", "Case 1", "", items[:1]), Case("2", "Case 2", "", items[1:])],
                   journeys={}, links={}, campaigns={"c1": campaign})  # fmt: skip
     data = campaigns_payload(lib)
-    card = data["campaigns"][0]
-    assert card["title"] == "Metabo RX" and card["kit"] is None
-    assert (
-        card["facts"]
-        == "2 pages · 2 websites (a.top, b.top) · in Cases 1, 2 · first seen 20 Nov 2026"
-    )
-    assert card["why"]["text"] == "Same Facebook tracking pixel 1071875908635809"
-    assert card["signs"]["text"] == "Warning signs not checked"
+    row = data["campaigns"][0]
+    assert row["title"] == "Metabo RX" and row["kit"] == ""
+    assert row["sub"] == "2 pages · a.top, b.top" and row["cases"] == "1, 2"
+    assert row["linkedBy"] == "same Facebook tracking pixel" and row["strength"] == "Strong"
+    assert row["signs"]["text"] == "not checked"  # nothing was looked at
     assert data["count"] == "1 campaign in 3 items"
     assert data["unlinked"] == "1 item isn't linked to anything yet."
+
+    page = campaign_detail(lib, campaign)
+    assert {f["label"]: f["value"] for f in page["facts"]} == {
+        "Made of": "2 pages",
+        "Websites": "a.top, b.top",
+        "Found in": "Cases 1, 2",
+        "First seen": "20 Nov 2026",
+    }
+    assert page["why"]["text"] == "Same Facebook tracking pixel 1071875908635809"
+    assert page["why"]["note"].startswith("Only whoever runs the pages")
+    assert page["empty"] == "Not checked." and page["path"] is None and page["kit"] is None
+    assert [(p["a"]["id"], p["b"]["id"], p["kind"]) for p in page["pairs"]] == [
+        ("a", "b", "campaign")
+    ]
+
+
+def test_warning_signs_say_how_many_pages_show_them():
+    from ftf.library import Campaign, Case, Finding, Item, Library, Risk
+    from ftf.web.views import campaign_detail
+
+    def risk(*signs):
+        return Risk(
+            "warning",
+            findings=[Finding(kind="Domain", summary=s, source="page.html") for s in signs],
+        )
+
+    items = [
+        Item("a", "1", ViewKind.PAGE, "A", "x.top", [], risk(".top address", "countdown")),
+        Item("b", "1", ViewKind.PAGE, "B", "x.top", [], risk(".top address")),
+    ]
+    campaign = Campaign("c1", "Campaign x", ["a", "b"], ["1"], "", [], title="A")
+    lib = Library(cases=[Case("1", "Case 1", "", items)], journeys={}, links={},
+                  campaigns={"c1": campaign})  # fmt: skip
+    signs = campaign_detail(lib, campaign)["signs"]
+    assert [(s["text"], s["where"]) for s in signs] == [
+        (".top address", "on 2 of 2 pages"),
+        ("countdown", "on 1 of 2 pages"),
+    ]
 
 
 def test_item_page_and_pictures(client):

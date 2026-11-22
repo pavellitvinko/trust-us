@@ -1,114 +1,22 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { api, compareUrl, pictureUrl, type ItemData, type MatchInfo } from "../api";
+import { api, pictureUrl, type ItemData, type MatchInfo } from "../api";
 import { Chip, Help, Picture, plural, useMeta } from "../components/bits";
-import { campaignUrl } from "../hooks";
-
-const itemUrl = (id: string) => `/item/${encodeURIComponent(id)}`;
-
-function Comparison({ a, b }: { a: string; b: string }) {
-  const [text, setText] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    api
-      .compare(a, b)
-      .then((r) => setText(r.markdown))
-      .catch((e) => setError(e.message));
-  }, [a, b]);
-  if (error) return <p className="error">{error}</p>;
-  if (text === null) return <p className="muted">Building the comparison…</p>;
-  return (
-    <div style={{ textAlign: "left", marginTop: 8 }}>
-      <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
-        <a className="btn" href={compareUrl(a, b, "md")}>
-          Download Markdown
-        </a>
-        <a className="btn" href={compareUrl(a, b, "json")}>
-          Download JSON
-        </a>
-      </div>
-      {/* Plain text: the report quotes values from scam pages. */}
-      <pre className="report">{text}</pre>
-    </div>
-  );
-}
+import { itemUrl, LinkPair, PathView } from "../components/links";
+import { campaignUrl, kitUrl } from "../hooks";
 
 function Pair({ item, match }: { item: ItemData; match: MatchInfo }) {
-  const [open, setOpen] = useState(false);
+  const detail = [match.strength && `${match.strength} link`, match.sameCase ? "same case" : `in ${match.case}`]
+    .filter(Boolean)
+    .join(" · ");
   return (
-    <>
-      <div className="pair">
-        <Picture id={item.id} has={item.picture} type={item.type} width={156} height={96} />
-        <div className="mid">
-          <Chip kind={match.kind}>{match.name}</Chip>
-          <Help topic={match.kind} />
-          <div className={`bar ${match.kind}`} />
-          {match.reason}
-          <div className="small">
-            {[match.strength && `${match.strength} link`, match.sameCase ? "same case" : `in ${match.case}`]
-              .filter(Boolean)
-              .join(" · ")}
-          </div>
-          <div className="actions">
-            <button className="btn ghost small" onClick={() => setOpen((o) => !o)}>
-              {open ? "Hide the full comparison" : "Compare in full"}
-            </button>
-          </div>
-        </div>
-        <Link className="other" to={itemUrl(match.id)}>
-          <Picture id={match.id} has={match.picture} type={match.type} width={156} height={96} />
-          <div className="t">{match.title}</div>
-        </Link>
-      </div>
-      {open && <Comparison a={item.id} b={match.id} />}
-    </>
+    <LinkPair a={item} b={match} kind={match.kind} name={match.name} reason={match.reason} detail={detail} linkA={false} />
   );
 }
 
 function Path({ item }: { item: ItemData }) {
-  const path = item.path;
-  if (!path) return <p className="small">No proven step to or from this item.</p>;
-  return (
-    <div className="path">
-      {path.ad && (
-        <>
-          <div className="adbox">
-            <b>Facebook ad</b>
-            <span>
-              ID {path.ad.slice(0, 6)}…{path.ad.slice(-4)}
-            </span>
-            <span className="muted">not added yet</span>
-          </div>
-          <div className="arrow">
-            <b>→</b>The page address carries this ad's ID
-          </div>
-        </>
-      )}
-      {path.steps.map((s, n) => (
-        <div key={s.id} style={{ display: "contents" }}>
-          <Link className={`step ${s.id === item.id ? "me" : ""}`} to={itemUrl(s.id)}>
-            <Picture id={s.id} has={s.picture} type={s.type} width={176} height={108} />
-            <div className="t">
-              {n + 1}. {s.title}
-            </div>
-            <div className="small">
-              {n === 0 ? "first page" : "next page"}
-              {s.id === item.id && " · this item"}
-            </div>
-          </Link>
-          {n < path.steps.length - 1 && (
-            <div className="arrow">
-              <b>→</b>
-              {path.reasons[n]}
-            </div>
-          )}
-        </div>
-      ))}
-      <div className="arrow">
-        <b style={{ color: "#c3c2b7" }}>⇢</b>next page not captured
-      </div>
-    </div>
-  );
+  if (!item.path) return <p className="small">No proven step to or from this item.</p>;
+  return <PathView path={item.path} current={item.id} />;
 }
 
 export default function ItemPage() {
@@ -169,7 +77,10 @@ export default function ItemPage() {
             <div className="box">
               {item.groups.map((g) => (
                 <div className="grp" key={g.name}>
-                  <Link to={campaignUrl(g.id)} title={g.kind === "kit" ? "See this kit" : "See this campaign"}>
+                  <Link
+                    to={g.kind === "kit" ? kitUrl(g.id) : campaignUrl(g.id)}
+                    title={g.kind === "kit" ? "See this kit" : "See this campaign"}
+                  >
                     <Chip kind={g.kind}>{g.name}</Chip>
                   </Link>
                   <div>

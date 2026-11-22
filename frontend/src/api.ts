@@ -80,42 +80,86 @@ export interface ItemData extends Row {
   groups: { kind: "campaign" | "kit"; id: string; name: string; reason: string }[];
   warningSigns: string[];
   unchecked: string[];
-  path: { ad: string | null; steps: Brief[]; reasons: string[] } | null;
+  path: PathData | null;
   matches: MatchInfo[];
   sameCase: Brief[];
   actions: { label: string; url: string; help?: string }[];
   findings: { kind: string; summary: string; source: string }[];
 }
 
-export interface CampaignCard {
+export interface PathData {
+  ad: string | null;
+  steps: Brief[];
+  reasons: string[];
+}
+
+export interface SignsCell {
+  count: number;
+  text: string;
+}
+
+export interface CampaignRow {
   id: string;
   name: string;
   title: string;
-  facts: string;
+  sub: string;
+  picture: Brief;
+  linkedBy: string;
+  strength: string;
+  cases: string;
+  signs: SignsCell;
+  kit: string;
   items: number;
-  why: { text: string; strength: string; note: string };
-  journey: boolean;
-  members: Brief[];
-  signs: { count: number; text: string; examples: string[]; checked: boolean };
-  kit: { id: string; name: string; text: string } | null;
 }
 
-export interface KitBox {
+export interface KitRow {
   id: string;
   name: string;
-  why: string;
-  facts: string;
-  members: (Brief & { campaign: string })[];
+  title: string;
+  sub: string;
+  picture: Brief;
+  linkedBy: string;
+  cases: string;
+  signs: SignsCell;
 }
 
 export interface CampaignsData {
   count: string;
-  campaigns: CampaignCard[];
-  kits: KitBox[];
+  campaigns: CampaignRow[];
+  kits: KitRow[];
   unlinked: string;
   repeats: string;
   generation: number;
   busy: boolean;
+}
+
+export interface PairInfo {
+  a: Brief;
+  b: Brief;
+  kind: LinkKind;
+  name: string;
+  reason: string;
+  strength: string;
+}
+
+export interface GroupDetail {
+  kind: "campaign" | "kit";
+  id: string;
+  name: string;
+  title: string;
+  pictures: Brief[];
+  facts: { label: string; value: string }[];
+  why: { text: string; label: string; strength: string; note: string };
+  signs: { text: string; where: string }[];
+  empty: string;
+  actions: { label: string; url: string; help?: string }[];
+  path: PathData | null;
+  members: (Brief & { host: string })[];
+  pairs: PairInfo[];
+  kit: { id: string; name: string; why: string; text: string; others: Brief[] } | null;
+  campaigns: CampaignRow[];
+  possible: PairInfo[];
+  evidence: { item: string; kind: string; summary: string; source: string }[];
 }
 
 export interface Meta {
@@ -145,6 +189,8 @@ export const api = {
   meta: () => get<Meta>("/api/meta"),
   library: () => get<LibraryData>("/api/library"),
   campaigns: () => get<CampaignsData>("/api/campaigns"),
+  campaign: (id: string) => get<GroupDetail>(`/api/campaigns/${encodeURIComponent(id)}`),
+  kit: (id: string) => get<GroupDetail>(`/api/kits/${encodeURIComponent(id)}`),
   item: (id: string) => get<ItemData>(`/api/items/${encodeURIComponent(id)}`),
   compare: (a: string, b: string) =>
     get<{ markdown: string }>(`/api/compare/${encodeURIComponent(a)}/${encodeURIComponent(b)}?format=view`),

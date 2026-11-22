@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api, type Row } from "../api";
 import { Chip, Help, Legend, Picture, plural } from "../components/bits";
 import MapView from "../components/MapView";
-import { campaignUrl, usePolled } from "../hooks";
+import { campaignUrl, kitUrl, usePolled } from "../hooks";
 
 /** The Library, refreshed every 1.5 s while an analysis runs. */
 export const useLibrary = () => usePolled(api.library);
@@ -85,7 +85,7 @@ function ItemsTable({ rows }: { rows: Row[] }) {
             </td>
             <td>
               {r.kit && (
-                <Link to={campaignUrl(r.kitId)} onClick={(e) => e.stopPropagation()} title="See this kit">
+                <Link to={kitUrl(r.kitId)} onClick={(e) => e.stopPropagation()} title="See this kit">
                   <Chip kind="kit">{r.kit}</Chip>
                 </Link>
               )}

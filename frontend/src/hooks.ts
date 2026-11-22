@@ -25,4 +25,5 @@ export function usePolled<T extends { busy: boolean }>(fetcher: () => Promise<T>
   return { data, error };
 }
 
-export const campaignUrl = (id: string) => `/campaigns#${encodeURIComponent(id)}`;
+export const campaignUrl = (id: string) => `/campaigns/${encodeURIComponent(id)}`;
+export const kitUrl = (id: string) => `/campaigns/kit/${encodeURIComponent(id)}`;
