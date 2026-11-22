@@ -21,6 +21,7 @@ ffmpeg = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not i
 @pytest.fixture(autouse=True)
 def _fresh_cache():
     _material.clear_cache()
+    video_media.clear_cache()  # tests below fake ffmpeg failures on videos read before
 
 
 def make_video(path: Path, *sources: str, extra: tuple[str, ...] = ()) -> Path:
@@ -128,6 +129,33 @@ def test_a_broken_file_is_not_observable(store, tmp_path):
     view, ctx = video_view(store, folder)
     out = VideoMedia().run(view, ctx)
     assert out and all(o.state is State.NOT_OBSERVABLE for o in out)
+
+
+@ffmpeg
+def test_the_same_video_is_read_once(store, tmp_path, monkeypatch):
+    """A second view of the same bytes, under another name, costs no ffmpeg run."""
+    clip = make_video(tmp_path / "a" / "ad.mp4", "testsrc", "smptebars")
+    (tmp_path / "b").mkdir()
+    (tmp_path / "b" / "copy.mp4").write_bytes(clip.read_bytes())
+    first, ctx = video_view(store, tmp_path / "a")
+    before = VideoMedia().run(first, ctx)
+    calls = []
+    real = video_media._run
+    monkeypatch.setattr(video_media, "_run", lambda cmd, **kw: calls.append(cmd) or real(cmd, **kw))
+    second, ctx = video_view(store, tmp_path / "b")
+    after = VideoMedia().run(second, ctx)
+    assert not calls
+    assert frames(after) == frames(before) and values(after, "video.codec") == ["h264"]
+
+
+@ffmpeg
+def test_a_failed_reading_is_tried_again(store, tmp_path, monkeypatch):
+    make_video(tmp_path / "case" / "ad.mp4", "testsrc")
+    view, ctx = video_view(store, tmp_path / "case")
+    monkeypatch.setattr(video_media, "key_frames", lambda path, duration: [])
+    assert not any(frames(VideoMedia().run(view, ctx)))  # only the not_observable row
+    monkeypatch.undo()
+    assert all(frames(VideoMedia().run(view, ctx)))
 
 
 def test_container_facts_from_a_phone_screen_recording():

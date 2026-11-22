@@ -19,10 +19,16 @@ The file is untrusted. ffmpeg and ffprobe may only read local files, every call 
 timeout, and frames are capped in number and size. Without ffmpeg on the machine, or when
 the frames cannot be read, the view gets a `not_observable` row saying why instead of
 silence. Frames written before ffmpeg failed on a damaged file are kept.
+
+A reading is cached in the process by the file's SHA-256 (with this extractor's version), so
+the same video met again, under another path or in another store, costs no ffmpeg run.
+Only complete readings are cached: a missing tool, a failed run or a video without one
+decoded frame is tried again next time.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import re
@@ -45,6 +51,7 @@ MAX_FRAMES = 120  # a safety cap for pathological input (a flashing video cuts e
 MIN_INTERVAL = 2.0  # seconds; the finest grid step
 TARGET_FRAMES = 24  # the step doubles on long videos to stay near this many grid frames
 FRAME_WIDTH = 320
+CACHE_ENTRIES = 256  # readings are small: metadata and a few dozen 16-character hashes
 
 # showinfo prints `n:<index> pts:<pts> pts_time:<seconds>`; a start before 0 (an MP4 edit
 # list) gives a negative time, and the index pairs each time with its frame file.
@@ -167,6 +174,41 @@ def container_facts(info: dict[str, Any]) -> list[tuple[str, Any, str]]:
     return out
 
 
+Reading = tuple[dict[str, Any], list[tuple[float, str]]]  # ffprobe JSON, (seconds, pHash)
+_cache: dict[str, Reading] = {}
+
+
+def clear_cache() -> None:
+    _cache.clear()
+
+
+def _digest(path: Path) -> str:
+    sha = hashlib.sha256(VERSION.encode())
+    with path.open("rb") as stream:
+        while chunk := stream.read(1 << 20):
+            sha.update(chunk)
+    return sha.hexdigest()
+
+
+def read(path: Path) -> Reading | None:
+    """ffprobe facts and frame hashes of a video, cached by content; None when unreadable.
+
+    Raises `_NoTool` and `OSError` like the calls it makes; those are never cached."""
+    key = _digest(path)
+    if key in _cache:
+        return _cache[key]
+    info = probe(path)
+    if info is None:
+        return None
+    duration = _number((info.get("format") or {}).get("duration"))
+    frames = [(t, h) for t, data in key_frames(path, duration) if (h := phash(data))]
+    if frames:
+        if len(_cache) >= CACHE_ENTRIES:
+            _cache.pop(next(iter(_cache)))
+        _cache[key] = (info, frames)
+    return info, frames
+
+
 def _not_observable(view: View, signal: str, namespace: str, why: str) -> Observation:
     return Observation(
         view_id=view.view_id,
@@ -197,11 +239,10 @@ class VideoMedia:
             ]
 
         try:
-            info = probe(path)
-            if info is None:
+            reading = read(path)
+            if reading is None:
                 return unavailable("not a readable video")
-            duration = _number((info.get("format") or {}).get("duration"))
-            frames = key_frames(path, duration)
+            info, frames = reading
         except _NoTool as exc:
             return unavailable(f"{exc} is not installed")
         except OSError as exc:  # ffmpeg not runnable, disk full: an extractor never raises
@@ -210,15 +251,10 @@ class VideoMedia:
         for namespace, value, locator in container_facts(info):
             emit("M5", namespace, value, Source(file=view.primary, locator=f"ffprobe:{locator}"),
                  raw=str(value), purpose=Purpose.RISK)  # fmt: skip
-        hashed = 0
-        for seconds, data in frames:  # the emitter merges equal hashes, the first time wins
-            value = phash(data)
-            if not value:
-                continue
-            hashed += 1
+        for seconds, value in frames:  # the emitter merges equal hashes, the first time wins
             at = f"{seconds:.2f}s" if math.isfinite(seconds) else "?"
             emit("M1", "video.frame_phash", value,
                  Source(file=view.primary, locator=f"video:frame@{at}"), raw=at)  # fmt: skip
-        if not hashed:
+        if not frames:
             emit.out.append(_not_observable(view, "M1", "video.frame_phash", "no frame decoded"))
         return emit.out
