@@ -16,7 +16,7 @@ from ftf.eval import sample
 from ftf.eval.fixtures import store_from_fixtures
 from ftf.fusion import prepare
 from ftf.layers._embedder import FakeEmbedder, GatewayEmbedder, set_embedder
-from ftf.layers.vectors import mask
+from ftf.layers.vectors import _BYLINE, mask
 from ftf.models.gemini import EMBEDDING_DIMENSIONS
 from ftf.registry import comparators
 
@@ -198,6 +198,57 @@ def test_a_missing_same_text_vector_makes_the_check_unmeasurable_not_lost():
     assert all(v is None for v in sample.narrative_checks(missing).values())
 
 
+def test_skeleton_closer_than_text_is_a_strict_check():
+    """Closer on the masked skeleton means strictly closer: a story pair whose skeleton cosine
+    sits a hair below the semantic one is a lost ordering, not a tolerated one."""
+    sem, ske = sample.VECTOR_LAYERS
+
+    def pair(group, raw_sem, raw_ske, score_ske):
+        return sample.VectorPair(
+            "a",
+            "b",
+            group,
+            group,
+            raw={sem: raw_sem, ske: raw_ske},
+            score={sem: 0.0, ske: score_ske},
+        )
+
+    pairs = [
+        pair("same text", 0.9, 0.95, 0.9),
+        pair("same story", 0.70, 0.69, 0.3),
+        pair("unrelated", 0.2, 0.3, 0.0),
+    ]
+    checks = sample.narrative_checks(pairs)
+    assert checks["skeleton_above_text"] is False
+    assert checks["story_above_unrelated_raw"] is True
+    pairs[1] = pair("same story", 0.70, 0.70, 0.3)
+    assert sample.narrative_checks(pairs)["skeleton_above_text"] is False
+    pairs[1] = pair("same story", 0.70, 0.71, 0.3)
+    assert sample.narrative_checks(pairs)["skeleton_above_text"] is True
+
+
+def test_chunks_embedded_before_a_failure_count_as_calls(settings):
+    """A multi-chunk text that fails on a later chunk still made (and cached) the earlier
+    calls; the run record must count them, or "served from the cache" skews low."""
+
+    class FailsOnSecondCall(FakeGemini):
+        def _embed(self, model, contents, config):
+            if self.calls == 1:
+                self.calls += 1
+                raise TimeoutError()
+            return super()._embed(model, contents, config)
+
+    client = FailsOnSecondCall()
+    emb = GatewayEmbedder(settings.embedding_model, settings=settings, client=client)
+    two_chunks = "zamach na kuriera " * 1500  # ~27,000 chars: two chunks of 7,000 tokens
+    assert emb.embed([two_chunks]) == [None]
+    assert emb.failures == {"timeout": 1} and client.calls == 2
+    assert emb.chunks == 1  # the first chunk was a real call...
+    assert sample.cache_entries(settings) == 1  # ...and is in the cache
+    # so the report's arithmetic reads 0 served from the cache, not a clamped shortfall
+    assert max(emb.chunks - sample.cache_entries(settings), 0) == 0
+
+
 def test_active_model_is_the_installed_embedder():
     set_embedder(FakeEmbedder())
     try:
@@ -223,6 +274,33 @@ def test_mask_removes_inflected_first_names_and_bylines():
     assert mask("fot. PAP Zamach na biznesmena.") == "fot. PAP Zamach na biznesmena."
     assert mask("oprac. Jan. Zamach trwa.") == "oprac. [PERSON]. Zamach trwa."
     assert "[CELEBRITY]" not in mask("Lisa z Krakowa schudła.")
+
+
+def test_mask_catches_capitalised_bylines_and_stops_at_a_line_break():
+    # the sample renders its credits capitalised, at the start of a line
+    m = mask("Fot. Jan Kowalski. Autor: Anna Nowak\nTekst: Piotr Zieliński\nAutorka: Ewa Lis-Kot")
+    for leak in ("Kowalski", "Nowak", "Zieliński", "Lis-Kot"):
+        assert leak not in m, (leak, m)
+    assert m.count("[PERSON]") == 4
+    assert mask("Fot. PAP Zamach na biznesmena.") == "Fot. PAP Zamach na biznesmena."
+    # a line break ends the byline: the next line's first word is story, not the author
+    # (tested on the pattern, since mask() collapses whitespace on its way out)
+    assert _BYLINE.sub(r"\1 [PERSON]", "oprac. Natalia\nPoseł zapytał") == (
+        "oprac. [PERSON]\nPoseł zapytał"
+    )
+    assert _BYLINE.sub(r"\1 [PERSON]", "oprac. Natalia Pacholczyk\nPoseł") == (
+        "oprac. [PERSON]\nPoseł"
+    )
+    # a keyword with no name on its line is not a byline: the next line is left alone
+    assert mask("Fot.\nPremier zapytał") == "Fot. Premier zapytał"
+    assert mask("Autor:\nPoseł zapytał") == "Autor: Poseł zapytał"
+
+
+def test_mask_covers_the_inflections_the_sample_uses():
+    m = mask("Słowa pana Rafała o uwolnieniu Tomasza. Rozmowa z Brzoską. Rafałowi i Tomaszem.")
+    for leak in ("Rafał", "Tomasz", "Brzosk"):
+        assert leak not in m, (leak, m)
+    assert m.count("[CELEBRITY]") == 5
 
 
 @pytest.mark.skipif(not Path("testing_sample").is_dir(), reason="testing_sample/ not present")

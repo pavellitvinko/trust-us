@@ -1384,7 +1384,8 @@ def vector_pairs(store: Store) -> list[VectorPair]:
 
 
 def narrative_checks(pairs: list[VectorPair]) -> dict[str, bool | None]:
-    """The ordering the design claims for the masked layer. None: a pair is missing."""
+    """The ordering the design claims for the masked layer. None: a pair has no comparable
+    vectors (one side missing, or two embedding models), so nothing is measured."""
     sem, ske = VECTOR_LAYERS
     story = [p for p in pairs if p.group == "same story"]
     text = [p for p in pairs if p.group == "same text"]
@@ -1399,8 +1400,8 @@ def narrative_checks(pairs: list[VectorPair]) -> dict[str, bool | None]:
         return dict.fromkeys(keys)
     text_raw = [p.raw[ske] for p in text]
     return {
-        # masking brings the same story closer than the name-keeping text does
-        "skeleton_above_text": all(p.raw[ske] >= p.raw[sem] - 0.02 for p in story),
+        # masking brings the same story strictly closer than the name-keeping text does
+        "skeleton_above_text": all(p.raw[ske] > p.raw[sem] for p in story),
         # ...and above every unrelated pair on raw cosine
         "story_above_unrelated_raw": min(p.raw[ske] for p in story)
         > max(p.raw[ske] for p in other),
@@ -1445,7 +1446,11 @@ def format_narrative(store: Store) -> list[str]:
         ]
         for p in pairs
     ]
-    verdict = {True: "holds", False: "**lost**", None: "not measurable (a vector is missing)"}
+    verdict = {
+        True: "holds",
+        False: "**lost**",
+        None: "not measurable (a pair has no comparable vectors)",
+    }
     return [
         *_table(
             [

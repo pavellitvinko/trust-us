@@ -33,14 +33,17 @@ class ModelResult[T]:
     state: State
     value: T | None = None
     reason: str | None = None  # refusal|timeout|schema|error|no_key|empty|unsupported
+    # Calls a failed result still made (an embedding's chunks before the one that failed),
+    # each of them cached, so a run record counts them as calls, not as cache hits.
+    calls_made: int = 0
 
     @classmethod
     def ok(cls, value: T) -> ModelResult[T]:
         return cls(state=State.PRESENT, value=value)
 
     @classmethod
-    def not_observable(cls, reason: str) -> ModelResult[T]:
-        return cls(state=State.NOT_OBSERVABLE, reason=reason)
+    def not_observable(cls, reason: str, calls_made: int = 0) -> ModelResult[T]:
+        return cls(state=State.NOT_OBSERVABLE, reason=reason, calls_made=calls_made)
 
 
 class TransientModelError(Exception):

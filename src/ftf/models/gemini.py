@@ -163,13 +163,13 @@ def _embed_one(
     for piece in pieces:
         result = _embed_chunk(_with_prefix(task, piece), settings, client)
         if result.value is None:
-            return ModelResult.not_observable(result.reason or "error")
+            return ModelResult.not_observable(result.reason or "error", calls_made=len(vectors))
         vectors.append(result.value)
 
     try:
         vector = _mean_normalised(vectors)
     except ValueError:
-        return ModelResult.not_observable("schema")
+        return ModelResult.not_observable("schema", calls_made=len(vectors))
     return ModelResult.ok(Embedding(vector=vector, chunks=vectors, model=settings.embedding_model))
 
 
