@@ -160,6 +160,26 @@ bundle with `status` (`dns_failed`, `connection_failed`, `tls_failed`, `timeout`
 still run. Replay serves the browser only from the archive (`not_in_archive` when it lacks
 the page); the archive is kept as `page.har` and its own time stays the capture time.
 
+## Start from a bare identifier
+
+```bash
+uv run ftf start example.com                 # a domain or URL: capture, enrich, compare
+uv run ftf start 2012165449475163            # anything else: look it up in processed material
+uv run ftf lookup "Świtowin Zyskarnia"       # views carrying a value, and the namespaces it sits in
+uv run ftf lookup 2012165449475163 --namespace fb_pixel --json
+```
+
+`ftf start` reads a URL, or a bare host whose suffix is on the public-suffix list, as a page
+to capture (a bare host gets `https://`; only http and https are opened). It first lists views
+already holding that registrable domain, then runs `ftf capture --ingest`; `--out`,
+`--proxy` and `--timeout` apply to that capture only. Any other hint (a pixel ID, an
+ad-library ID, a product name, including dotted ones like `Bitcoin.Era`) goes to
+`ftf lookup`, which searches the stored observations in every namespace, or only those given
+with `--namespace`. An exact match wins; when there is none, letter case is ignored and the
+output says so. Observations recorded as absent never match, and structured values (such as
+`page.entity.person`) cannot be typed in. It exits with 1 when no view carries the value
+(`--json` then prints `[]`).
+
 ## Known corpus
 
 `corpus/` holds processed results for the organiser sample: observations, fingerprints, evidence
