@@ -347,7 +347,13 @@ def cmd_ground(args) -> None:
     """Check expectation profiles against genuine pages (model and live capture)."""
     from .perception.grounding import load_grounding, run_grounding
 
-    kinds = load_grounding() if args.show else run_grounding(args.kind or None)
+    try:
+        kinds = load_grounding() if args.show else run_grounding(args.kind or None)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
+    if args.kind:
+        kinds = {kind: entry for kind, entry in kinds.items() if kind in args.kind}
     if not kinds:
         print("no grounding results yet")
         return

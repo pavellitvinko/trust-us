@@ -107,8 +107,12 @@ def page(url, **states):
 def test_ground_kind_scores_pages_and_verifies_additions(tmp_path, settings, monkeypatch):
     monkeypatch.setattr(gr, "_profile", lambda *a, **k: (ELEMENTS, "hash", None))
     pages = {
-        "u1": page("u1", terms="present", controller="present", licence="absent"),
-        "u2": page("u2", terms="present", controller="absent", licence="absent"),
+        "https://a.pl/1": page(
+            "https://a.pl/1", terms="present", controller="present", licence="absent"
+        ),
+        "https://b.pl/2": page(
+            "https://b.pl/2", terms="present", controller="absent", licence="absent"
+        ),
     }
     monkeypatch.setattr(gr, "_check_page", lambda url, *a: pages[url])
     good = gr.AddedElement(
@@ -135,7 +139,7 @@ def test_ground_kind_scores_pages_and_verifies_additions(tmp_path, settings, mon
         "read_structured",
         lambda *a, **k: ModelResult.ok(gr.AddedElements(elements=[good, invented])),
     )
-    result = gr.ground_kind("k", ("u1", "u2"), tmp_path, settings=settings)
+    result = gr.ground_kind("k", tuple(pages), tmp_path, settings=settings)
     assert result["elements"]["terms"]["decision"] == "kept"
     assert result["elements"]["controller"]["false_alarm_rate"] == 0.5
     assert result["elements"]["licence"]["decision"] == "dropped"
@@ -168,3 +172,111 @@ def test_damaged_file_is_ignored(settings):
     path.parent.mkdir(parents=True)
     path.write_text("{broken")
     assert gr.load_grounding(settings) == {}
+
+
+def test_one_operator_is_not_enough(tmp_path, settings, monkeypatch):
+    monkeypatch.setattr(gr, "_profile", lambda *a, **k: (ELEMENTS, "hash", None))
+    urls = ("https://www.a.pl/1", "https://a.pl/2")
+    monkeypatch.setattr(gr, "_check_page", lambda url, *a: page(url, terms="present"))
+    assert gr.ground_kind("k", urls, tmp_path, settings=settings)["status"] == "too_few_pages"
+
+
+def test_consent_wall_does_not_count_as_a_page():
+    wall = Observation(
+        view_id="v",
+        signal_id="K",
+        namespace=ex.READ_TEXT_NAMESPACE,
+        value="Twoja prywatność. Zaufani partnerzy przetwarzają dane. " * 12,
+        extractor="x",
+        version="1",
+    )
+    assert gr._page_result("u", [wall])["status"] == "interstitial"
+
+
+def test_trivial_or_unmatched_quotes_cannot_add_an_element(settings, monkeypatch):
+    bad = gr.AddedElement(
+        name="Licence badge",
+        description="d",
+        polish_wordings=["nie ma takiego"],
+        expected_location="footer",
+        quotes=[
+            gr.PageQuote(page_index=0, quote="na"),
+            gr.PageQuote(page_index=1, quote="Administratorem danych"),
+        ],
+    )
+    monkeypatch.setattr(
+        gr, "read_structured", lambda *a, **k: ModelResult.ok(gr.AddedElements(elements=[bad]))
+    )
+    pages = [page("a"), page("b")]
+    assert gr._additions("k", {}, pages, settings, None) == {}
+
+
+def test_bad_entry_is_left_out(settings):
+    path = gr.grounding_path(settings)
+    path.parent.mkdir(parents=True)
+    broken = {"status": "grounded", "profile": "h", "elements": {}, "added": {"x": {"name": 1}}}
+    path.write_text(json.dumps({"schema": gr.SCHEMA, "kinds": {"k": broken}}))
+    assert gr.load_grounding(settings) == {}
+
+
+def test_weak_absence_counts_half_when_comparing():
+    from ftf.compare.pattern import AbsenceAgreement
+    from ftf.contracts import Fingerprint, FingerprintKind
+
+    def fingerprint(view, weak):
+        items = [
+            {"ns": "element", "value": "x", "state": "absent", **({"weak": True} if weak else {})},
+            {"ns": "element", "value": "y", "state": "absent"},
+            {"ns": "element", "value": "z", "state": "present"},
+        ]
+        return Fingerprint(
+            view_id=view,
+            layer_id="kit.absence",
+            kind=FingerprintKind.SET,
+            payload={"kind": "k", "items": items},
+            version="2",
+        )
+
+    evidence = AbsenceAgreement().compare(fingerprint("a", True), fingerprint("b", True))
+    assert {s["value"]: s["weight"] for s in evidence.shared}["x:absent"] == 0.5
+
+
+def test_regrade_removes_dropped_and_marks_weak(store):
+    from ftf.contracts import Incident, View, ViewKind
+    from ftf.registry import Context
+
+    view = View(view_id="v", incident_id="i", kind=ViewKind.PAGE, label="p")
+    store.put_incident(Incident(incident_id="i", root="."), [], [view])
+
+    def row(value):
+        return Observation(
+            view_id="v",
+            signal_id="K",
+            namespace=ex.ELEMENT_NAMESPACE,
+            value=value,
+            raw="expected element not found",
+            state=State.ABSENT,
+            extractor=ex.NAME,
+            version="1",
+        )
+
+    store.put_observations("v", ex.NAME, [row("licence"), row("controller")])
+    store.put_observations(
+        "v",
+        ex.KIND_EXTRACTOR,
+        [
+            Observation(
+                view_id="v",
+                signal_id="K",
+                namespace=ex.KIND_NAMESPACE,
+                value={"named": "n", "canonical": "k", "profile": "hash"},
+                extractor=ex.KIND_EXTRACTOR,
+                version="1",
+            )
+        ],
+    )
+    grounding = entry(licence="dropped", controller="downgraded")
+    assert ex.regrade_stored(Context(store), grounding) == 1
+    rows = {o.value: o for o in store.observations("v") if o.namespace == ex.ELEMENT_NAMESPACE}
+    assert set(rows) == {"controller"} and rows["controller"].confidence == 0.5
+    assert ex.regrade_stored(Context(store), grounding) == 0

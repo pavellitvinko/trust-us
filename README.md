@@ -153,8 +153,9 @@ uv run ftf ground --show   # decisions and false-alarm rates
 uv run ftf perceive        # later checks use the grounded profiles
 ```
 
-An element missing on every genuine page is dropped, one missing on some is kept as weak evidence,
-and one that every page carries is added. Results apply only to the profile version they checked.
+An element missing on every genuine page is dropped, one missing on some counts half as much,
+and one that every page carries is added. A kind needs pages from two different operators; consent
+walls, bot checks and redirects to another domain do not count. Results apply only to the profile version they checked.
 
 ## Rehearse the demo
 
