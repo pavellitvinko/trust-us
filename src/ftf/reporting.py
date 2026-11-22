@@ -479,7 +479,30 @@ def build_pair_report(store: Store, view_a: str, view_b: str, config=DEFAULT) ->
                 "sources": {side: register(obs) for side, obs in found.items()},
             }
         )
+    report["membership"] = _membership(store, view_a, view_b, config)
     return report
+
+
+def _membership(store: Store, view_a: str, view_b: str, config) -> dict[str, Any]:
+    """Group context, kept apart from the direct pair evidence above."""
+    groups = build_groups(store, config, persist_funnel=False)
+    campaigns = {side: groups.campaign_of.get(v) for side, v in (("a", view_a), ("b", view_b))}
+    families = {side: groups.family_of.get(c) if c else None for side, c in campaigns.items()}
+    edges = [
+        {"source": e.source, "target": e.target, "evidence": list(e.evidence)}
+        for found, *_ in groups.funnel_edges.values()
+        for e in found
+        if {e.source, e.target} == {view_a, view_b}
+    ]
+    return {
+        "note": "Group membership can be funnel-based or transitive. It is not direct evidence "
+        "between these two views.",
+        "campaigns": campaigns,
+        "families": families,
+        "same_campaign": campaigns["a"] is not None and campaigns["a"] == campaigns["b"],
+        "same_family": families["a"] is not None and families["a"] == families["b"],
+        "funnel_edges": edges,
+    }
 
 
 def _display(value):
@@ -654,6 +677,24 @@ def render_pair_report(report: dict) -> str:
             ),
             f"  {refs([ref])}",
         ]
+    membership = report["membership"]
+    lines += [
+        "",
+        "## Group membership (not direct evidence)",
+        "",
+        membership["note"],
+        "",
+        "- Campaigns: "
+        + " / ".join(_display(v) for v in membership["campaigns"].values())
+        + f" (same: {membership['same_campaign']})",
+        "- Families: "
+        + " / ".join(_display(v) for v in membership["families"].values())
+        + f" (same: {membership['same_family']})",
+        *[
+            f"- Funnel edge: {_display(e['source'])} -> {_display(e['target'])}"
+            for e in membership["funnel_edges"]
+        ],
+    ]
     lines += [
         "",
         "## Scope and limitations",

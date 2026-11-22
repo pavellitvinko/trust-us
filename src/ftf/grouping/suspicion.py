@@ -18,7 +18,7 @@ YOUNG_DOMAIN_DAYS = 365
 
 # A kind counts as checked when one of these inputs was observed.
 _INPUTS = {
-    "domain": ("url.host", "domain.registrable"),
+    "domain": ("rdap.", "warning."),  # the host alone does not show age or listing
     "impersonation": ("page.read_text", "image.text"),
     "absent_elements": ("expect.element",),
     "evasion": ("page.clean_text", "page.body_text"),
