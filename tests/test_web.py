@@ -97,6 +97,8 @@ def test_a_campaign_row_and_page_say_what_it_is_and_why():
         "Found in": "Cases 1, 2",
         "First seen": "20 Nov 2026",
     }
+    assert page["title"] == "Metabo RX campaign" and page["short"] == "Metabo RX"
+    assert page["summary"] == "2 pages on 2 websites, linked by same Facebook tracking pixel"
     assert page["why"]["text"] == "Same Facebook tracking pixel 1071875908635809"
     assert page["why"]["note"].startswith("Only whoever runs the pages")
     assert page["empty"] == "Not checked." and page["path"] is None and page["kit"] is None

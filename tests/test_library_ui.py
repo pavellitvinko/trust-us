@@ -581,3 +581,13 @@ def test_why_falls_back_to_the_journey():
         "",
         "A visitor is taken from one to the next.",
     )
+
+
+def test_group_pages_are_titled_for_what_they_are():
+    from ftf.library import campaign_heading, kit_heading
+
+    assert campaign_heading("Metabo RX") == "Metabo RX campaign"  # never the page's own title
+    assert campaign_heading("Pages on x.top") == "Campaign: Pages on x.top"
+    assert campaign_heading("słowo " * 10).startswith("Campaign: ")
+    views = {v: _page(v, "1", v) for v in "abcd"}
+    assert kit_heading(list("abcd"), views) == "Page template used by 4 pages"

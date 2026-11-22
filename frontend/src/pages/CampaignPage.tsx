@@ -1,34 +1,24 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
-import { api, pictureUrl, type GroupDetail } from "../api";
+import { Link, useParams } from "react-router-dom";
+import { api, type GroupDetail } from "../api";
 import { Chip, Help, Picture, plural, useMeta } from "../components/bits";
 import { itemUrl, LinkPair, PathView } from "../components/links";
+import { Band, Crumbs } from "../components/pagetop";
 import { campaignUrl, kitUrl } from "../hooks";
 import { GroupRow, GroupTable } from "./Campaigns";
 
-/** Up to four member pictures, the first one large. */
-function Pictures({ group }: { group: GroupDetail }) {
-  const [first, ...rest] = group.pictures;
-  if (!first) return null;
+/** A group looks like a group: its pages as a grid, never one big screenshot like an item. */
+function Mosaic({ group }: { group: GroupDetail }) {
+  const shown = group.pictures.slice(0, 4);
+  const more = group.pictures.length - shown.length;
   return (
-    <div>
-      <Link to={itemUrl(first.id)} title={first.title}>
-        {first.picture ? (
-          <img className="big" src={pictureUrl(first.id, "full")} alt="" />
-        ) : (
-          <Picture id={first.id} has={false} type={first.type} width={520} height={320} />
-        )}
-      </Link>
-      {rest.length > 0 && (
-        <div className="strip" style={{ marginTop: 10 }}>
-          {rest.slice(0, 3).map((p) => (
-            <Link key={p.id} className="other" to={itemUrl(p.id)} title={p.title}>
-              <Picture id={p.id} has={p.picture} type={p.type} width={124} height={78} />
-            </Link>
-          ))}
-          {rest.length > 3 && <span className="small">and {rest.length - 3} more below</span>}
-        </div>
-      )}
+    <div className={`mosaic mosaic-${group.kind}`}>
+      {shown.map((p) => (
+        <Link key={p.id} to={itemUrl(p.id)} title={p.title}>
+          <Picture id={p.id} has={p.picture} type={p.type} width={250} height={156} />
+        </Link>
+      ))}
+      {more > 0 && <span className="small">and {more} more below</span>}
     </div>
   );
 }
@@ -36,7 +26,6 @@ function Pictures({ group }: { group: GroupDetail }) {
 /** A campaign's page, or a kit's (route /campaigns/kit/:id): one layout for both. */
 export default function CampaignPage({ kit = false }: { kit?: boolean }) {
   const { id = "" } = useParams();
-  const navigate = useNavigate();
   const meta = useMeta();
   const [group, setGroup] = useState<GroupDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -47,32 +36,29 @@ export default function CampaignPage({ kit = false }: { kit?: boolean }) {
     window.scrollTo(0, 0);
   }, [id, kit]);
 
-  const back = (
-    <a
-      className="back"
-      href="/campaigns"
-      onClick={(e) => {
-        e.preventDefault();
-        if (window.history.state?.idx > 0) navigate(-1);
-        else navigate("/campaigns");
-      }}
-    >
-      ← Campaigns
-    </a>
+  const top = (here: string) => (
+    <Crumbs
+      parts={[
+        { label: "Campaigns", to: "/campaigns" },
+        ...(kit ? [{ label: "Shared kits", to: "/campaigns" }] : []),
+        { label: here },
+      ]}
+    />
   );
-  if (error) return <>{back}<p className="error">{error}</p></>;
-  if (!group) return <>{back}<p className="muted">Loading…</p></>;
+  if (error) return <>{top(kit ? "Kit" : "Campaign")}<p className="error">{error}</p></>;
+  if (!group) return <>{top("…")}<p className="muted">Loading…</p></>;
 
   const isKit = group.kind === "kit";
   return (
-    <>
-      {back}
+    <div className={`page-${group.kind}`}>
+      {top(group.short)}
       <div className="dgrid">
-        <Pictures group={group} />
+        <Mosaic group={group} />
         <div>
+          <Band kind={group.kind} />
           <h1 style={{ fontSize: 20, lineHeight: 1.3 }}>{group.title}</h1>
           <div className="small" style={{ margin: "6px 0 14px" }}>
-            <Chip kind={group.kind}>{group.name}</Chip> <Help topic={group.kind} />
+            {group.summary} · <Chip kind={group.kind}>{group.name}</Chip> <Help topic={group.kind} />
           </div>
 
           <div className="box">
@@ -260,6 +246,6 @@ export default function CampaignPage({ kit = false }: { kit?: boolean }) {
           </table>
         </details>
       )}
-    </>
+    </div>
   );
 }

@@ -980,7 +980,14 @@ def name_groups(
             name="",
             campaigns=ordered,
             linked_by=_clues(across),
-            title=campaign_title([v for c in ordered for v in out[c].members], views),
+            title=kit_heading(
+                [
+                    v
+                    for c in ordered
+                    for v in (out[c].members[:1] if out[c].repeat else out[c].members)
+                ],
+                views,
+            ),
         )
     for fid, name in _unique(kit_names, kit_anchors).items():
         kits[fid].name = name
@@ -1036,6 +1043,19 @@ def campaign_title(members: list[str], views: dict[str, View]) -> str:
     if len(hosts) == 2:
         return "Pages on " + " and ".join(sorted(hosts))
     return f"Pages on {len(hosts)} websites"
+
+
+def campaign_heading(title: str) -> str:
+    """A campaign's page title, which says it is a campaign: never the same as a page's."""
+    if len(title) <= 40 and not title.startswith("Pages on "):
+        return f"{title} campaign"
+    return f"Campaign: {title}"
+
+
+def kit_heading(members: list[str], views: dict[str, View]) -> str:
+    """ "Page template used by 4 pages": a kit is named for what it is, not for one page."""
+    pages = all(views[v].kind is ViewKind.PAGE for v in members)
+    return f"Page template used by {plural(len(members), 'page' if pages else 'item')}"
 
 
 # What a campaign's strongest link means, for a reader who does not know the method.

@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { api, pictureUrl, type ItemData, type MatchInfo } from "../api";
 import { Chip, Help, Picture, plural, useMeta } from "../components/bits";
 import { itemUrl, LinkPair, PathView } from "../components/links";
+import { Band, Crumbs } from "../components/pagetop";
 import { campaignUrl, kitUrl } from "../hooks";
 
 function Pair({ item, match }: { item: ItemData; match: MatchInfo }) {
@@ -21,7 +22,6 @@ function Path({ item }: { item: ItemData }) {
 
 export default function ItemPage() {
   const { id = "" } = useParams();
-  const navigate = useNavigate();
   const meta = useMeta();
   const [item, setItem] = useState<ItemData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -35,27 +35,23 @@ export default function ItemPage() {
     window.scrollTo(0, 0);
   }, [id]);
 
-  const back = (
-    <a
-      className="back"
-      href="/library"
-      onClick={(e) => {
-        e.preventDefault();
-        if (window.history.state?.idx > 0) navigate(-1);
-        else navigate("/library");
-      }}
-    >
-      ← Library
-    </a>
+  const back = (here?: { case: string; type: string }) => (
+    <Crumbs
+      parts={[
+        { label: "Library", to: "/library" },
+        ...(here ? [{ label: here.case, to: "/library" }, { label: here.type.toLowerCase() }] : []),
+      ]}
+    />
   );
-  if (error) return <>{back}<p className="error">{error}</p></>;
-  if (!item) return <>{back}<p className="muted">Loading…</p></>;
+  if (error) return <>{back()}<p className="error">{error}</p></>;
+  if (!item) return <>{back()}<p className="muted">Loading…</p></>;
+  const campaign = item.groups.find((g) => g.kind === "campaign");
 
   const firm = item.matches.filter((m) => m.kind !== "possible");
   const possible = item.matches.filter((m) => m.kind === "possible");
   return (
     <>
-      {back}
+      {back(item)}
       <div className="dgrid">
         <div>
           {item.picture ? (
@@ -67,12 +63,19 @@ export default function ItemPage() {
           )}
         </div>
         <div>
+          <Band kind="item" text={`One ${item.type === "Image" ? "picture" : item.type.toLowerCase()}`} />
           <h1 style={{ fontSize: 20, lineHeight: 1.3 }}>{item.title}</h1>
-          <div className="small" style={{ margin: "6px 0 14px" }}>
+          <div className="small" style={{ margin: "6px 0 6px" }}>
             {item.type}
             {item.host && ` · ${item.host}`} · <Chip kind="case">{item.case}</Chip>
             <Help topic="case" /> · added {item.added}
           </div>
+          {campaign && (
+            <div className="partof">
+              Part of <Link to={campaignUrl(campaign.id)}>{campaign.title}</Link> →
+            </div>
+          )}
+          <div style={{ height: 8 }} />
           {item.groups.length > 0 && (
             <div className="box">
               {item.groups.map((g) => (

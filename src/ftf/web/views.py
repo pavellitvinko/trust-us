@@ -20,6 +20,7 @@ from ..library import (
     Journey,
     Kit,
     Library,
+    campaign_heading,
     campaign_why,
     case_key,
     case_title,
@@ -207,14 +208,17 @@ def detail(library: Library, item: Item) -> dict[str, Any]:
         """What joins this item to its group: its own strongest link of that kind."""
         return next((m.reason for m in item.matches if m.kind == kind), "")
 
+    campaign = library.campaigns.get(item.campaign or "")
+    kit = library.kits.get(item.kit or "")
     groups = [
-        {"kind": kind, "id": gid or "", "name": name, "reason": own_reason(kind)}
-        for kind, gid, name in (
-            ("campaign", item.campaign, campaign_name(library, item)),
-            ("kit", item.kit, kit_name(library, item)),
+        {"kind": kind, "id": gid or "", "name": name, "reason": own_reason(kind), "title": title}
+        for kind, gid, name, title in (
+            ("campaign", item.campaign, campaign_name(library, item),
+             campaign and f"{campaign_heading(campaign.title)} ({plural(len(campaign.members), 'page')})"),
+            ("kit", item.kit, kit_name(library, item), kit and kit.title),
         )
         if name
-    ]
+    ]  # fmt: skip
     journey = library.journeys.get(item.view_id)
     matches = []
     for match in item.matches:
@@ -503,6 +507,13 @@ def _all_actions(library: Library, items: list[Item]) -> list[dict[str, str]]:
     return list(seen.values())
 
 
+def _summary(items: list[Item], tail: str) -> str:
+    """One line under a group's title: what it is made of, where, and what holds it together."""
+    hosts = _hosts(items)
+    where = f" on {plural(len(hosts), 'website')}" if hosts else ""
+    return f"{_items_text(items)}{where}, {tail}"
+
+
 def campaign_detail(library: Library, campaign: Campaign) -> dict[str, Any]:
     """Everything a campaign's page shows."""
     items, journey = _members(library, campaign.members)
@@ -523,7 +534,9 @@ def campaign_detail(library: Library, campaign: Campaign) -> dict[str, Any]:
         "kind": "campaign",
         "id": campaign.campaign_id,
         "name": campaign.name,
-        "title": campaign.title,
+        "title": campaign_heading(campaign.title),
+        "short": campaign.title,
+        "summary": _summary(items, f"linked by {why.label}"),
         "pictures": [_brief(i) for i in items],
         "facts": _facts(items, journey, campaign.first_seen),
         "why": why._asdict(),
@@ -549,6 +562,8 @@ def kit_detail(library: Library, kit: Kit) -> dict[str, Any]:
         "id": kit.kit_id,
         "name": kit.name,
         "title": kit.title,
+        "short": kit.name,
+        "summary": _summary(items, _kit_row(library, kit)["sub"].split(" · ", 1)[-1]),
         "pictures": [_brief(i) for i in items],
         "facts": _facts(items, None, first),
         "why": {

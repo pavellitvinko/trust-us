@@ -77,7 +77,7 @@ export interface MatchInfo extends Brief {
 }
 
 export interface ItemData extends Row {
-  groups: { kind: "campaign" | "kit"; id: string; name: string; reason: string }[];
+  groups: { kind: "campaign" | "kit"; id: string; name: string; reason: string; title: string }[];
   warningSigns: string[];
   unchecked: string[];
   path: PathData | null;
@@ -147,6 +147,8 @@ export interface GroupDetail {
   id: string;
   name: string;
   title: string;
+  short: string;
+  summary: string;
   pictures: Brief[];
   facts: { label: string; value: string }[];
   why: { text: string; label: string; strength: string; note: string };
