@@ -168,6 +168,28 @@ pre.report { white-space: pre-wrap; font-size: 12px; background: #fafaf7; border
 .progress { height: 4px; background: var(--line); border-radius: 2px; overflow: hidden; margin-top: 10px; }
 .progress div { height: 100%; background: var(--accent); }
 
+/* probe agent */
+.probe-check { display: flex; gap: 8px; align-items: center; margin: 4px 0 10px; }
+.probe-levels { border: 0; padding: 0; margin: 14px 0 10px; display: grid; gap: 6px; }
+.probe-levels label { display: flex; gap: 8px; align-items: baseline; cursor: pointer; }
+.probe-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+.probe-warn { margin-bottom: 12px; border-color: #f0c4c4; background: #fdf6f6; }
+.probe-warn pre { margin: 8px 0 0; font-size: 12px; white-space: pre-wrap; word-break: break-all; }
+.probe-result { margin-top: 12px; display: grid; gap: 10px; }
+.probe-result > .btn { justify-self: start; }
+.probe-now { display: flex; gap: 8px; align-items: center; }
+.probe-demo { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
+.probe-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.probe-steps li { display: flex; align-items: center; gap: 10px; color: var(--text-3); }
+.probe-steps li.done, .probe-steps li.now { color: var(--text); }
+.probe-steps .mark { width: 22px; height: 22px; flex: none; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 50%; border: 1px solid var(--line-2); font-size: 12px; }
+.probe-steps .done .mark { background: var(--accent); border-color: var(--accent); color: #fff; }
+.probe-panel, .probe-tools { margin-top: 12px; display: grid; gap: 10px; }
+.probe-panel .probe-check { margin: 0; align-items: flex-start; }
+.probe-panel .probe-warn { padding: 10px 12px; border: 1px solid #f0c4c4; border-radius: 8px; margin: 0; }
+.probe-tools .probe-actions { margin-top: 0; flex-wrap: wrap; }
+
 /* how it works */
 .explain { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .prose { max-width: 760px; }

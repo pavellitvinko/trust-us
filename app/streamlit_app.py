@@ -48,6 +48,7 @@ from ftf.patterns.analyst import (
     retire_pattern,
 )
 from ftf.patterns.library import PatternLibraryStore
+from ftf.probe.ui import probe_page
 from ftf.registry import layers, load_plugins
 from ftf.reporting import build_pair_report, render_pair_report
 from ftf.store import Store
@@ -1012,6 +1013,10 @@ def page_library() -> None:
 # -- Campaigns, method, report (unchanged screens) ----------------------------------------
 
 
+def page_probe() -> None:
+    probe_page(settings, db, worker.invalidate)
+
+
 def number_rows(values: dict) -> list[dict]:
     return [{"setting": k, "value": float(v)} for k, v in values.items()]
 
@@ -1270,6 +1275,7 @@ has_material = bool(db().incidents()) or bool(worker.jobs)
 PAGES = {
     "add": st.Page(page_add, title="Add material", url_path="add", default=not has_material),
     "library": st.Page(page_library, title="Library", url_path="library", default=has_material),
+    "probe": st.Page(page_probe, title="Probe agent", url_path="probe"),
     "campaigns": st.Page(page_campaigns, title="Campaigns", url_path="campaigns"),
     "method": st.Page(page_method, title="Method", url_path="method"),
     "report": st.Page(page_report, title="Report", url_path="report"),

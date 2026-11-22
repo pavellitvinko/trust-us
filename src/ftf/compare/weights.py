@@ -87,6 +87,13 @@ BASE_WEIGHTS: dict[str, float] = {
     "contact.email": 0.9,
     "contact.handle": 0.9,
     "contact.wallet": 0.95,
+    "contact.iban": 0.95,
+    "payment.public_key": 0.9,
+    "payment.merchant_id": 0.85,
+    "mail.sender_domain": 0.85,
+    # Below the identity threshold alone: scam pages copy real companies' numbers.
+    "company.nip": 0.6,
+    "company.krs": 0.6,
     # identity: where the page lives
     "domain.registrable": 0.9,
     "url.host_path": 0.95,

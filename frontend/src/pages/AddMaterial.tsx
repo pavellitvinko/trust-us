@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { addMaterial } from "../api";
 import { plural } from "../components/bits";
+import { ProbeLinkPanel, ProbeRun, ProbeTools, useProbe } from "../components/ProbeAgent";
 
 type Staged = { file: File; path: string };
 
@@ -59,6 +60,9 @@ export default function AddMaterial() {
   const fileInput = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
   const kind = linkKind(link);
+  const agent = useProbe();
+  // The agent walks websites, so a Meta Ad Library link is not a target for it.
+  const probeTargets = [...new Set([...(kind ? [link.trim()] : []), ...links])].filter((l) => !AD_LIBRARY.test(l));
 
   const addFiles = (more: Staged[]) => {
     setError(null);
@@ -214,6 +218,8 @@ export default function AddMaterial() {
           {progress !== null ? "Uploading…" : count > 1 ? `Analyse ${count} items together` : "Analyse"}
         </button>
       </div>
+      <ProbeLinkPanel agent={agent} targets={probeTargets} />
+      <ProbeRun agent={agent} />
 
       <h2>Or find material with a tool</h2>
       <div className="card">
@@ -240,6 +246,7 @@ export default function AddMaterial() {
           </button>
         </form>
       </div>
+      <ProbeTools agent={agent} />
     </div>
   );
 }

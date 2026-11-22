@@ -289,6 +289,55 @@ export const api = {
   prepareVideo: (id: string) => get<{ prepared: boolean }>(`${itemApi(id)}/media/prepare`, { method: "POST" }),
 };
 
+export interface ProbeJob {
+  id: string;
+  target: string;
+  level: number;
+  state: "queued" | "running" | "done" | "failed";
+  created: string;
+  error: string | null;
+  steps: string[];
+  pages: number;
+  registered: boolean;
+  loggedIn: boolean;
+  emailConfirmed: boolean;
+  checkoutSeen: boolean;
+  findings: { found: string; value: string; page: string }[];
+  added: boolean;
+}
+
+export interface ProbeData {
+  workerAlive: boolean;
+  inboxEnabled: boolean;
+  jobs: ProbeJob[];
+}
+
+export interface InboxReport {
+  messages: number;
+  attributed: number;
+  new: number;
+  resold: { site: string; sender: string; subject: string }[];
+}
+
+async function post<T>(url: string, body?: unknown): Promise<T> {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new ApiError(typeof data.detail === "string" ? data.detail : res.statusText, res.status);
+  return data;
+}
+
+export const probe = {
+  overview: () => get<ProbeData>("/api/probe"),
+  start: (request: { url: string; level: number; live: boolean; fake: boolean }) =>
+    post<{ id: string }>("/api/probe", request),
+  add: (id: string) => post<{ added: boolean }>(`/api/probe/${encodeURIComponent(id)}/add`),
+  inbox: () => post<InboxReport>("/api/probe/inbox"),
+};
+
 export const itemApi = (id: string) => `/api/items/${encodeURIComponent(id)}`;
 
 export const pictureUrl = (id: string, size: "card" | "full" = "card") =>

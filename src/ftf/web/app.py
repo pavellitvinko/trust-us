@@ -37,6 +37,7 @@ from ..store import Store
 from . import views
 from .inspection import cleaner_for, comparison_sources
 from .inspection_routes import router as inspection_router
+from .probe import probe_router
 
 MAX_UPLOAD_FILES = 50_000  # parts in one upload: a saved site is hundreds of files
 
@@ -312,6 +313,8 @@ def create_app() -> FastAPI:
             media_type="application/zip",
             headers={"Content-Disposition": f'attachment; filename="{name}"'},
         )
+
+    app.include_router(probe_router(settings.data_dir, settings.db_path, worker.invalidate))
 
     dist = Path(os.environ.get("FTF_WEB_DIST", "frontend/dist"))
     if not (dist / "index.html").is_file():
