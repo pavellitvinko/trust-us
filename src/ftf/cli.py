@@ -199,10 +199,15 @@ def cmd_perceive(args) -> None:
     from .perception.image import run_perceive
     from .perception.page import run_perceive_pages
     from .perception.techniques import run_techniques
+    from .perception.video import run_perceive_videos
     from .registry import Context
 
     ctx = Context(_store())
-    for label, run in (("image", run_perceive), ("page", run_perceive_pages)):
+    for label, run in (
+        ("image", run_perceive),
+        ("page", run_perceive_pages),
+        ("video", run_perceive_videos),
+    ):
         summary = run(ctx, args.view or None)
         print(
             f"{label} views: {summary['views']}, read: {summary['read']}, "

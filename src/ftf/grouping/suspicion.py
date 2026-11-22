@@ -20,7 +20,7 @@ YOUNG_DOMAIN_DAYS = 365
 # A kind counts as checked when one of these inputs was observed.
 _INPUTS = {
     "domain": ("rdap.", "warning.", "ct.prior_life_days"),  # host alone: no age or listing
-    "impersonation": ("page.read_text", "image.text"),
+    "impersonation": ("page.read_text", "image.text", "video.transcript", "video.on_screen_text"),
     "absent_elements": ("expect.element",),
     "evasion": ("page.clean_text", "page.body_text", "cloak."),
     "persuasion": ("pattern.score", "markup."),
