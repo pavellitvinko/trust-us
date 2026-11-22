@@ -38,6 +38,16 @@ def _label(item: Item, kind: str) -> str:
     return next((label.text for label in item.labels if label.kind == kind), "")
 
 
+def campaign_name(library: Library, item: Item) -> str:
+    campaign = library.campaigns.get(item.campaign or "")
+    return (campaign.name or "") if campaign else ""
+
+
+def kit_name(library: Library, item: Item) -> str:
+    kit = library.kits.get(item.kit or "")
+    return kit.name if kit else ""
+
+
 def _firm(item: Item) -> list:
     return [m for m in item.matches if m.kind != "possible"]
 
@@ -53,8 +63,8 @@ def summary(library: Library, item: Item) -> dict[str, Any]:
         "case": case_title(item.case_id),
         "caseId": item.case_id,
         "added": library.added(item.case_id)[:10],
-        "campaign": _label(item, "campaign"),
-        "kit": _label(item, "kit"),
+        "campaign": campaign_name(library, item),
+        "kit": kit_name(library, item),
         "duplicateOf": duplicate.split(" · ", 1)[-1] if duplicate else "",
         "comparable": item.labels[0].text != "Not enough evidence",
         "signs": len(item.risk.signs),
@@ -153,9 +163,12 @@ def detail(library: Library, item: Item) -> dict[str, Any]:
         return next((m.reason for m in item.matches if m.kind == kind), "")
 
     groups = [
-        {"kind": label.kind, "name": label.text, "reason": own_reason(label.kind)}
-        for label in item.labels
-        if label.kind in ("campaign", "kit")
+        {"kind": kind, "name": name, "reason": own_reason(kind)}
+        for kind, name in (
+            ("campaign", campaign_name(library, item)),
+            ("kit", kit_name(library, item)),
+        )
+        if name
     ]
     journey = library.journeys.get(item.view_id)
     path = None

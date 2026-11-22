@@ -7,10 +7,10 @@ kit with a single member is not named: it says nothing a reader can act on.
 
 from __future__ import annotations
 
+import hashlib
 import itertools
 import json
 import re
-import string
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -54,8 +54,9 @@ _LIBRARY_URL = re.compile(r"facebook\.com/ads/library/?\?(?:[^#]*&)?id=(\d+)")
 
 @dataclass
 class Label:
-    kind: str  # campaign | kit | duplicate | none
+    kind: str  # campaign | duplicate | none
     text: str
+    detail: str = ""  # e.g. "with 3 more items in 2 cases"
 
 
 @dataclass
@@ -80,6 +81,15 @@ class Risk:
     def signs(self) -> list[str]:
         """The findings in plain words, each said once (three timers are one sign)."""
         return list(dict.fromkeys(f.plain or f.summary for f in self.findings))
+
+    @property
+    def text(self) -> str:
+        """Worded, never a bare number: "2 red flags", "1 warning"."""
+        if self.level == "error":
+            return plural(self.count, "red flag")
+        if self.level == "warning":
+            return plural(self.count, "warning")
+        return ""
 
 
 @dataclass
@@ -111,6 +121,8 @@ class Item:
     library_id: str | None = None  # Meta Ad Library ID, when the item is a Library ad
     note: str | None = None  # what the latest add changed for this item
     matches: list[Match] = field(default_factory=list)
+    campaign: str | None = None  # campaign id, when the campaign is named (several items)
+    kit: str | None = None  # kit id, when its campaign is part of a kit
 
 
 @dataclass(frozen=True)
@@ -123,6 +135,8 @@ class Match:
     observed_groups: int
     total_groups: int
     clue: str
+    clue_ns: str = ""  # the literal value behind the clue, when there is one
+    clue_value: str = ""
 
     @property
     def strength(self) -> str:
@@ -157,11 +171,32 @@ class Case:
 
 
 @dataclass
+class Campaign:
+    campaign_id: str
+    name: str | None  # None for a single item: it is not named
+    members: list[str]  # view ids
+    cases: list[str]  # case ids, in case order
+    first_seen: str
+    linked_by: list[str]
+    kit: str | None = None
+
+
+@dataclass
+class Kit:
+    kit_id: str
+    name: str
+    campaigns: list[str]  # campaign ids
+    linked_by: list[str]
+
+
+@dataclass
 class Library:
     cases: list[Case]
     journeys: dict[str, Journey]  # view_id -> the journey it is on
     links: dict[str, set[str]]  # view_id -> views it is linked with (campaign or duplicate)
     playbook_run: bool = False
+    campaigns: dict[str, Campaign] = field(default_factory=dict)  # linked ones only
+    kits: dict[str, Kit] = field(default_factory=dict)
 
     def items(self) -> list[Item]:
         return [i for c in self.cases for i in c.items]
@@ -261,13 +296,61 @@ def case_title(incident_id: str) -> str:
     return f"Case {incident_id}" if incident_id.isdigit() else incident_id
 
 
-def _letters(n: int) -> str:
-    out = ""
-    n += 1
-    while n:
-        n, r = divmod(n - 1, 26)
-        out = string.ascii_uppercase[r] + out
-    return out
+def case_key(case_id: str) -> tuple:
+    """Numeric cases in number order (2 before 14), then the rest by name."""
+    return (0, int(case_id), "") if case_id.isdigit() else (1, 0, case_id)
+
+
+def plural(n: int, word: str) -> str:
+    return f"{n} {word}{'' if n == 1 else 's'}"
+
+
+def cases_text(case_ids) -> str:
+    ids = sorted(set(case_ids), key=case_key)
+    if all(c.isdigit() for c in ids):
+        return ("Case " if len(ids) == 1 else "Cases ") + ", ".join(ids)
+    return ", ".join(case_title(c) for c in ids)
+
+
+def short_id(view_id: str) -> str:
+    """A short ID that depends only on the given view ID, never on the order of adding."""
+    return "#" + hashlib.sha1(view_id.encode()).hexdigest()[:4].upper()
+
+
+_UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-", re.IGNORECASE)
+
+
+def short_value(ns: str, value: str) -> str:
+    """A shared value short enough for a chip: a host, a UUID's first block, a cut value."""
+    if ns == "url.host_path":
+        host, _, path = value.partition("/")
+        value = host + ("/…" if path.strip("/") else "")
+    if _UUID.match(value):
+        return value[:8] + "…"
+    if len(value) <= 22:
+        return value
+    cut = value[:18]
+    if " " in cut and value[18] != " ":  # do not end on half a word
+        cut = cut.rsplit(" ", 1)[0]
+    return cut.rstrip() + " …"
+
+
+def _strongest(matches: list[Match]) -> tuple[str, str] | None:
+    """The literal clue to name a group by. Ranked by kind of identifier, then by value, so
+    adding material that repeats a clue more often never changes which one is picked."""
+    literal = {(m.clue_ns, m.clue_value) for m in matches if m.clue_ns}
+    return min(literal, key=lambda c: (_CLUE_RANK.get(c[0], 99), c[1])) if literal else None
+
+
+def _unique(names: dict[str, str], anchors: dict[str, str]) -> dict[str, str]:
+    """Names that collide get the group's short ID appended."""
+    seen: dict[str, int] = defaultdict(int)
+    for name in names.values():
+        seen[name] += 1
+    return {
+        gid: f"{name} {short_id(anchors[gid])}" if seen[name] > 1 else name
+        for gid, name in names.items()
+    }
 
 
 # -- risk --------------------------------------------------------------------------------
@@ -525,27 +608,35 @@ def playbook_status(store: Store) -> bool:
     return any(fp.layer_id in playbook for fp in store.fingerprints())
 
 
+_CLUE_NAMES = {
+    "fb_pixel": "pixel",
+    "gtm_id": "tag manager account",
+    "ga_id": "analytics account",
+    "aio.campaign_uuid": "campaign record",
+    "aio.owner_uuid": "owner record",
+    "url.host_path": "page address",
+    "contact.phone": "phone number",
+    "contact.email": "email address",
+    "aio.template_uuid": "template",
+    "api_key_id": "conversion account",
+    "brand.offer": "brand or offer",
+}
+_CLUE_RANK = {ns: n for n, ns in enumerate(_CLUE_NAMES)}
+
+
+def clue_value(shared: list[dict]) -> tuple[str, str] | None:
+    """(namespace, value) of the first literal identifier deciding_clue would name."""
+    s = next((s for s in shared if s.get("ns") in _CLUE_NAMES), None)
+    return (s["ns"], str(s["value"])) if s else None
+
+
 def deciding_clue(shared: list[dict], tier: str) -> str:
-    names = {
-        "fb_pixel": "pixel",
-        "gtm_id": "tag manager account",
-        "ga_id": "analytics account",
-        "aio.campaign_uuid": "campaign record",
-        "aio.owner_uuid": "owner record",
-        "url.host_path": "page address",
-        "contact.phone": "phone number",
-        "contact.email": "email address",
-        "aio.template_uuid": "template",
-        "api_key_id": "conversion account",
-        "brand.offer": "brand or offer",
-    }
-    literal = [s for s in shared if s.get("ns") in names]
-    if literal:
-        s = literal[0]
-        value = str(s["value"])
+    names = _CLUE_NAMES
+    if literal := clue_value(shared):
+        ns, value = literal
         if len(value) > 26:
             value = value[:12] + "…" + value[-6:]
-        return f"Same {names[s['ns']]} {value}"
+        return f"Same {names[ns]} {value}"
     images = {str(s["value"]) for s in shared if s.get("ns", "").startswith("asset.sha256")}
     if images:
         return f"{len(images)} identical file{'s' if len(images) != 1 else ''}"
@@ -642,6 +733,7 @@ def build_matches(store: Store, groups: Groups, config=DEFAULT) -> dict[str, lis
             if relation and (typed or relation.type is RelationType.SAME_PLAYBOOK)
             else ""
         )
+        literal = clue_value(values) or ("", "")
         for anchor, other in ((a, b), (b, a)):
             out[anchor].append(
                 Match(
@@ -653,6 +745,8 @@ def build_matches(store: Store, groups: Groups, config=DEFAULT) -> dict[str, lis
                     observed_groups=len(observed),
                     total_groups=len(active),
                     clue=deciding_clue(values, tiers[0]),
+                    clue_ns=literal[0],
+                    clue_value=literal[1],
                 )
             )
     return {vid: sorted(matches, key=match_sort_key) for vid, matches in out.items()}
@@ -668,25 +762,19 @@ def build_library(
     titles = {vid: view_title(v) for vid, v in views.items()}
     matches = build_matches(store, groups)
 
-    # Name only groups that link more than one item, in the order they were first added.
-    multi = {cid: m for cid, m in groups.campaigns.items() if len(m) > 1}
-    first = {cid: min(added.get(views[v].incident_id, "") for v in m) for cid, m in multi.items()}
-    names = {
-        cid: f"Campaign {_letters(n)}"
-        for n, cid in enumerate(sorted(multi, key=lambda c: (first[c], c)))
-    }
     campaign_of = {v: cid for cid, members in groups.campaigns.items() for v in members}
-    kits = {fid: cs for fid, cs in groups.families.items() if len(cs) > 1}
-    kit_names = {fid: f"Kit {n + 1}" for n, fid in enumerate(sorted(kits))}
-    kit_of = {cid: fid for fid, cs in kits.items() for cid in cs}
-
+    campaigns, kits = name_groups(groups, matches, views, added)
     duplicates: dict[str, list[str]] = {}
     for rel in store.relations():
         if rel.type is RelationType.DUPLICATE:
             duplicates.setdefault(rel.view_a, []).append(rel.view_b)
             duplicates.setdefault(rel.view_b, []).append(rel.view_a)
     links = {
-        vid: (set(multi.get(campaign_of.get(vid), [])) | set(duplicates.get(vid, []))) - {vid}
+        vid: (
+            set(campaigns[c].members if (c := campaign_of.get(vid)) in campaigns else ())
+            | set(duplicates.get(vid, []))
+        )
+        - {vid}
         for vid in views
     }
     with_fingerprints = {fp.view_id for fp in store.fingerprints()}
@@ -726,13 +814,14 @@ def build_library(
             title, host = titles[vid]
             labels = []
             cid = campaign_of.get(vid)
-            if cid in names:
-                labels.append(Label("campaign", names[cid]))
-            if cid in kit_of:
-                labels.append(Label("kit", kit_names[kit_of[cid]]))
+            campaign = campaigns.get(cid)
+            if campaign and campaign.name:
+                labels.append(Label("campaign", campaign.name, more_text(campaign, vid, views)))
             for other in duplicates.get(vid, [])[:1]:
                 where = case_title(views[other].incident_id)
                 labels.append(Label("duplicate", f"Duplicate · {where}"))
+            if not labels and campaign and campaign.kit:
+                labels.append(Label("none", "No campaign link yet", "shares a kit"))
             if not labels:
                 enough = vid in with_fingerprints
                 labels.append(Label("none", "No link yet" if enough else "Not enough evidence"))
@@ -760,6 +849,8 @@ def build_library(
                     library_id=library_id(view, incident.root),
                     note=note,
                     matches=matches[vid],
+                    campaign=cid if campaign and campaign.name else None,
+                    kit=campaign.kit if campaign else None,
                 )
             )
         # Steps of one journey sit together, in order; everything else keeps its place.
@@ -781,4 +872,178 @@ def build_library(
     # Newest first; cases added at the same moment (or with no known time) keep ID order.
     cases.sort(key=lambda c: c.case_id)
     cases.sort(key=lambda c: c.added_at, reverse=True)
-    return Library(cases=cases, journeys=journeys, links=links, playbook_run=playbook_status(store))
+    # A journey joins items without a stored relation; say so where nothing else does.
+    for campaign in (c for c in campaigns.values() if c.name):
+        on_path = [steps[v] for v in campaign.members if v in steps]
+        if len(on_path) > 1 or (on_path and not campaign.linked_by):
+            case = next(views[v].incident_id for v in campaign.members if v in steps)
+            campaign.linked_by.append(f"journey in {case_title(case)}")
+        if not campaign.linked_by:
+            campaign.linked_by.append("stored relations")
+    return Library(
+        cases=cases,
+        journeys=journeys,
+        links=links,
+        playbook_run=playbook_status(store),
+        campaigns=campaigns,
+        kits=kits,
+    )
+
+
+# -- campaigns and kits --------------------------------------------------------------------
+
+
+_JOINING = ("Duplicate", "Same campaign")
+
+
+def _clues(matches: list[Match]) -> list[str]:
+    ordered = sorted({(_VERDICT_ORDER[m.verdict], m.clue) for m in matches})
+    return list(dict.fromkeys(clue for _, clue in ordered))[:3]
+
+
+def name_groups(
+    groups: Groups, matches: dict[str, list[Match]], views: dict[str, View], added: dict
+) -> tuple[dict[str, Campaign], dict[str, Kit]]:
+    """Every campaign that is linked (several items, or part of a kit), and every kit.
+
+    A campaign is named by its strongest shared clue, else by a short ID of its smallest
+    member; a single item is not named. A kit is named by what joins its campaigns, else by
+    a short ID. Nothing depends on the order material was added.
+    """
+    campaign_of = {v: cid for cid, members in groups.campaigns.items() for v in members}
+    kit_of = {cid: fid for fid, cs in groups.families.items() if len(cs) > 1 for cid in cs}
+    out: dict[str, Campaign] = {}
+    names: dict[str, str] = {}
+    anchors: dict[str, str] = {}
+    for cid, members in groups.campaigns.items():
+        members = [v for v in members if v in views]
+        if not members or (len(members) < 2 and cid not in kit_of):
+            continue
+        inside = [
+            m
+            for v in members
+            for m in matches.get(v, [])
+            if m.verdict in _JOINING and campaign_of.get(m.view_id) == cid
+        ]
+        cases = sorted({views[v].incident_id for v in members}, key=case_key)
+        out[cid] = Campaign(
+            campaign_id=cid,
+            name=None,
+            members=sorted(members),
+            cases=cases,
+            first_seen=min((added.get(c, "") for c in cases), default=""),
+            linked_by=_clues(inside),
+            kit=kit_of.get(cid),
+        )
+        if len(members) > 1:
+            anchors[cid] = min(members)
+            clue = _strongest(inside)
+            names[cid] = (
+                f"Campaign {short_value(*clue)}" if clue else f"Campaign {short_id(anchors[cid])}"
+            )
+    for cid, name in _unique(names, anchors).items():
+        out[cid].name = name
+
+    kits: dict[str, Kit] = {}
+    kit_names: dict[str, str] = {}
+    kit_anchors: dict[str, str] = {}
+    for fid, cs in groups.families.items():
+        cs = [c for c in cs if c in out]
+        if len(cs) < 2:
+            continue
+        across = [
+            m
+            for c in cs
+            for v in out[c].members
+            for m in matches.get(v, [])
+            if m.verdict == "Shared kit"
+            and campaign_of.get(m.view_id) in cs
+            and campaign_of.get(m.view_id) != c
+        ]
+        kit_anchors[fid] = min(v for c in cs for v in out[c].members)
+        clue = _strongest(across)
+        kit_names[fid] = (
+            f"Kit {short_value(*clue)}" if clue else f"Kit {short_id(kit_anchors[fid])}"
+        )
+        ordered = sorted(cs, key=lambda c: (out[c].first_seen, out[c].members[0]))
+        kits[fid] = Kit(kit_id=fid, name="", campaigns=ordered, linked_by=_clues(across))
+    for fid, name in _unique(kit_names, kit_anchors).items():
+        kits[fid].name = name
+    for campaign in out.values():
+        if campaign.kit not in kits:
+            campaign.kit = None
+    return out, kits
+
+
+def more_text(campaign: Campaign, view_id: str, views: dict[str, View]) -> str:
+    """ "with 3 more items in 2 cases", counting the others, not this item."""
+    others = [v for v in campaign.members if v != view_id]
+    here = views[view_id].incident_id
+    cases = {views[v].incident_id for v in others}
+    where = "this case" if cases == {here} else plural(len(cases), "case")
+    return f"with {len(others)} more item{'' if len(others) == 1 else 's'} in {where}"
+
+
+@dataclass
+class TreeRow:
+    depth: int  # 0 kit or top-level campaign, 1 campaign in a kit
+    kind: str  # kit | campaign | item
+    name: str
+    campaign_id: str | None  # for a row that can filter the Library
+    items: int
+    cases: list[str]
+    first_seen: str
+    linked_by: list[str]
+
+
+@dataclass
+class Tree:
+    rows: list[TreeRow]
+    unlinked_items: int
+    unlinked_cases: int
+
+    @property
+    def unlinked(self) -> str:
+        return (
+            f"Not linked yet: {plural(self.unlinked_items, 'item')} "
+            f"in {plural(self.unlinked_cases, 'case')}"
+        )
+
+
+def campaign_tree(library: Library) -> Tree:
+    """Kits with their campaigns, then campaigns without a kit, oldest first; every item
+    appears once, under its campaign or in the not-linked count."""
+    titles = {i.view_id: i.title for i in library.items()}
+
+    def row(c: Campaign, depth: int) -> TreeRow:
+        name = c.name or titles.get(c.members[0], c.members[0])
+        return TreeRow(
+            depth=depth,
+            kind="campaign" if c.name else "item",
+            name=name,
+            campaign_id=c.campaign_id if c.name else None,
+            items=len(c.members),
+            cases=c.cases,
+            first_seen=c.first_seen,
+            linked_by=c.linked_by,
+        )
+
+    tops: list[tuple[str, str, list[TreeRow]]] = []
+    for kit in library.kits.values():
+        inner = [library.campaigns[c] for c in kit.campaigns]
+        members = [v for c in inner for v in c.members]
+        cases = sorted({x for c in inner for x in c.cases}, key=case_key)
+        first = min(c.first_seen for c in inner)
+        head = TreeRow(0, "kit", kit.name, None, len(members), cases, first, kit.linked_by)
+        tops.append((first, min(members), [head, *(row(c, 1) for c in inner)]))
+    for c in library.campaigns.values():
+        if c.kit is None:
+            tops.append((c.first_seen, c.members[0], [row(c, 0)]))
+    tops.sort(key=lambda t: (t[0], t[1]))
+    linked = {v for c in library.campaigns.values() for v in c.members}
+    rest = [i for i in library.items() if i.view_id not in linked]
+    return Tree(
+        rows=[r for _, _, rows in tops for r in rows],
+        unlinked_items=len(rest),
+        unlinked_cases=len({i.case_id for i in rest}),
+    )

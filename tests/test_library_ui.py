@@ -11,7 +11,19 @@ from ftf.grouping.funnel import FunnelEdge
 from ftf.grouping.levels import Groups
 from ftf.intake import IntakeError
 from ftf.jobs import Job, Worker, link_case, save_files
-from ftf.library import build_library, plain_proof, read_meta, view_title
+from ftf.library import (
+    Match,
+    Risk,
+    build_library,
+    campaign_tree,
+    name_groups,
+    plain_proof,
+    read_meta,
+    record_cases,
+    short_id,
+    short_value,
+    view_title,
+)
 
 SAMPLE = Path(__file__).resolve().parents[1] / "testing_sample"
 PAGE = "<html><head><title>Oferta</title></head><body><p>Treść strony.</p></body></html>"
@@ -111,7 +123,9 @@ def test_only_groups_of_several_items_are_named(store, tmp_path):
     )
     lib = build_library(store, groups, tmp_path)
     labels = {i.view_id: [label.text for label in i.labels] for i in lib.items()}
-    assert labels["a"] == labels["b"] == ["Campaign A"]
+    # No shared clue: a short ID from the smallest member view, not a letter.
+    assert labels["a"] == labels["b"] == [f"Campaign {short_id('a')}"]
+    assert lib.get("a").labels[0].detail == "with 1 more item in this case"
     assert labels["c"] == ["Not enough evidence"]  # no fingerprints at all
     assert lib.links["a"] == {"b"} and lib.links["c"] == set()
 
@@ -196,7 +210,12 @@ def test_sample_campaigns_kits_and_journeys(sample_library):
 
     first = labels("1", "civicdaybook.live")[0]
     second = labels("2", "acrosscommunities.live")[0]
-    assert first[0].startswith("Campaign") and first[0] == second[0]
+    assert first[0] == second[0] == "Campaign 0b9611d9…"  # its shared campaign record
+    assert all(lab.kind != "kit" for i in sample_library.items() for lab in i.labels)
+    tree = campaign_tree(sample_library)
+    kit = next(r for r in tree.rows if r.kind == "kit")
+    assert kit.name.startswith("Kit 25c6c6fd") and kit.cases == ["48", "61"]
+    assert tree.unlinked.startswith("Not linked yet: ")
     assert any("Duplicate" in t for t in labels("2", "healthlinkq.pro")[0])
     case61 = next(c for c in sample_library.cases if c.case_id == "61")
     on_path = [i for i in case61.items if i.step]
@@ -332,3 +351,126 @@ def test_a_journey_knows_its_entry_host(store, tmp_path):
         funnel_edges={"7": ([edge], [])},
     )  # fmt: skip
     assert build_library(store, groups, tmp_path).journeys["chat"].host == "landing.example"
+
+
+# -- naming, stability and plurals ---------------------------------------------------------
+
+
+def _match(other, verdict="Same campaign", ns="", value=""):
+    return Match(
+        view_id=other, same_case=False, verdict=verdict, tiers=("identity",), confidence="high",
+        observed_groups=1, total_groups=1, clue="clue", clue_ns=ns, clue_value=value,
+    )  # fmt: skip
+
+
+def _views(*pairs):
+    return {
+        v: View(view_id=v, incident_id=case, kind=ViewKind.PAGE, label=f"{case} · {v}")
+        for v, case in pairs
+    }
+
+
+def _groups(campaigns, families=None):
+    families = families or {f"f:{c}": [c] for c in campaigns}
+    return Groups(
+        campaign_of={v: c for c, vs in campaigns.items() for v in vs},
+        campaigns=campaigns,
+        family_of={c: f for f, cs in families.items() for c in cs},
+        families=families,
+    )
+
+
+def test_a_campaign_is_named_by_its_strongest_shared_clue():
+    views = _views(("a", "1"), ("b", "2"), ("c", "2"))
+    matches = {
+        "a": [_match("b", ns="contact.phone", value="+48 22 307 45 67 wew. 12"),
+              _match("c", ns="fb_pixel", value="1071875908635809")],
+        "b": [_match("a", ns="contact.phone", value="+48 22 307 45 67 wew. 12")],
+        "c": [_match("a", ns="fb_pixel", value="1071875908635809"),
+              _match("b", verdict="Clue only", ns="aio.campaign_uuid", value="x")],
+    }  # fmt: skip
+    campaigns, _ = name_groups(_groups({"c1": ["a", "b", "c"]}), matches, views, {})
+    assert campaigns["c1"].name == "Campaign 1071875908635809"  # a pixel outranks a phone
+    del matches["c"]  # a clue-only pair never names a campaign
+    matches["a"] = matches["a"][:1]
+    campaigns, _ = name_groups(_groups({"c1": ["a", "b", "c"]}), matches, views, {})
+    assert campaigns["c1"].name == "Campaign +48 22 307 45 67 …"
+
+
+def test_long_values_are_shortened_for_a_chip():
+    assert short_value("url.host_path", "shadowtracecore.com/") == "shadowtracecore.com"
+    assert short_value("url.host_path", "shadowtracecore.com/a/b") == "shadowtracecore.com/…"
+    assert short_value("aio.campaign_uuid", "0b9611d9-df5e-44e6-acea-ef85847dc3f1") == "0b9611d9…"
+
+
+def test_names_do_not_depend_on_the_order_material_was_added(store, tmp_path):
+    for case, vids in (("7", ("7:a", "7:b")), ("9", ("9:a",))):
+        views = [View(view_id=v, incident_id=case, kind=ViewKind.PAGE, label=f"{case} · {v}")
+                 for v in vids]  # fmt: skip
+        store.put_incident(Incident(incident_id=case, root="."), [], views)
+    record_cases(tmp_path, ["7"], when="2026-01-02T00:00:00+00:00")
+    record_cases(tmp_path, ["9"], when="2026-01-03T00:00:00+00:00")
+    before = build_library(store, _groups({"c1": ["7:a", "7:b"], "c2": ["9:a"]}), tmp_path)
+    name = before.get("7:a").labels[0].text
+    # An older case joins with a new campaign of its own: the first name stays as it was.
+    store.put_incident(Incident(incident_id="5", root="."), [],
+                       [View(view_id=v, incident_id="5", kind=ViewKind.PAGE, label=v)
+                        for v in ("5:a", "5:b")])  # fmt: skip
+    record_cases(tmp_path, ["5"], when="2025-01-01T00:00:00+00:00")
+    groups = _groups({"c0": ["5:a", "5:b"], "c1": ["7:a", "7:b"], "c2": ["9:a"]})
+    after = build_library(store, groups, tmp_path)
+    assert after.get("7:a").labels[0].text == name
+    assert after.get("5:a").labels[0].text != name
+
+
+def test_campaigns_with_the_same_clue_are_told_apart():
+    views = _views(("a", "1"), ("b", "1"), ("c", "2"), ("d", "2"))
+    matches = {v: [_match(o, ns="fb_pixel", value="42")]
+               for v, o in (("a", "b"), ("b", "a"), ("c", "d"), ("d", "c"))}  # fmt: skip
+    campaigns, _ = name_groups(_groups({"c1": ["a", "b"], "c2": ["c", "d"]}), matches, views, {})
+    assert campaigns["c1"].name == f"Campaign 42 {short_id('a')}"
+    assert campaigns["c2"].name == f"Campaign 42 {short_id('c')}"
+
+
+def test_a_kit_is_the_parent_of_its_campaigns_in_the_tree(store, tmp_path):
+    views = [
+        View(view_id=v, incident_id=case, kind=ViewKind.PAGE, label=f"{case} · {v}")
+        for v, case in (("a", "1"), ("b", "2"), ("c", "3"), ("d", "4"), ("e", "4"))
+    ]
+    for case in ("1", "2", "3", "4"):
+        store.put_incident(Incident(incident_id=case, root="."), [],
+                           [v for v in views if v.incident_id == case])  # fmt: skip
+    groups = _groups(
+        {"c1": ["a", "b"], "c2": ["c"], "c3": ["d"], "c4": ["e"]},
+        {"f1": ["c1", "c2"], "f3": ["c3"], "f4": ["c4"]},
+    )
+    lib = build_library(store, groups, tmp_path)
+    assert lib.get("a").kit == "f1" and lib.get("c").kit == "f1"
+    assert lib.get("c").labels[0].text == "No campaign link yet"
+    tree = campaign_tree(lib)
+    assert [(r.depth, r.kind) for r in tree.rows] == [(0, "kit"), (1, "campaign"), (1, "item")]
+    assert tree.rows[0].name == f"Kit {short_id('a')}" and tree.rows[0].cases == ["1", "2", "3"]
+    assert tree.unlinked == "Not linked yet: 2 items in 1 case"
+    shown = sum(r.items for r in tree.rows if r.kind != "kit") + tree.unlinked_items
+    assert shown == len(lib.items())  # every item exactly once
+
+
+def test_cases_sort_by_number_in_the_tree(store, tmp_path):
+    views = [View(view_id=v, incident_id=v, kind=ViewKind.PAGE, label=v) for v in ("14", "2")]
+    for v in views:
+        store.put_incident(Incident(incident_id=v.view_id, root="."), [], [v])
+    lib = build_library(store, _groups({"c1": ["14", "2"]}), tmp_path)
+    assert lib.campaigns["c1"].cases == ["2", "14"]
+    assert lib.get("2").labels[0].detail == "with 1 more item in 1 case"
+
+
+@pytest.mark.parametrize(
+    ("level", "n", "text"),
+    [("error", 1, "1 red flag"), ("error", 2, "2 red flags"), ("warning", 1, "1 warning"),
+     ("warning", 3, "3 warnings"), ("none", 0, "")],
+)  # fmt: skip
+def test_risk_is_worded_with_the_right_plural(level, n, text):
+    from ftf.library import Finding
+
+    risk = Risk(level=level, findings=[Finding("Domain", "x", "s")] * n)
+    assert risk.text == text
