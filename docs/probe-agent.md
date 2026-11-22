@@ -27,7 +27,7 @@ uv run ftf probe-mail [--leaks] && uv run ftf run
 ## From the app
 
 ```bash
-docker compose --profile probe up -d --build
+docker compose up -d --build
 ```
 
 Open **Add material** at <http://localhost:8000/add>, paste a link and click **Run probe agent**. Tick the box to let it register. **Run demo**, under the tools, uses the built-in fake site.
@@ -53,7 +53,7 @@ no app database, no capabilities, a read-only root filesystem, and memory and pr
 can write only to `data/probe-sandbox`. It shares the network of `probe-guard`, whose firewall
 rejects private, link-local and reserved addresses and has IPv6 off, so the app, CompreFace, the
 host and the LAN stay unreachable even if a page escapes the browser. Mail is read outside the
-sandbox, so the Resend key never enters it. Both services start only with `--profile probe`. If
+sandbox, so the Resend key never enters it. The firewall and worker start with a plain `docker compose up`. If
 your user ID is not 1000, set `FTF_UID`.
 
 ## Evidence

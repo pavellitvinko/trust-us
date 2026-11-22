@@ -87,7 +87,7 @@ export function ProbeLinkPanel({ agent, targets }: { agent: Agent; targets: stri
       {agent.data && !alive && (
         <div className="probe-warn">
           <b>The isolated worker is not running.</b> Start it, and this will update:
-          <pre>docker compose --profile probe up -d --build probe-worker</pre>
+          <pre>docker compose up -d --build probe-worker</pre>
         </div>
       )}
     </div>

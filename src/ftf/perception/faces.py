@@ -133,3 +133,16 @@ def run_perceive_faces(
         else:
             summary["no_match"] += 1
     return {**summary, "status": "ok"}
+
+
+def run_face_check(ctx: Context, view_ids: list[str]) -> dict[str, Any]:
+    """The app's face check. An item with no picture is not a failed check."""
+    summary = run_perceive_faces(ctx, view_ids)
+    if summary.pop("status") == "not_configured":
+        return {**summary, "reason": "no_face_service"}
+    no_image = sum(
+        o.extractor == NAME and o.state is State.NOT_OBSERVABLE and o.raw == "no_image"
+        for view_id in view_ids
+        for o in ctx.store.observations(view_id)
+    )
+    return {**summary, "not_observable": max(0, summary["unavailable"] - no_image)}

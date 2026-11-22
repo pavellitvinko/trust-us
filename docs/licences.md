@@ -59,7 +59,7 @@ Both APIs are used with the operator's own keys. Rate limits and data-use terms 
 | --- | --- | --- |
 | CompreFace 1.2.0 | Apache-2.0 | <https://github.com/exadel-inc/CompreFace> |
 | FaceNet code | MIT | <https://github.com/davidsandberg/facenet> |
-| Reference photos | CC0, public domain, CC BY, CC BY-SA | Author, licence and source for each are in `src/ftf/faces/reference_people.json`. |
+| Reference photos | CC0, public domain, CC BY, CC BY-SA | Shipped unmodified in `src/ftf/faces/reference_photos/`. Author, licence and source for each are in `src/ftf/faces/reference_people.json`. |
 
 InsightFace-based CompreFace builds are not used: their models are for non-commercial research only.
 

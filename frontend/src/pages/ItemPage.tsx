@@ -205,6 +205,17 @@ export default function ItemPage() {
             )}
           </div>
           {item.ad && <AdDetails ad={item.ad} />}
+          {item.possibleFaces.length > 0 && (
+            <div className="box">
+              <b>Possible people in the pictures</b>
+              {item.possibleFaces.map((face) => (
+                <div key={face}>{face.charAt(0).toUpperCase() + face.slice(1)}</div>
+              ))}
+              <div className="small" style={{ marginTop: 6 }}>
+                From the private face service. Not proof of identity, and not used to link campaigns.
+              </div>
+            </div>
+          )}
           {item.actions.length > 0 && (
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               {item.actions.map((a) => (

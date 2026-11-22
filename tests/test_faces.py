@@ -224,3 +224,56 @@ def test_dropped_response_is_a_service_error(monkeypatch):
     monkeypatch.setattr(fc.urllib.request, "urlopen", dropped)
     with pytest.raises(FaceServiceError):
         fc._send("http://x", "GET", None, {})
+
+
+def test_app_check_reports_a_match_and_shows_it_as_context(ctx, monkeypatch):
+    from ftf.library import risk_for
+    from ftf.processing import check_result
+
+    service = FakeService({b"img": [face("Donald Tusk", 0.99)]})
+    monkeypatch.setattr(pf, "service_client", lambda: service)
+    summary = pf.run_face_check(ctx, ["v"])
+    observations = ctx.store.observations("v")
+    assert summary["matched"] == 1 and summary["not_observable"] == 0
+    assert check_result("faces", observations, summary)["state"] == "complete"
+    risk = risk_for("v", observations)
+    assert risk.count == 0 and "Donald Tusk" in risk.faces[0]
+
+
+def test_app_check_without_a_service_says_so(ctx, monkeypatch):
+    from ftf.processing import check_result
+
+    monkeypatch.setattr(pf, "service_client", lambda: None)
+    summary = pf.run_face_check(ctx, ["v"])
+    assert summary["reason"] == "no_face_service" and rows(ctx) == []
+    result = check_result("faces", [], summary)
+    assert result["state"] == "unavailable" and "not connected" in result["message"]
+
+
+def test_item_without_a_picture_is_not_a_failed_face_check(ctx, monkeypatch):
+    from ftf.processing import check_result
+
+    monkeypatch.setattr(pf, "view_images", lambda *a: [])
+    monkeypatch.setattr(pf, "service_client", lambda: FakeService())
+    summary = pf.run_face_check(ctx, ["v"])
+    assert summary["not_observable"] == 0
+    assert check_result("faces", ctx.store.observations("v"), summary)["state"] == "not_applicable"
+
+
+def test_packaged_photos_are_intact_and_need_no_download():
+    from ftf.faces.enroll import read_photo
+
+    def no_network(url):
+        raise AssertionError(f"downloaded {url}")
+
+    bundled = [f for files in load_manifest().values() for f in files if f.get("photo")]
+    assert bundled
+    assert all(read_photo(f, no_network) for f in bundled)
+    assert all(any(f.get("photo") for f in files) for files in load_manifest().values())
+
+
+def test_damaged_packaged_photo_falls_back_to_its_source():
+    from ftf.faces.enroll import read_photo
+
+    file = {"photo": "missing.jpg", "sha256": "0", "url": "u"}
+    assert read_photo(file, str.encode) == b"u"

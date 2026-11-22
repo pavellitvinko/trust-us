@@ -108,6 +108,7 @@ def signature(store, task, settings):
             "video": "perception.video",
             "techniques": "perception.techniques",
             "expectations": "perception.expectations",
+            "faces": "perception.faces",
             "match": "patterns.matching",
             "patterns": "patterns.induction",
         }
@@ -157,6 +158,12 @@ def signature(store, task, settings):
             )
     if stage == "enrich":
         extras.extend([settings.enrich_mode, datetime.now(UTC).date().isoformat()])
+    if stage == "faces":
+        # A face check reads only the source files and the reference list.
+        from .faces.enroll import MANIFEST
+
+        inputs = []
+        extras.append(digest(MANIFEST.read_text(encoding="utf-8")))
     if stage == "expectations":
         grounding = settings.data_dir / "expectations/grounding.json"
         extras.append(grounding.read_text() if grounding.is_file() else "")
@@ -212,6 +219,10 @@ def compute(snapshot: bytes, task: dict, settings, seconds: float):
                 summary = getattr(importlib.import_module(f"ftf.perception.{module}"), function)(
                     ctx, ids, settings=settings
                 )
+            elif stage == "faces":
+                from .perception.faces import run_face_check
+
+                summary = run_face_check(ctx, ids)
             elif stage == "enrich":
                 summary = {"observations": sum(pipeline.run_enrich(store, ids).values())}
                 summary["not_observable"] = sum(
@@ -433,7 +444,7 @@ class Scheduler:
                 for v in ordered:
                     local = add("local", [v.view_id], phase="core", priority=0)
                     if v.kind is ViewKind.VIDEO and job.kind not in ("video", "item"):
-                        for stage in ("video", "techniques", "patterns"):
+                        for stage in ("video", "techniques", "faces", "patterns"):
                             self.worker.item_checks.setdefault(v.view_id, {}).setdefault(
                                 stage,
                                 {
@@ -451,6 +462,7 @@ class Scheduler:
                     if job.kind == "item":
                         add("warnings", [v.view_id], [read], priority=3)
                     techniques.append(add("techniques", [v.view_id], [read], priority=12))
+                    add("faces", [v.view_id], [local], priority=11)
                     add("enrich", [v.view_id], [read], priority=15)
                 selected = [
                     v.view_id
@@ -682,7 +694,7 @@ class Scheduler:
                     )
                     if task["stage"] in ("match", "patterns"):
                         keys.append("gemini_api_key")
-                    if task["stage"] not in ("local", "enrich", "previews", "warnings") and any(
+                    if task["stage"] not in ("local", "enrich", "previews", "warnings", "faces") and any(
                         not getattr(settings, key) for key in keys
                     ):
                         task.update(

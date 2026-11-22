@@ -15,9 +15,9 @@ def observation(extractor="perception.image", state=State.PRESENT):
 def test_only_applicable_checks_count_and_missing_outputs_are_not_negative_results():
     image = item_processing(view(), [])
     page = item_processing(view(ViewKind.PAGE), [])
-    assert image["state"] == "not_run" and image["total"] == 4
-    assert {c["id"] for c in image["checks"]} == {"image", "techniques", "warnings", "patterns"}
-    assert page["total"] == 5
+    assert image["state"] == "not_run" and image["total"] == 5
+    assert {c["id"] for c in image["checks"]} == {"image", "techniques", "faces", "warnings", "patterns"}
+    assert page["total"] == 6
     assert all(c["state"] == "not_run" for c in page["checks"])
 
 

@@ -96,7 +96,7 @@ def probe_page(settings, db, on_change) -> None:
     alive = worker_alive(root)
     if not alive:
         st.warning("The isolated worker is not running. Start it, then reload this page:")
-        st.code("docker compose --profile probe up -d --build probe-worker", language="bash")
+        st.code("docker compose up -d --build probe-worker", language="bash")
     fake = st.checkbox("Use the built-in fake scam site", value=True, key="probe_fake")
     url = st.text_input(
         "URL", disabled=fake, placeholder="https://suspect.example", key="probe_url"

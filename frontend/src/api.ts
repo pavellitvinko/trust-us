@@ -121,6 +121,7 @@ export interface ItemData extends Row {
   busy: boolean;
   groups: { kind: "campaign" | "kit"; id: string; name: string; reason: string; title: string }[];
   warningSigns: string[];
+  possibleFaces: string[];
   unchecked: string[];
   path: PathData | null;
   matches: MatchInfo[];

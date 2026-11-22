@@ -75,6 +75,7 @@ class Risk:
     level: str  # none | warning | error
     findings: list[Finding] = field(default_factory=list)
     unchecked: list[str] = field(default_factory=list)
+    faces: list[str] = field(default_factory=list)  # context to verify, never a warning sign
 
     @property
     def count(self) -> int:
@@ -438,7 +439,8 @@ def risk_for(view_id: str, observations) -> Risk:
     kinds = len(summary.reasons_by_kind)
     level = "error" if kinds >= 2 or listed else "warning" if kinds == 1 else "none"
     unchecked = [KIND_TITLES.get(k, k) for k in summary.unchecked_kinds]
-    return Risk(level=level, findings=findings, unchecked=unchecked)
+    faces = [reason.summary for reason in summary.face_matches]
+    return Risk(level=level, findings=findings, unchecked=unchecked, faces=faces)
 
 
 # -- words for a reader with no context ----------------------------------------------------

@@ -7,6 +7,25 @@ HackNation challenge "Kolekcjoner fejków", set by NASK.
 - Signals: [docs/signal-catalogue.md](docs/signal-catalogue.md)
 - **NEW**: [Pattern Library](PATTERN_LIBRARY.md) — Pattern discovery, library versioning, novelty tracking
 
+## Quick start
+
+**You need:** Docker with Compose v2, 8 GB of RAM, about 15 GB of free disk, internet on the first
+start, and port 8000 free.
+
+```bash
+docker compose up
+```
+
+Open <http://localhost:8000>. The app starts with the known sample campaigns already loaded.
+
+- **No keys are required.** Local analysis, campaign linking and reports work without them. To
+  turn on model reading, run `cp .env.example .env`, add `OPENAI_API_KEY` and `GEMINI_API_KEY`,
+  then run `docker compose up -d`.
+- **Face matching** prepares itself in the background on the first start, which took about 2
+  minutes in testing. The app is usable meanwhile.
+- **Probe agent** starts automatically in its own isolated container.
+- **After updating the code:** `docker compose up --build`. **To stop:** `docker compose down`.
+
 **Status: Method track built; identifier, kit, asset and perception extractors landing.**
 Twenty-four fingerprint layers, five comparator families with rarity weighting and a stoplist,
 typed fusion with the contradiction and demotion rules, three-level grouping, funnel edges,
@@ -132,8 +151,7 @@ side and open http://localhost:5173: Vite reloads on every change and forwards `
   scans, speech/scene reading and dependent checks run only from **Analyze video** on the video
   item page. That page shows progress and can cancel the remaining analysis. A request already
   sent may finish and populate the cache after cancellation, but its results are not published.
-  Processed corpus views without source material are skipped. Face matching,
-  live grounding of genuine reference pages and on-demand narratives are separate workflows.
+  Processed corpus views without source material are skipped. Live grounding of genuine reference pages and on-demand narratives are separate workflows.
   Each table row has a compact progress ring. Open its dropdown to see the individual checks
   and completion count. The item page uses the same ring and dropdown. Item states update during a run,
   persist in `$FTF_DATA_DIR/item-checks.json`, and distinguish skipped or failed attempts from
@@ -306,13 +324,14 @@ The Match screen has the same action under the evidence table. Without a key, it
 ## Face reference matching
 
 `docker compose up` also starts a private CompreFace service with no published port and loads a
-closed list of public figures from `src/ftf/faces/reference_people.json`. `ftf perceive` then
-reports "possible face match, needs verification" as context. It is not counted in the suspicion
+closed list of public figures from `src/ftf/faces/reference_people.json`. New material is then
+checked automatically, and `ftf perceive` does the same from the command line. A hit is shown on
+the item page as "possible face match, needs verification", as context. It is not counted in the suspicion
 level, because a real news photo of a public figure is not suspicious by itself.
 
 - Matching runs only against that list. Unmatched faces are not stored, and a match cannot link campaigns.
-- Photos come from Wikimedia Commons under free licences, are not stored in the repository, and
-  CompreFace is set not to keep them. Face templates are biometric data: keep the volume private.
+- Photos come from Wikimedia Commons under free licences and ship unmodified in
+  `src/ftf/faces/reference_photos/`, with attribution in the manifest. CompreFace is set not to keep them. Face templates are biometric data: keep the volume private.
 - If the service is down, faces are `not_observable` and the rest of the app works.
 
 ## Rehearse the demo
