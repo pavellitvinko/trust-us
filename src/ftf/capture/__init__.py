@@ -5,16 +5,27 @@ Playwright is imported only when a capture runs, so every other command works wi
 
 from .browser import CaptureResult, archived_capture, capture_url
 from .bundle import SCHEMA, Hop, HopKind, Manifest, Status, build_trace, read_manifest
+from .differential import DifferentialResult, capture_differential, differential_profiles
+from .profiles import AD_CLICK, BARE, CRAWLER, DESKTOP, PROFILES, Profile
 
 __all__ = [
+    "AD_CLICK",
+    "BARE",
+    "CRAWLER",
+    "DESKTOP",
+    "PROFILES",
     "SCHEMA",
     "CaptureResult",
+    "DifferentialResult",
     "Hop",
     "HopKind",
     "Manifest",
+    "Profile",
     "Status",
     "archived_capture",
     "build_trace",
+    "capture_differential",
     "capture_url",
+    "differential_profiles",
     "read_manifest",
 ]

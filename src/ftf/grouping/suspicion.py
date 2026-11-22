@@ -21,7 +21,7 @@ _INPUTS = {
     "domain": ("rdap.", "warning."),  # the host alone does not show age or listing
     "impersonation": ("page.read_text", "image.text"),
     "absent_elements": ("expect.element",),
-    "evasion": ("page.clean_text", "page.body_text"),
+    "evasion": ("page.clean_text", "page.body_text", "cloak."),
     "persuasion": ("pattern.score", "markup."),
 }
 _MARKUP = {
@@ -105,6 +105,19 @@ def _describe(o: Observation, hosts: list[str]) -> tuple[str, str, str] | None:
         return "evasion", "E13", f"visual-evasion filter: {value}"
     if ns == "kit.cloaker":
         return "evasion", "J1", f"cloaking kit marker: {value}"
+    if ns == "cloak.differential" and isinstance(value, dict):
+        return (
+            "evasion",
+            "J1",
+            (
+                f"different content for {value.get('reference')} and {value.get('against')} "
+                f"(difference {value.get('difference')})"
+            ),
+        )
+    if ns == "cloak.gating":
+        return "evasion", "J5", o.raw or "offer shown only to the ad-click profile"
+    if ns == "cloak.white_page":
+        return "evasion", "J2", f"white-page traits: {o.raw or value}"
     if ns in _MARKUP:
         return "persuasion", o.signal_id, f"{_MARKUP[ns]}: {value}"
     if ns == "pattern.score" and isinstance(value, dict) and value.get("score", 0) >= 0.5:

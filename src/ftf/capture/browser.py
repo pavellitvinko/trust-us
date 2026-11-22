@@ -30,8 +30,8 @@ from .bundle import (
     classify_error,
     now_iso,
 )
+from .profiles import DESKTOP, Profile
 
-VIEWPORT = {"width": 1366, "height": 900}
 MAX_RESOURCE = 20 << 20  # bytes per saved resource
 MAX_RESOURCES = 400
 SCROLL_STEPS = 25
@@ -113,15 +113,6 @@ def archived_capture(har: Path) -> tuple[str, str | None]:
     return start, entries[first].get("startedDateTime") or entries[doc[0]].get("startedDateTime")
 
 
-def _user_agent(browser_version: str) -> str:
-    # Headless Chromium announces itself as HeadlessChrome, which cloakers filter on.
-    major = browser_version.split(".")[0] or "130"
-    return (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        f"(KHTML, like Gecko) Chrome/{major}.0.0.0 Safari/537.36"
-    )
-
-
 def capture_url(
     url: str | None,
     out_dir: Path,
@@ -130,8 +121,16 @@ def capture_url(
     proxy: str | None = None,
     timeout: float = 30.0,
     settle: float = 5.0,
+    profile: Profile = DESKTOP,
+    differential: str | None = None,
+    differential_run: str | None = None,
 ) -> CaptureResult:
-    """Capture `url` (or, in replay mode, the archive's own page) into `out_dir`."""
+    """Capture `url` (or, in replay mode, the archive's own page) into `out_dir`.
+
+    `profile` decides device, user agent, referrer and which form of the URL is opened.
+    `differential` names the URL a cloaking differential is testing and `differential_run`
+    the run; the variants of one run share both, which is how they are paired after ingestion.
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
     archived_at = None
     if replay_har is not None:
@@ -141,6 +140,7 @@ def capture_url(
         raise ValueError("a URL is required for a live capture")
     if not urlsplit(url).scheme:
         url = "https://" + url
+    url, click_id_added = profile.url_for(url)
 
     started = now_iso()
     manifest = Manifest(
@@ -152,7 +152,12 @@ def capture_url(
             {"file": replay_har.name, "sha256": _sha256_file(replay_har)} if replay_har else None
         ),
         egress=proxy or "direct",
-        viewport=VIEWPORT,
+        profile=profile.name,
+        referer=profile.referer,
+        click_id_added=click_id_added or None,
+        differential=differential,
+        differential_run=differential_run,
+        viewport=profile.viewport,
     )
     har_path = out_dir / "page.har"
     # The browser's own recording. In replay mode it only feeds resources and the DOM
@@ -161,7 +166,7 @@ def capture_url(
     work = Path(tempfile.mkdtemp(prefix="ftf-capture-"))
     try:
         record_path = work / "replay.har" if replay_har else har_path
-        run = _Run(manifest, out_dir, record_path, replay_har, proxy, timeout, settle)
+        run = _Run(manifest, out_dir, record_path, replay_har, proxy, timeout, settle, profile)
         run.browse(url)
         recorded = load_har(record_path)
         if run.dom_from_har:
@@ -191,8 +196,9 @@ _FORM_BODY = ("application/x-www-form-urlencoded", "multipart/form-data")
 class _Run:
     """One browser session: navigate, settle, scroll, snapshot. Collects what it saw."""
 
-    def __init__(self, manifest, out_dir, record_path, replay_har, proxy, timeout, settle):
+    def __init__(self, manifest, out_dir, record_path, replay_har, proxy, timeout, settle, profile):
         self.manifest, self.out_dir, self.record_path = manifest, out_dir, record_path
+        self.profile: Profile = profile
         self.replay_har, self.proxy = replay_har, proxy
         self.timeout, self.settle = timeout, settle
         self.notes: list[str] = []
@@ -240,15 +246,20 @@ class _Run:
         man = self.manifest
         with sync_playwright() as pw:
             browser = pw.chromium.launch(
-                headless=True, proxy={"server": self.proxy} if self.proxy else None
+                headless=True,
+                proxy={"server": self.proxy} if self.proxy else None,
+                # Otherwise navigator.webdriver is true, the first thing a cloaker checks.
+                args=["--disable-blink-features=AutomationControlled"],
             )
             try:
-                man.user_agent = _user_agent(browser.version)
+                man.user_agent = self.profile.user_agent_for(browser.version)
                 context = browser.new_context(
                     accept_downloads=False,
                     service_workers="block",
                     user_agent=man.user_agent,
-                    viewport=VIEWPORT,
+                    viewport=self.profile.viewport,
+                    is_mobile=self.profile.is_mobile,
+                    has_touch=self.profile.is_mobile,
                     locale="pl-PL",
                     timezone_id="Europe/Warsaw",
                     record_har_path=str(self.record_path),
@@ -260,6 +271,7 @@ class _Run:
                     context.route("**/*", self.guard)
                     context.add_init_script(_NO_SUBMIT_JS)
                     self.page = page = context.new_page()
+                    self.mask_headless(context, page, browser.version)
                     page.set_default_timeout(self.timeout * 1000)
                     page.on("request", self.on_request)
                     page.on("response", self.on_response)
@@ -277,7 +289,12 @@ class _Run:
                     )
                     loaded = False
                     try:
-                        page.goto(url, wait_until="domcontentloaded", timeout=self.timeout * 1000)
+                        page.goto(
+                            url,
+                            wait_until="domcontentloaded",
+                            timeout=self.timeout * 1000,
+                            referer=self.profile.referer,
+                        )
                         loaded = True
                     except PlaywrightTimeout as exc:
                         man.status, man.error = Status.TIMEOUT, str(exc).splitlines()[0]
@@ -294,6 +311,14 @@ class _Run:
                     context.close()  # writes the HAR, also after an error
             finally:
                 browser.close()
+
+    def mask_headless(self, context, page, browser_version: str) -> None:
+        """Client hints and navigator.platform matching the profile (see Profile.ua_override)."""
+        try:
+            cdp = context.new_cdp_session(page)
+            cdp.send("Emulation.setUserAgentOverride", self.profile.ua_override(browser_version))
+        except Exception as exc:  # noqa: BLE001 — the capture still runs, the note says how
+            self.notes.append(f"client hints not overridden: {exc}")
 
     def snapshot(self, page, PlaywrightError) -> None:
         man = self.manifest
