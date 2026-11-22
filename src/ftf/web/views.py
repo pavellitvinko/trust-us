@@ -201,6 +201,51 @@ def _actions(library: Library, item: Item) -> list[dict[str, str]]:
     return []
 
 
+_AD_LINK_NAMES = {
+    "same_post": "Same post",
+    "same_account": "Same account",
+    "possible_advertiser": "Possibly the same advertiser",
+    "different_account": "Same name, different accounts",
+}
+_AD_LINK_ORDER = list(_AD_LINK_NAMES)
+_LIBRARY_SOURCES = {
+    "metadata": "From the saved material",
+    "ocr": "Read on this screenshot",
+    "same_post": "Read on another screenshot of the same post",
+}
+
+
+def _ad(library: Library, item: Item) -> dict[str, Any] | None:
+    """The ad's Library ID and advertiser, where each was read, and the screenshots it
+    shares a post, account or advertiser name with. None of these names a campaign."""
+    links = []
+    for link in sorted(item.ad_links, key=lambda x: (_AD_LINK_ORDER.index(x.kind), x.other)):
+        other = library.get(link.other)
+        if other is not None:
+            links.append(
+                {
+                    **_brief(other),
+                    "kind": link.kind,
+                    "name": _AD_LINK_NAMES[link.kind],
+                    "evidence": list(link.evidence),
+                }
+            )
+    if not (item.library_id or item.advertiser or links):
+        return None
+    via = library.get(item.library_via) if item.library_via else None
+    return {
+        "libraryId": item.library_id,
+        "librarySource": _LIBRARY_SOURCES.get(item.library_source or "", ""),
+        "libraryEvidence": [
+            {"text": e.raw, "where": e.locator or "", "file": e.file or ""}
+            for e in item.library_evidence
+        ],
+        "via": _brief(via) if via else None,
+        "advertiser": item.advertiser,
+        "links": links,
+    }
+
+
 def detail(library: Library, item: Item) -> dict[str, Any]:
     """Everything the item page shows."""
 
@@ -245,6 +290,7 @@ def detail(library: Library, item: Item) -> dict[str, Any]:
         "matches": matches,
         "sameCase": [_brief(i) for i in case.items if i.view_id != item.view_id],
         "actions": _actions(library, item),
+        "ad": _ad(library, item),
         "findings": [
             {"kind": f.kind, "summary": f.summary, "source": f.source} for f in item.risk.findings
         ],

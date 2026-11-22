@@ -19,6 +19,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, NamedTuple
 from urllib.parse import urlsplit
 
+from .ad_links import AdLink, build_ad_links
 from .campaign_map import TOGGLES, _shared_values, link_tiers
 from .compare.weights import WeightTable
 from .contracts import RelationType, Tier, View, ViewKind
@@ -27,6 +28,8 @@ from .fusion.demotion import find_demotions
 from .grouping.funnel import AD_ID
 from .grouping.levels import Groups
 from .grouping.suspicion import reason_summary_for_view
+from .perception.ad_library_id import Evidence as LibraryIdEvidence
+from .perception.ad_library_id import read_library_id
 from .previews import picture
 from .registry import layers, load_plugins
 from .store import Store
@@ -119,6 +122,11 @@ class Item:
     step: Step | None = None
     thumbnail: str | None = None  # absolute path of an image to show
     library_id: str | None = None  # Meta Ad Library ID, when the item is a Library ad
+    library_source: str | None = None  # metadata | ocr | same_post: where library_id was found
+    library_evidence: tuple[LibraryIdEvidence, ...] = ()  # the OCR lines it was read from
+    library_via: str | None = None  # same_post: the screenshot the ID was read on
+    advertiser: str | None = None  # the advertiser name read on the screenshot
+    ad_links: list[AdLink] = field(default_factory=list)  # same post, shared advertiser/account
     note: str | None = None  # what the latest add changed for this item
     matches: list[Match] = field(default_factory=list)
     campaign: str | None = None  # campaign id, when the campaign is named (several items)
@@ -293,6 +301,47 @@ def library_id(view: View, root: str) -> str | None:
         if match := _LIBRARY_URL.search(str(data.get("webpage_url") or "")):
             return match.group(1)
     return None
+
+
+@dataclass(frozen=True)
+class LibraryRef:
+    value: str
+    source: str  # metadata | ocr | same_post
+    evidence: tuple[LibraryIdEvidence, ...] = ()
+    via: str | None = None  # same_post: the screenshot the ID was read on
+
+
+def library_ref(view: View, root: str, observations=()) -> LibraryRef | None:
+    """The item's Library ID and where it came from: the material first, then a screenshot's
+    OCR, where only an explicitly labelled Library ID counts."""
+    if value := library_id(view, root):
+        return LibraryRef(value, "metadata")
+    if view.kind is ViewKind.IMAGE and (found := read_library_id(observations)):
+        return LibraryRef(found.value, "ocr", found.evidence)
+    return None
+
+
+def post_library_refs(
+    refs: dict[str, LibraryRef], posts: dict[str, set[str]]
+) -> dict[str, LibraryRef]:
+    """A Library ID read on one screenshot of a post, for the others of the same post.
+
+    Only when the post's screenshots agree on a single ID; the item's own ID always wins.
+    """
+    out = dict(refs)
+    for vid, group in posts.items():
+        if vid in refs:
+            continue
+        found = {refs[o].value: o for o in sorted(group) if o in refs}
+        if len(found) == 1:
+            ((value, source),) = found.items()
+            out[vid] = LibraryRef(value, "same_post", refs[source].evidence, via=source)
+    return out
+
+
+def advertiser_name(observations) -> str | None:
+    names = [o for o in observations if o.namespace == "image.advertiser" and o.raw]
+    return max(names, key=lambda o: o.confidence).raw.strip() if names else None
 
 
 def case_title(incident_id: str) -> str:
@@ -809,6 +858,16 @@ def build_library(
                 journeys[vid] = journey
                 steps[vid] = Step(chain=number, position=position, total=len(chain))
 
+    observations_of = {vid: store.observations(vid) for vid in views}
+    ad = build_ad_links(views, observations_of)
+    refs = {
+        vid: ref
+        for vid, view in views.items()
+        if view.incident_id in incidents
+        and (ref := library_ref(view, incidents[view.incident_id].root, observations_of[vid]))
+    }
+    refs = post_library_refs(refs, ad.posts)
+
     cases = []
     for incident_id, incident in incidents.items():
         items = []
@@ -841,6 +900,8 @@ def build_library(
                 if gained:
                     other = min(gained)
                     note = f"New link to {titles[other][0]}"
+            observations = observations_of.get(vid) or store.observations(vid)
+            ref = refs.get(vid)
             items.append(
                 Item(
                     view_id=vid,
@@ -849,10 +910,15 @@ def build_library(
                     title=title,
                     host=host,
                     labels=labels,
-                    risk=risk_for(vid, store.observations(vid)),
+                    risk=risk_for(vid, observations),
                     step=steps.get(vid),
                     thumbnail=thumbnail,
-                    library_id=library_id(view, incident.root),
+                    library_id=ref.value if ref else None,
+                    library_source=ref.source if ref else None,
+                    library_evidence=ref.evidence if ref else (),
+                    library_via=ref.via if ref else None,
+                    advertiser=advertiser_name(observations),
+                    ad_links=ad.links.get(vid, []),
                     note=note,
                     matches=matches[vid],
                     campaign=cid if campaign and campaign.name else None,
