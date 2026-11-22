@@ -18,7 +18,7 @@ Keep the team's real mailbox domain and phone numbers in the committed file only
 
 ```json
 {
-  "version": "2",
+  "version": "3",
   "local": {
     "email":  { "domain": "victim.test", "pattern": "{persona}.{run_id}@{domain}" },
     "phones": { "retiree-income": "+48 500 000 101", "...": "one per persona" },
@@ -26,7 +26,7 @@ Keep the team's real mailbox domain and phone numbers in the committed file only
   },
   "live": {
     "email":  { "provider": "mail.tm", "api": "https://api.mail.tm", "domain": "",
-                "pattern": "{persona}.{run_id}@{domain}" },
+                "pattern": "{initials}{run_compact}@{domain}" },
     "phones": {},
     "phones_confirmed_by": ""
   }
@@ -39,7 +39,7 @@ Keep the team's real mailbox domain and phone numbers in the committed file only
 | `email.provider` | `static` (the default): addresses on `email.domain`, which the team must be able to receive. `mail.tm`: the run creates its own disposable inbox on [mail.tm](https://mail.tm) before the browser opens (see below). |
 | `email.api` | For `mail.tm`: the API address, `https://api.mail.tm`. |
 | `email.domain` | `static`: the domain. Empty means no address: a form that needs one is filled but not sent, and the run records `email_domain_unset`. `mail.tm`: empty takes the first active domain mail.tm offers; a value must be one of its domains. |
-| `email.pattern` | How the address is built. Must contain `{run_id}` and `{domain}`, so every run gets its own address (VV-30), and a message that arrives later can be tied to the exact run, site and form. `{persona}` is the persona ID. |
+| `email.pattern` | How the address is built. Must contain `{domain}` and `{run_id}` or `{run_compact}`, so every run gets its own address (VV-30) and a message that arrives later can be tied to the exact run, site and form. Placeholders: `{persona}` (`retiree-income`), `{initials}` (`ri`), `{run_id}` (`20261122-004020-93cd`), `{run_compact}` (`26112200402093cd`). mail.tm needs the short form, `{initials}{run_compact}` → `ri26112200402093cd@…`; a mail.tm pattern with `{run_id}` is refused when the file is read. |
 | `phones` | One number per persona ID, as `+48` and 9 digits (spaces allowed). A persona with no number gets none: optional phone fields stay empty and a form that requires a phone stops the run with `phone_required`. |
 | `phones_confirmed_by` | Who confirmed, and how, that the live numbers cannot belong to anyone, e.g. "UKE numbering plan, checked by X on 2026-11-23". **Live numbers are ignored while this is empty** (VV-31). |
 
@@ -68,7 +68,9 @@ The local numbers have the shape of real Polish mobiles so that phone widgets ac
 
 Decided 2026-11-22: live runs get disposable mail.tm inboxes, not addresses on a team catch-all domain.
 
-- **When:** at the start of a run whose scope has `"provider": "mail.tm"`, before the browser opens. The agent fetches mail.tm's active domains, then creates the account `<persona>.<run-id>@<domain>` with a random password (`GET /domains`, `POST /accounts`).
+- **When:** at the start of a run whose scope has `"provider": "mail.tm"`, before the browser opens. The agent fetches mail.tm's active domains, then creates the account `<initials><run-compact>@<domain>` (e.g. `ri26112200402093cd@euploading.com`) with a random password (`GET /domains`, `POST /accounts`).
+- **Username limits:** mail.tm refuses usernames that are too long. On 2026-11-22 it accepted 21 letters and digits and refused 25, with or without hyphens and dots, hence the compact pattern (18 characters).
+- **Checked live on 2026-11-22:** an inbox (`ri20261122012230smoke@euploading.com`) was created, logged into and read (no messages) with the client in `src/ftf/victim/mailbox.py`. The compact pattern was not itself tried against mail.tm, so it falls within the observed limit but is not confirmed.
 - **Recorded:** `run_files/mailbox.json` holds the address, the password, the account ID and the time it was created, so the inbox can be read later. The address is also in `run.json` and in the form log for every form it was typed into.
 - **If it fails:** mail.tm may be unreachable, refuse the address, or rate-limit. The run then continues with no e-mail: a form that needs one is not sent, and `run.json` records why under `contacts.email_policy`.
 - **Reading what arrives (VV-33):** run `ftf victim mail <run folder>`. It logs in (`POST /token`), fetches every message and saves each to `run_files/mail/<id>.json`. It adds one line per message to `run_files/mail.jsonl`: sender, sender domain, subject, links, link hosts and phone numbers. Then it re-ingests the run. Run it again later for mail that arrives later; messages already saved are skipped.

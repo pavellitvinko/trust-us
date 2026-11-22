@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .persona import Persona, fold
 
@@ -105,6 +105,17 @@ _PHONE = re.compile(r"^\+?[\d\s-]{9,16}$")
 _ADDRESS = re.compile(r"^[a-z0-9._+-]+@[a-z0-9-]+(\.[a-z0-9-]+)+$")
 
 
+def placeholders(persona: str, run_id: str) -> dict[str, str]:
+    """What a pattern may use. `20261122-004020-93cd` -> run_compact `26112200402093cd`."""
+    compact = re.sub(r"[^0-9a-z]", "", run_id.lower())
+    return {
+        "persona": persona,
+        "run_id": run_id,
+        "initials": "".join(w[0] for w in persona.split("-") if w),
+        "run_compact": compact[2:] if compact[:2] == "20" else compact,
+    }
+
+
 class _M(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -116,14 +127,23 @@ class EmailRule(_M):
     pattern: str = "{persona}.{run_id}@{domain}"
 
     def local_part(self, persona: str, run_id: str) -> str:
-        return self.pattern.split("@", 1)[0].format(persona=persona, run_id=run_id).lower()
+        return self.pattern.split("@", 1)[0].format(**placeholders(persona, run_id)).lower()
 
     @field_validator("pattern")
     @classmethod
     def _unique_per_run(cls, value: str) -> str:
-        if "{run_id}" not in value or "{domain}" not in value:
-            raise ValueError("the pattern needs {run_id} and {domain}: one address per run (VV-30)")
+        if not ("{run_id}" in value or "{run_compact}" in value) or "{domain}" not in value:
+            raise ValueError(
+                "the pattern needs {run_id} or {run_compact}, and {domain}: one address per run (VV-30)"
+            )
         return value
+
+    @model_validator(mode="after")
+    def _mail_tm_usernames(self) -> EmailRule:
+        # mail.tm refuses long usernames (21 letters and digits pass, 25 do not; 2026-11-22).
+        if self.provider == "mail.tm" and "{run_id}" in self.pattern:
+            raise ValueError("mail.tm needs a short address: use {initials}{run_compact}")
+        return self
 
 
 class Scope(_M):
@@ -193,7 +213,9 @@ def contacts_for(book: ContactBook, persona: Persona, run_id: str, local: bool) 
         # The inbox is created when the run starts (VictimRun.run), not here: no network yet.
         email_policy = f"{scope_name}: a mail.tm inbox created when the run starts"
     elif domain:
-        email = scope.email.pattern.format(persona=persona.id, run_id=run_id, domain=domain).lower()
+        email = scope.email.pattern.format(
+            **placeholders(persona.id, run_id), domain=domain
+        ).lower()
         if not _ADDRESS.match(email):
             raise ValueError(f"contacts {scope_name}.email gives an invalid address: {email!r}")
         email_policy = f"{scope_name}: per-run address on {domain}"

@@ -270,7 +270,7 @@ def test_a_mail_tm_inbox_is_what_the_form_gets(chromium, site, tmp_path):
         {
             "version": "t",
             "local": {
-                "email": {"provider": "mail.tm"},
+                "email": {"provider": "mail.tm", "pattern": "{initials}{run_compact}@{domain}"},
                 "phones": {"retiree-income": "+48 500 000 101"},
             },
             "live": {},
@@ -289,6 +289,6 @@ def test_a_mail_tm_inbox_is_what_the_form_gets(chromium, site, tmp_path):
     )
     result = run.run()
     assert result.stop_reason == rules.OFFSITE_HANDOFF, result.stop_detail
-    assert posts[0]["form"]["email"] == [f"retiree-income.{run.run_id}@mailbox.example"]
+    assert posts[0]["form"]["email"] == [run.email] and run.email.endswith("@mailbox.example")
     assert result.manifest["contacts"]["provider"] == "mail.tm"
     assert (result.root / "run_files" / "mailbox.json").is_file()

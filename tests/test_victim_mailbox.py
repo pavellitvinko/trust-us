@@ -79,6 +79,22 @@ def test_a_taken_or_refused_address_is_an_error():
         MailTm(transport=FakeMailTm(domains=())).create("x")
 
 
+def test_mail_tm_addresses_are_short_enough_and_long_patterns_are_refused():
+    from pydantic import ValidationError
+
+    book = load_contacts()
+    assert (
+        book.live.email.local_part("retiree-income", "20261122-004020-93cd") == "ri26112200402093cd"
+    )
+    assert (
+        book.live.email.local_part("young-gambler", "20261122-004020-93cd") == "yg26112200402093cd"
+    )
+    with pytest.raises(ValidationError, match="short address"):
+        ContactBook.model_validate(
+            {"version": "x", "local": {}, "live": {"email": {"provider": "mail.tm"}}}
+        )
+
+
 def test_summary_finds_sender_links_and_phones():
     line = summarise(MESSAGE, "retiree-income.r1@mailbox.example")
     assert line["sender_domain"] == "crm.invest-leads.com"
@@ -96,7 +112,7 @@ def test_packaged_live_scope_uses_mail_tm_and_local_stays_reserved():
 
 
 def _book_with_mail_tm(local_too=False):
-    rule = {"provider": "mail.tm", "pattern": "{persona}.{run_id}@{domain}"}
+    rule = {"provider": "mail.tm", "pattern": "{initials}{run_compact}@{domain}"}
     return ContactBook.model_validate(
         {"version": "t", "local": {"email": rule} if local_too else {}, "live": {"email": rule}}
     )
@@ -127,7 +143,8 @@ def test_the_run_creates_its_inbox_before_the_browser_opens(tmp_path, settings):
         mail_client=MailTm(transport=fake),
     )
     run.provision_mailbox()
-    assert run.email == f"retiree-income.{run.run_id}@mailbox.example"
+    assert run.email == f"ri{run.run_id.replace('-', '')[2:]}@mailbox.example"
+    assert len(run.email.split("@")[0]) <= 21
     saved = Mailbox.load(run.rec.files)
     assert saved.address == run.email and saved.password == fake.accounts[run.email]
     assert run.contacts.email == run.email and "mail.tm inbox" in run.contacts.email_policy
