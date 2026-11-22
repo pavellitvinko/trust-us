@@ -92,6 +92,7 @@ BASE_WEIGHTS: dict[str, float] = {
     "url.host_path": 0.95,
     "outbound.domain": 0.7,
     "redirect.domain": 0.8,
+    "ct.shared_cert": 0.6,  # a certificate the owner chose to share; hosters can do it too
     "brand.offer": 0.8,
     "offer.name": 0.8,
     "url.host": 0.9,

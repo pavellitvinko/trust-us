@@ -71,7 +71,7 @@ def add_material() -> None:
         disabled=not root,
         help=f"Inside {root}" if root else "Off until FTF_UI_FOLDER_ROOT is set.",
     )
-    enrich = st.checkbox("Look up DNS and RDAP (network)", value=True)
+    enrich = st.checkbox("Look up DNS, RDAP and crt.sh (network)", value=True)
     st.text_input(
         "URL", disabled=True, help="Available once the live capture service (HAC-14) is connected."
     )
