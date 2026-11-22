@@ -316,6 +316,7 @@ def detail(library: Library, item: Item) -> dict[str, Any]:
         **summary(library, item),
         "groups": groups,
         "warningSigns": item.risk.signs,
+        "possibleFaces": item.risk.faces,
         "unchecked": [UNCHECKED_PLAIN.get(u, u.lower()) for u in item.risk.unchecked],
         "path": _path(library, journey),
         "matches": matches,

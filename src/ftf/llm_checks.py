@@ -20,6 +20,7 @@ CHECK_STEPS = (
     ("video", "Read videos", "Speech, scenes and on-screen text", True, True),
     ("expectations", "Check expected elements", "Compare pages with shared kind profiles", True, False),
     ("techniques", "Find persuasion techniques", "Evidence-backed technique cards", True, True),
+    ("faces", "Match faces", "Compare faces with the private public-figure list", True, True),
     ("warnings", "Check warning lists", "Check local snapshots using the extracted names", True, False),
     ("rebuild", "Refresh campaigns", "Prepare current groups for pattern discovery", False, False),
     ("patterns", "Discover and match patterns", "Embed cards, discover patterns and match material", True, False),
@@ -57,6 +58,7 @@ def run_llm_checks(
     from .layers._embedder import GatewayEmbedder, get_embedder, set_embedder
     from .patterns.workflow import run_discover
     from .perception.expectations import run_expectations
+    from .perception.faces import run_face_check
     from .perception.image import run_perceive
     from .perception.page import run_perceive_pages
     from .perception.techniques import run_techniques
@@ -147,6 +149,11 @@ def run_llm_checks(
         ):
             perform(name, lambda view_id, run=run: run(ctx, [view_id], settings=settings),
                     [v for v in source if kind is None or v.kind is kind])
+        perform(
+            "faces",
+            lambda view_id: {k: v for k, v in run_face_check(ctx, [view_id]).items() if isinstance(v, int)},
+            source,
+        )
         perform("warnings", lambda: run_warning_lists(store, settings.data_dir / "warning_lists"), batch_items=source)
         # Pattern discovery needs current independent campaigns. Refresh once before it,
         # then again after matching so new pattern scores reach the Library.

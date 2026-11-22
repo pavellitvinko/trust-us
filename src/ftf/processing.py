@@ -9,6 +9,7 @@ CHECK_EXTRACTORS = {
     "image": "perception.image", "page": "perception.page", "video": "perception.video",
     "expectations": "perception.expectations", "techniques": "perception.technique",
     "warnings": "enrich.warning_lists", "patterns": "perception.pattern",
+    "faces": "perception.faces",
 }
 STATE_LABELS = {
     "not_run": "Not checked", "queued": "Waiting", "running": "Processing",
@@ -25,6 +26,10 @@ REASONS = {
     "no_patterns": "No active patterns are available to match.", "not_judged": "The model did not judge this pattern.",
     "rate_limit": "The provider rate limit was reached.",
     "quote_not_in_text": "The quoted evidence could not be verified in the source.",
+    "no_face_service": "The face service is not connected.",
+    "media_error": "A picture in this item could not be read.",
+    "image_rejected": "The face service could not read the pictures.",
+    "unreachable": "The face service could not be reached.",
 }
 
 
@@ -44,7 +49,9 @@ def check_result(check: str, observations: list, summary: dict | None = None) ->
                         and not (check == "warnings" and isinstance(o.value, dict) and o.value.get("message") == "no supported input")]
     unavailable = len(unavailable_rows)
     # A successful read with zero findings is still a completed check.
-    if summary and (summary.get("kept") or (summary.get("reason") and observable)):
+    if check == "faces" and rows and all(o.state == State.NOT_OBSERVABLE and o.raw == "no_image" for o in rows):
+        state, message, unavailable = "not_applicable", "This item has no picture to check.", 0
+    elif summary and (summary.get("kept") or (summary.get("reason") and observable)):
         state, message = "retained", "The latest attempt did not finish; earlier results were kept."
     elif unavailable:
         state = "partial" if observable else "unavailable"
@@ -77,7 +84,7 @@ def item_processing(view: View, observations: list, tracked: dict | None = None,
                 and attempt["outputSignature"] != stored["outputSignature"]):
             attempt = {}  # output changed through another workflow, such as the CLI
         state = attempt.get("state", stored["state"])
-        if view.kind is ViewKind.VIDEO and key in ("video", "techniques", "patterns") and state == "not_run":
+        if view.kind is ViewKind.VIDEO and key in ("video", "techniques", "patterns", "faces") and state == "not_run":
             state = "on_demand"
         has_result = stored["hasResult"] or attempt.get("hasResult", False)
         message = attempt.get("message", stored["message"])

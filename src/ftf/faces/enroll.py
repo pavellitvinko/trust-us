@@ -1,11 +1,13 @@
 """Load the closed reference list into the private face service.
 
-Photos come from the licensed manifest, are sent to the service and are not kept on disk or in
-the repository. The first photo anchors a person; later ones must match it.
+Photos ship unmodified in `reference_photos/`, with author and licence in the manifest, so setup
+needs no download. A photo missing from the package is fetched from its source. The first photo
+anchors a person; later ones must match it.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 import urllib.error
@@ -17,6 +19,7 @@ from typing import Any
 from .client import FaceClient, FaceServiceError, _read_state, write_state
 
 MANIFEST = Path(__file__).with_name("reference_people.json")
+PHOTOS = Path(__file__).with_name("reference_photos")
 MAX_PHOTO_BYTES = 5 * 1024 * 1024
 DOWNLOAD_ATTEMPTS = 4
 DOWNLOAD_PAUSE_SECONDS = 2.0
@@ -45,6 +48,18 @@ def download(url: str) -> bytes:
     if len(data) > MAX_PHOTO_BYTES:
         raise ValueError("photo is too large")
     return data
+
+
+def read_photo(file: dict[str, str], fetch: Callable[[str], bytes] = download) -> bytes:
+    """The packaged photo when it is intact, otherwise the one at its source."""
+    if file.get("photo"):
+        try:
+            data = (PHOTOS / Path(file["photo"]).name).read_bytes()
+        except OSError:
+            data = b""
+        if hashlib.sha256(data).hexdigest() == file.get("sha256"):
+            return data
+    return fetch(file["url"])
 
 
 def _matches(client: FaceClient, person: str, photo: bytes) -> str | None:
@@ -90,7 +105,7 @@ def enroll(
                 report["already"] += 1
                 continue
             try:
-                photo = fetch(file["url"])
+                photo = read_photo(file, fetch)
                 # Only the first photo may define who this person is.
                 problem = _matches(client, person, photo) if done else _single_face(client, photo)
                 if problem:
