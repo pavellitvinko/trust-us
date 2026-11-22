@@ -179,6 +179,8 @@ class Campaign:
     first_seen: str
     linked_by: list[str]
     kit: str | None = None
+    title: str = ""  # what a reader calls it, from the members' own titles
+    repeat: bool = False  # only the same page in several cases: not a campaign
 
 
 @dataclass
@@ -817,7 +819,10 @@ def build_library(
             campaign = campaigns.get(cid)
             if campaign and campaign.name:
                 labels.append(Label("campaign", campaign.name, more_text(campaign, vid, views)))
-            for other in duplicates.get(vid, [])[:1]:
+            copies = duplicates.get(vid, [])
+            if not copies and campaign and campaign.repeat:
+                copies = [v for v in campaign.members if views[v].incident_id != incident_id]
+            for other in copies[:1]:
                 where = case_title(views[other].incident_id)
                 labels.append(Label("duplicate", f"Duplicate · {where}"))
             if not labels and campaign and campaign.kit:
@@ -926,6 +931,7 @@ def name_groups(
             if m.verdict in _JOINING and campaign_of.get(m.view_id) == cid
         ]
         cases = sorted({views[v].incident_id for v in members}, key=case_key)
+        repeat = is_repeat(members, views)
         out[cid] = Campaign(
             campaign_id=cid,
             name=None,
@@ -934,8 +940,10 @@ def name_groups(
             first_seen=min((added.get(c, "") for c in cases), default=""),
             linked_by=_clues(inside),
             kit=kit_of.get(cid),
+            title=campaign_title(members, views),
+            repeat=repeat,
         )
-        if len(members) > 1:
+        if len(members) > 1 and not repeat:
             anchors[cid] = min(members)
             clue = _strongest(inside)
             names[cid] = (
@@ -973,6 +981,97 @@ def name_groups(
         if campaign.kit not in kits:
             campaign.kit = None
     return out, kits
+
+
+def is_repeat(members: list[str], views: dict[str, View]) -> bool:
+    """The same page (same kind, title and host) in more than one case, and nothing else.
+
+    Saying so twice is not evidence of an operation: the screens show it once, not as a
+    campaign. The same title on two hosts, or two pages of one site, still is a campaign.
+    """
+    # The address counts too: pages captured from a link are titled by their host alone.
+    same = {(views[v].kind, *view_title(views[v]), view_url(views[v])) for v in members}
+    return len(members) > 1 and len(same) == 1 and len({views[v].incident_id for v in members}) > 1
+
+
+TITLE_LENGTH = 80
+
+
+def _clean_title(title: str) -> str:
+    title = title.replace("_ ", ": ").strip()  # a saved file name stands ":" in for "_"
+    if len(title) <= TITLE_LENGTH:
+        return title
+    return title[:TITLE_LENGTH].rsplit(" ", 1)[0].rstrip(" ,.:;-—") + "…"
+
+
+def campaign_title(members: list[str], views: dict[str, View]) -> str:
+    """What a reader calls a group: its pages' most common own title, in their language.
+
+    A title that is only a web address reads "Pages on <host>" (or its hosts); a group without pages is
+    counted. Ties go to the shortest title, then the first in alphabetical order, so the
+    order material was added never changes the name.
+    """
+    pages = [view_title(views[v]) for v in members if views[v].kind is ViewKind.PAGE]
+    if not pages:
+        kinds = {views[v].kind for v in members}
+        if len(kinds) > 1:
+            return f"{len(members)} pictures and videos"
+        return plural(len(members), "video" if ViewKind.VIDEO in kinds else "picture")
+    hosts = {h for _, h in pages if h}
+    counts: dict[str, int] = defaultdict(int)
+    for title, _ in pages:
+        counts[title] += 1
+    best = min(counts, key=lambda t: (t in hosts, -counts[t], len(t), t))
+    if best not in hosts:
+        return _clean_title(best)
+    if len(hosts) == 1:
+        return f"Pages on {best}"
+    if len(hosts) == 2:
+        return "Pages on " + " and ".join(sorted(hosts))
+    return f"Pages on {len(hosts)} websites"
+
+
+# What a campaign's strongest link means, for a reader who does not know the method.
+WHY_NOTE = {
+    "campaign": "Only whoever runs the pages can set this.",
+    "duplicate": "The same files were reused.",
+    "journey": "A visitor is taken from one to the next.",
+}
+
+
+def campaign_why(library: Library, campaign: Campaign) -> tuple[str, str, str]:
+    """(what links the members, how strong, what that means): the link a reader should see.
+
+    A link only the operator controls comes before reused files, then the stronger, then
+    one with a literal value, so the sentence never depends on the order of adding.
+    """
+    members = set(campaign.members)
+    inside = [
+        m
+        for v in campaign.members
+        if (item := library.get(v))
+        for m in item.matches
+        if m.view_id in members and m.kind in ("campaign", "duplicate")
+    ]
+    if inside:
+        best = min(
+            inside,
+            key=lambda m: (
+                m.kind != "campaign",
+                _STRENGTH_ORDER.get(m.confidence, 3),
+                not m.clue_ns,
+                m.clue,
+            ),
+        )
+        strength = "" if best.strength == "Not assessed" else best.strength
+        # Matching content is a strong hint, not something only the operator controls.
+        if best.kind == "campaign" and "identity" not in best.tiers:
+            return best.reason, strength, ""
+        return best.reason, strength, WHY_NOTE[best.kind]
+    journey = next((library.journeys[v] for v in campaign.members if v in library.journeys), None)
+    if journey and journey.proofs:
+        return visitor_reason(journey.proofs[0]), "", WHY_NOTE["journey"]
+    return "Linked by the analysis", "", ""
 
 
 def more_text(campaign: Campaign, view_id: str, views: dict[str, View]) -> str:
@@ -1037,7 +1136,7 @@ def campaign_tree(library: Library) -> Tree:
         head = TreeRow(0, "kit", kit.name, None, len(members), cases, first, kit.linked_by)
         tops.append((first, min(members), [head, *(row(c, 1) for c in inner)]))
     for c in library.campaigns.values():
-        if c.kit is None:
+        if c.kit is None and not c.repeat:
             tops.append((c.first_seen, c.members[0], [row(c, 0)]))
     tops.sort(key=lambda t: (t[0], t[1]))
     linked = {v for c in library.campaigns.values() for v in c.members}

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, compareUrl, pictureUrl, type ItemData, type MatchInfo } from "../api";
 import { Chip, Help, Picture, plural, useMeta } from "../components/bits";
+import { campaignUrl } from "../hooks";
 
 const itemUrl = (id: string) => `/item/${encodeURIComponent(id)}`;
 
@@ -168,7 +169,9 @@ export default function ItemPage() {
             <div className="box">
               {item.groups.map((g) => (
                 <div className="grp" key={g.name}>
-                  <Chip kind={g.kind}>{g.name}</Chip>
+                  <Link to={campaignUrl(g.id)} title={g.kind === "kit" ? "See this kit" : "See this campaign"}>
+                    <Chip kind={g.kind}>{g.name}</Chip>
+                  </Link>
                   <div>
                     {g.reason && <>{g.reason}. </>}
                     <span className="small">{meta?.groups[g.kind]}</span>

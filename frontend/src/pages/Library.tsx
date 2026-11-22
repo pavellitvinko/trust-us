@@ -1,34 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { api, type LibraryData, type Row } from "../api";
+import { api, type Row } from "../api";
 import { Chip, Help, Legend, Picture, plural } from "../components/bits";
 import MapView from "../components/MapView";
+import { campaignUrl, usePolled } from "../hooks";
 
 /** The Library, refreshed every 1.5 s while an analysis runs. */
-export function useLibrary() {
-  const [data, setData] = useState<LibraryData | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    let alive = true;
-    let timer: number | undefined;
-    const load = () =>
-      api
-        .library()
-        .then((d) => {
-          if (!alive) return;
-          setData(d);
-          setError(null);
-          if (d.busy) timer = window.setTimeout(load, 1500);
-        })
-        .catch((e) => alive && setError(String(e.message ?? e)));
-    load();
-    return () => {
-      alive = false;
-      window.clearTimeout(timer);
-    };
-  }, []);
-  return { data, error };
-}
+export const useLibrary = () => usePolled(api.library);
 
 type SortKey = "title" | "case" | "campaign" | "kit" | "signs" | "links";
 
@@ -99,10 +77,18 @@ function ItemsTable({ rows }: { rows: Row[] }) {
               <Chip kind="case">{r.case}</Chip>
             </td>
             <td>
-              <Chip kind="campaign">{r.campaign}</Chip>
+              {r.campaign && (
+                <Link to={campaignUrl(r.campaignId)} onClick={(e) => e.stopPropagation()} title="See this campaign">
+                  <Chip kind="campaign">{r.campaign}</Chip>
+                </Link>
+              )}
             </td>
             <td>
-              <Chip kind="kit">{r.kit}</Chip>
+              {r.kit && (
+                <Link to={campaignUrl(r.kitId)} onClick={(e) => e.stopPropagation()} title="See this kit">
+                  <Chip kind="kit">{r.kit}</Chip>
+                </Link>
+              )}
             </td>
             <td>{signsText(r)}</td>
             <td>{linksText(r)}</td>

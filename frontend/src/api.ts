@@ -11,7 +11,9 @@ export interface Row {
   caseId: string;
   added: string;
   campaign: string;
+  campaignId: string;
   kit: string;
+  kitId: string;
   duplicateOf: string;
   comparable: boolean;
   signs: number;
@@ -75,7 +77,7 @@ export interface MatchInfo extends Brief {
 }
 
 export interface ItemData extends Row {
-  groups: { kind: "campaign" | "kit"; name: string; reason: string }[];
+  groups: { kind: "campaign" | "kit"; id: string; name: string; reason: string }[];
   warningSigns: string[];
   unchecked: string[];
   path: { ad: string | null; steps: Brief[]; reasons: string[] } | null;
@@ -83,6 +85,37 @@ export interface ItemData extends Row {
   sameCase: Brief[];
   actions: { label: string; url: string; help?: string }[];
   findings: { kind: string; summary: string; source: string }[];
+}
+
+export interface CampaignCard {
+  id: string;
+  name: string;
+  title: string;
+  facts: string;
+  items: number;
+  why: { text: string; strength: string; note: string };
+  journey: boolean;
+  members: Brief[];
+  signs: { count: number; text: string; examples: string[]; checked: boolean };
+  kit: { id: string; name: string; text: string } | null;
+}
+
+export interface KitBox {
+  id: string;
+  name: string;
+  why: string;
+  facts: string;
+  members: (Brief & { campaign: string })[];
+}
+
+export interface CampaignsData {
+  count: string;
+  campaigns: CampaignCard[];
+  kits: KitBox[];
+  unlinked: string;
+  repeats: string;
+  generation: number;
+  busy: boolean;
 }
 
 export interface Meta {
@@ -111,6 +144,7 @@ async function get<T>(url: string): Promise<T> {
 export const api = {
   meta: () => get<Meta>("/api/meta"),
   library: () => get<LibraryData>("/api/library"),
+  campaigns: () => get<CampaignsData>("/api/campaigns"),
   item: (id: string) => get<ItemData>(`/api/items/${encodeURIComponent(id)}`),
   compare: (a: string, b: string) =>
     get<{ markdown: string }>(`/api/compare/${encodeURIComponent(a)}/${encodeURIComponent(b)}?format=view`),

@@ -45,6 +45,53 @@ def test_library_lists_items_with_words_for_a_newcomer(client):
     assert set(meta["groups"]) >= {"case", "campaign", "kit", "duplicate"}
 
 
+def test_campaigns_screen_counts_what_is_left_over(client):
+    data = client.get("/api/campaigns").json()
+    assert data["campaigns"] == [] and data["kits"] == [] and data["repeats"] == ""
+    assert data["unlinked"] == "2 items aren't linked to anything yet."
+    assert "busy" in data and "generation" in data
+
+
+def test_a_campaign_card_says_what_it_is_and_why():
+    from ftf.library import UNCHECKED_PLAIN, Campaign, Case, Item, Library, Match, Risk
+    from ftf.web.views import campaigns_payload
+
+    blank = list(UNCHECKED_PLAIN)  # nothing was looked at
+
+    pixel = Match(view_id="b", same_case=False, verdict="Same campaign", tiers=("identity",),
+                  confidence="high", observed_groups=1, total_groups=1,
+                  clue="Same pixel 1071875908635809", clue_ns="fb_pixel", clue_value="1071875908635809")  # fmt: skip
+    items = [
+        Item(
+            "a",
+            "1",
+            ViewKind.PAGE,
+            "Metabo RX",
+            "a.top",
+            [],
+            Risk("none", unchecked=blank),
+            matches=[pixel],
+        ),
+        Item("b", "2", ViewKind.PAGE, "Metabo RX", "b.top", [], Risk("none", unchecked=blank)),
+        Item("c", "2", ViewKind.IMAGE, "shot.png", None, [], Risk("none")),
+    ]
+    campaign = Campaign("c1", "Campaign 1071875908635809", ["a", "b"], ["1", "2"],
+                        "2026-11-20T10:00:00+00:00", [], title="Metabo RX")  # fmt: skip
+    lib = Library(cases=[Case("1", "Case 1", "", items[:1]), Case("2", "Case 2", "", items[1:])],
+                  journeys={}, links={}, campaigns={"c1": campaign})  # fmt: skip
+    data = campaigns_payload(lib)
+    card = data["campaigns"][0]
+    assert card["title"] == "Metabo RX" and card["kit"] is None
+    assert (
+        card["facts"]
+        == "2 pages · 2 websites (a.top, b.top) · in Cases 1, 2 · first seen 20 Nov 2026"
+    )
+    assert card["why"]["text"] == "Same Facebook tracking pixel 1071875908635809"
+    assert card["signs"]["text"] == "Warning signs not checked"
+    assert data["count"] == "1 campaign in 3 items"
+    assert data["unlinked"] == "1 item isn't linked to anything yet."
+
+
 def test_item_page_and_pictures(client):
     item = client.get("/api/items/7:page").json()
     assert item["title"] == "page" and [b["id"] for b in item["sameCase"]] == ["7:shot"]

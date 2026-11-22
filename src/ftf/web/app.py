@@ -128,6 +128,16 @@ def create_app() -> FastAPI:
             "jobs": [j for j in jobs if j["status"] in ("queued", "running", "failed")],
         }
 
+    @app.get("/api/campaigns")
+    def campaigns() -> dict:
+        lib = library_or_none()
+        payload = (
+            views.campaigns_payload(lib)
+            if lib
+            else {"count": "", "campaigns": [], "kits": [], "unlinked": "", "repeats": ""}
+        )
+        return {**payload, "generation": worker.generation, "busy": bool(worker.active())}
+
     @app.get("/api/items/{view_id}")
     def item(view_id: str) -> dict:
         lib, found = item_or_404(view_id)

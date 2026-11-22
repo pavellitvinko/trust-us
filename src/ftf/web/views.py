@@ -6,6 +6,7 @@ Everything a reader sees is worded here or in ``ftf.library``: the screens only 
 from __future__ import annotations
 
 import math
+from datetime import datetime
 from typing import Any
 from urllib.parse import quote
 
@@ -14,9 +15,15 @@ from ..library import (
     KIND_NAMES,
     LINK_NAMES,
     UNCHECKED_PLAIN,
+    Campaign,
     Item,
     Library,
+    campaign_why,
+    case_key,
     case_title,
+    cases_text,
+    plain_clue,
+    plural,
     visitor_reason,
 )
 
@@ -64,7 +71,9 @@ def summary(library: Library, item: Item) -> dict[str, Any]:
         "caseId": item.case_id,
         "added": library.added(item.case_id)[:10],
         "campaign": campaign_name(library, item),
+        "campaignId": item.campaign or "",
         "kit": kit_name(library, item),
+        "kitId": item.kit if kit_name(library, item) else "",
         "duplicateOf": duplicate.split(" · ", 1)[-1] if duplicate else "",
         "comparable": item.labels[0].text != "Not enough evidence",
         "signs": len(item.risk.signs),
@@ -163,10 +172,10 @@ def detail(library: Library, item: Item) -> dict[str, Any]:
         return next((m.reason for m in item.matches if m.kind == kind), "")
 
     groups = [
-        {"kind": kind, "name": name, "reason": own_reason(kind)}
-        for kind, name in (
-            ("campaign", campaign_name(library, item)),
-            ("kit", kit_name(library, item)),
+        {"kind": kind, "id": gid or "", "name": name, "reason": own_reason(kind)}
+        for kind, gid, name in (
+            ("campaign", item.campaign, campaign_name(library, item)),
+            ("kit", item.kit, kit_name(library, item)),
         )
         if name
     ]
@@ -222,6 +231,158 @@ def detail(library: Library, item: Item) -> dict[str, Any]:
         "findings": [
             {"kind": f.kind, "summary": f.summary, "source": f.source} for f in item.risk.findings
         ],
+    }
+
+
+_STRENGTH_RANK = {"Strong": 0, "Moderate": 1, "Weak": 2, "": 3}
+_KIND_WORDS = {"Page": "page", "Image": "picture", "Video": "video"}
+
+
+def _day(iso: str) -> str:
+    """ "20 Nov 2026" from an ISO time; empty when the time is unknown."""
+    try:
+        return datetime.fromisoformat(iso).strftime("%-d %b %Y")
+    except ValueError:
+        return ""
+
+
+def _checked(item: Item) -> bool:
+    return len(item.risk.unchecked) < len(UNCHECKED_PLAIN)
+
+
+def _items_text(items: list[Item]) -> str:
+    """ "2 pages", "1 page and 2 pictures": what the group is made of."""
+    counts: dict[str, int] = {}
+    for item in items:
+        word = _KIND_WORDS[KIND_NAMES[item.kind]]
+        counts[word] = counts.get(word, 0) + 1
+    parts = [plural(n, word) for word, n in counts.items()]
+    return " and ".join(parts) if len(parts) < 3 else ", ".join(parts)
+
+
+def _signs(items: list[Item]) -> dict[str, Any]:
+    signs = list(dict.fromkeys(s for i in items for s in i.risk.signs))
+    checked = any(_checked(i) for i in items)
+    if signs:
+        text = plural(len(signs), "warning sign")
+    else:
+        text = "No warning signs found" if checked else "Warning signs not checked"
+    return {"count": len(signs), "text": text, "examples": signs[:2], "checked": checked}
+
+
+def _members(library: Library, campaign: Campaign) -> tuple[list[Item], bool]:
+    """The members in the order a reader should meet them, and whether that is a journey."""
+    items = [i for v in campaign.members if (i := library.get(v))]
+    journeys = {id(library.journeys[i.view_id]) for i in items if i.view_id in library.journeys}
+    if len(items) > 1 and len(journeys) == 1 and all(i.step for i in items):
+        return sorted(items, key=lambda i: i.step.position), True
+    return sorted(items, key=lambda i: (case_key(i.case_id), i.title.lower(), i.view_id)), False
+
+
+def _card(library: Library, campaign: Campaign) -> dict[str, Any]:
+    items, journey = _members(library, campaign)
+    hosts = sorted({i.host for i in items if i.host})
+    facts = [_items_text(items)]
+    if hosts:
+        facts.append(
+            f"{plural(len(hosts), 'website')} ({', '.join(hosts[:3])}"
+            f"{f' and {len(hosts) - 3} more' if len(hosts) > 3 else ''})"
+        )
+    facts.append(("in " if len(campaign.cases) > 1 else "") + cases_text(campaign.cases))
+    if first := _day(campaign.first_seen):
+        facts.append(f"first seen {first}")
+    text, strength, note = campaign_why(library, campaign)
+    kit = library.kits.get(campaign.kit or "")
+    kit_info = None
+    if kit:
+        others = sum(
+            1
+            for c in kit.campaigns
+            if c != campaign.campaign_id
+            for _ in _kit_members(library, library.campaigns[c])
+        )
+        kit_info = {
+            "id": kit.kit_id,
+            "name": kit.name,
+            "text": f"Built with the same kit as {plural(others, 'other item')}",
+        }
+    return {
+        "id": campaign.campaign_id,
+        "name": campaign.name,
+        "title": campaign.title,
+        "facts": " · ".join(facts),
+        "items": len(items),
+        "why": {"text": text, "strength": strength, "note": note},
+        "journey": journey,
+        "members": [_brief(i) for i in items],
+        "signs": _signs(items),
+        "kit": kit_info,
+    }
+
+
+def _kit_members(library: Library, campaign: Campaign) -> list[Item]:
+    """A kit lists each page once: a page found in several cases is one item."""
+    items = [i for v in campaign.members if (i := library.get(v))]
+    return items[:1] if campaign.repeat else items
+
+
+def campaigns_payload(library: Library) -> dict[str, Any]:
+    """The Campaigns screen: one card per campaign, the kits, and what is left over."""
+    named = [c for c in library.campaigns.values() if c.name]
+    cards = [_card(library, c) for c in named]
+    cards.sort(
+        key=lambda c: (
+            -c["items"],
+            _STRENGTH_RANK.get(c["why"]["strength"], 3),
+            next(x.first_seen for x in named if x.campaign_id == c["id"]),
+            c["id"],
+        )
+    )
+    kits = []
+    for kit in library.kits.values():
+        items = [i for c in kit.campaigns for i in _kit_members(library, library.campaigns[c])]
+        names = {
+            v: c.name
+            for cid in kit.campaigns
+            if (c := library.campaigns[cid]).name
+            for v in c.members
+        }
+        kits.append(
+            {
+                "id": kit.kit_id,
+                "name": kit.name,
+                "why": plain_clue(kit.linked_by[0]) if kit.linked_by else "",
+                "facts": f"{_items_text(items)} · " + cases_text({i.case_id for i in items}),
+                "members": [{**_brief(i), "campaign": names.get(i.view_id, "")} for i in items],
+            }
+        )
+    grouped = {v for c in library.campaigns.values() for v in c.members}
+    rest = [i for i in library.items() if i.view_id not in grouped]
+    repeats = sum(1 for c in library.campaigns.values() if c.repeat)
+    count = f"{plural(len(cards), 'campaign')} in {plural(len(library.items()), 'item')}"
+    if kits:
+        count += f" · {plural(len(kits), 'shared kit')}"
+    return {
+        "count": count,
+        "campaigns": cards,
+        "kits": kits,
+        "unlinked": (
+            f"{plural(len(rest), 'item')} {'is' if len(rest) == 1 else 'are'}n't linked to "
+            "anything yet."
+            if rest
+            else ""
+        ),
+        "repeats": (
+            f"{plural(repeats, 'page')} {'was' if repeats == 1 else 'were'} found in more than "
+            "one case. A page found twice is still one page, so "
+            + (
+                "it isn't counted as a campaign."
+                if repeats == 1
+                else "they aren't counted as campaigns."
+            )
+            if repeats
+            else ""
+        ),
     }
 
 
