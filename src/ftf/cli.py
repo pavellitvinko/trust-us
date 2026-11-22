@@ -195,6 +195,7 @@ def cmd_load_fixtures(args) -> None:
 
 def cmd_perceive(args) -> None:
     from .perception.expectations import run_expectations
+    from .perception.faces import run_perceive_faces
     from .perception.image import run_perceive
     from .perception.page import run_perceive_pages
     from .perception.techniques import run_techniques
@@ -216,6 +217,8 @@ def cmd_perceive(args) -> None:
         f"not observable: {checks['not_observable']}, "
         f"failed but kept earlier check: {checks['kept']}, profiles: {checks['profiles']}"
     )
+    faces = run_perceive_faces(ctx, args.view or None)
+    print(f"faces: {faces}")
     # After image and page reading, so a screenshot's text can be quoted as technique evidence.
     cards = run_techniques(ctx, args.view or None)
     print(
@@ -395,6 +398,29 @@ def cmd_narrate(args) -> None:
         print(f"\n({result['rejected']} unsupported sentence(s) removed)")
 
 
+def cmd_faces(args) -> None:
+    """Set up the private face service and load the closed reference list."""
+    from .faces.client import FaceServiceError, bootstrap, service_url
+    from .faces.enroll import enroll
+
+    url = service_url()
+    if not url:
+        print("error: FTF_COMPREFACE_URL is not set", file=sys.stderr)
+        raise SystemExit(1)
+    try:
+        report = enroll(bootstrap(url))
+    except FaceServiceError as exc:
+        print(f"error: face service: {exc.reason}", file=sys.stderr)
+        raise SystemExit(1) from exc
+    print(f"added {report['added']}, already loaded {report['already']}")
+    print(f"ready: {', '.join(report['people_ready']) or 'nobody'}")
+    for item in report["skipped"]:
+        print(f"skipped {item['person']}: {item['title']} ({item['why']})")
+    if report["people_missing"]:
+        print(f"error: no photo for {', '.join(report['people_missing'])}", file=sys.stderr)
+        raise SystemExit(1)
+
+
 def cmd_views(args) -> None:
     for v in _store().views():
         print(f"{v.view_id}  {v.kind.value:5}  {v.label}")
@@ -413,6 +439,8 @@ def cmd_suspicions(args) -> None:
             print(f"  {kind}:")
             for r in reasons:
                 print(f"    [{r.signal_id}] {r.summary} ({r.source.file}:{r.source.locator})")
+        for r in summary.face_matches:
+            print(f"  context: {r.summary} ({r.source.file}:{r.source.locator})")
         if summary.unchecked_kinds:
             print(f"  not checked: {', '.join(summary.unchecked_kinds)}")
 
@@ -693,6 +721,10 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("views", nargs="*", help="two view ids")
     p.add_argument("--campaign", help="a campaign id, instead of two views")
     p.set_defaults(func=cmd_narrate)
+
+    p = sub.add_parser("faces", help="face reference list in the private CompreFace service")
+    p.add_argument("action", choices=("setup",))
+    p.set_defaults(func=cmd_faces)
 
     sub.add_parser("views", help="list views").set_defaults(func=cmd_views)
 
