@@ -459,9 +459,6 @@ def cmd_ablate(args) -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
-    from .method_settings import apply_saved
-
-    apply_saved()
     parser = argparse.ArgumentParser(prog="ftf", description="Follow the Fake")
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -589,6 +586,11 @@ def main(argv: list[str] | None = None) -> None:
     p.set_defaults(func=cmd_eval)
 
     args = parser.parse_args(argv)
+    # Evaluation measures the shipped method, so analyst edits must not change its results.
+    if args.command not in ("eval", "loio", "ablate", "validate", "load-fixtures"):
+        from .method_settings import apply_saved
+
+        apply_saved()
     args.func(args)
 
 

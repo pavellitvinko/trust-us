@@ -43,6 +43,8 @@ def _unit(value: Any) -> bool:
 
 
 def validate(values: dict[str, Any]) -> list[str]:
+    if not isinstance(values, dict):
+        return ["settings must be an object"]
     errors = []
     for section, known in (
         ("group_weights", _FACTORY.group_weights),

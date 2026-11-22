@@ -2,7 +2,7 @@
 
 import pytest
 
-from ftf.campaign_map import map_data, to_dot
+from ftf.campaign_map import link_tiers, map_data, to_dot
 from ftf.contracts import Incident, Relation, RelationType, View, ViewKind
 from ftf.fusion import DEFAULT
 from ftf.method_settings import apply_saved, current_values, reset, save, settings_path
@@ -110,3 +110,76 @@ def test_bad_edits_are_refused(library):
     with pytest.raises(LibraryEditError):
         rename_pattern(library, "missing", "x")
     assert len(library.list_versions()) == 1
+
+
+@pytest.mark.parametrize("content", ["[]", "null", "1"])
+def test_non_object_settings_file_is_ignored(method, content):
+    settings_path().parent.mkdir(parents=True)
+    settings_path().write_text(content)
+    apply_saved()
+    assert DEFAULT.kit == 0.7
+
+
+def relation(kind, scores, reasons=()):
+    return Relation(
+        view_a="a",
+        view_b="b",
+        type=kind,
+        confidence="medium",
+        tier_scores=scores,
+        reasons=list(reasons),
+    )
+
+
+def test_duplicate_stays_on_the_map_below_tier_thresholds():
+    assert link_tiers(relation(RelationType.DUPLICATE, {"T2": 0.63}), DEFAULT) == ["artifact"]
+
+
+def test_rejected_artifact_score_is_not_a_link_tier():
+    found = relation(RelationType.SAME_PLAYBOOK, {"T2": 0.9, "T4": 0.8}, ["playbook 0.80 [x=1]"])
+    assert link_tiers(found, DEFAULT) == ["playbook"]
+
+
+def test_cannot_merge_into_a_retired_pattern(library):
+    retire_pattern(library, "p1")
+    with pytest.raises(LibraryEditError, match="retired"):
+        merge_patterns(library, "p1", "p2")
+
+
+def test_analyst_merge_survives_the_next_discovery(library, monkeypatch, tmp_path):
+    from ftf.config import Settings
+    from ftf.models import ModelResult
+    from ftf.patterns import induction as ind
+    from ftf.patterns.library import ClusterResult, TechniqueCardForClustering
+
+    version = library.latest_version()
+    version.patterns[0].centroid = [1.0, 0.0]
+    version.patterns[1].centroid = [0.0, 1.0]
+    version.version_id = "v0002-abc"
+    library.save_version(version)
+    merge_patterns(library, "p1", "p2")
+
+    def card(cid, campaign):
+        return TechniqueCardForClustering(
+            card_name=cid,
+            card_description=cid,
+            view_id=cid,
+            incident_id=campaign,
+            source_text="",
+            card_id=cid,
+            campaign_id=campaign,
+        )
+
+    cluster = ClusterResult(0, [card("x", "c1"), card("y", "c2")], [0.0, 1.0])
+    answer = ind.InducedPattern(
+        coherent=True,
+        name="New name",
+        description="d",
+        positive_card_ids=["x", "y"],
+        near_misses=[],
+    )
+    monkeypatch.setattr("ftf.models.read_structured", lambda *a, **k: ModelResult.ok(answer))
+    settings = Settings(tmp_path, "", "", "m", "e", "v")
+    result = ind.run_induction(library, [cluster], settings=settings)
+    assert [p.pattern_id for p in result.version.patterns] == ["p1"]
+    assert {e["card_id"] for e in result.version.patterns[0].positive_examples} >= {"x", "y"}

@@ -71,6 +71,9 @@ def merge_patterns(library: PatternLibraryStore, keep_id: str, merge_id: str):
 
     def change(version: LibraryVersion, _: str) -> None:
         keep, gone = _find(version, keep_id), _find(version, merge_id)
+        if keep.metadata.analyst_retired_at:
+            raise LibraryEditError("cannot merge into a retired pattern")
+        keep.merged_centroids += [c for c in (gone.centroid, *gone.merged_centroids) if c]
         known = {e.get("card_id") for e in keep.positive_examples}
         keep.positive_examples += [
             e for e in gone.positive_examples if e.get("card_id") not in known

@@ -50,7 +50,12 @@ st.title("Follow the Fake")
 settings = get_settings()
 store = Store(settings.db_path)
 load_plugins()
-apply_saved()
+# A running analysis already holds the current settings, so never wait for it here.
+if ANALYSIS_LOCK.acquire(blocking=False):
+    try:
+        apply_saved()
+    finally:
+        ANALYSIS_LOCK.release()
 
 
 def add_material() -> None:
@@ -94,6 +99,7 @@ def add_material() -> None:
     progress.progress(1.0, text="Done")
     st.session_state.pop("comparison_report", None)
     st.session_state.pop("assignments", None)
+    st.session_state.pop("map_cache", None)
     st.success(
         f"Added {result['views']} views in {len(result['incidents'])} incident(s). "
         f"Campaigns: {result['campaigns']}, families: {result['families']}."
@@ -115,7 +121,7 @@ def number_rows(values: dict) -> list[dict]:
 def recompute() -> None:
     with ANALYSIS_LOCK:
         run_method(store)
-    for key in ("assignments", "comparison_report"):
+    for key in ("assignments", "comparison_report", "map_cache"):
         st.session_state.pop(key, None)
 
 
@@ -127,8 +133,14 @@ def show_map() -> None:
         for column, name in zip(columns, TOGGLES, strict=True)
         if column.checkbox(name.capitalize(), value=name != "playbook", key=f"map_{name}")
     ]
-    with ANALYSIS_LOCK:
-        data = map_data(store, enabled)
+    if not st.toggle("Build map", key="map_on"):
+        st.caption("The map is built on request, because it reads every stored relation.")
+        return
+    cache = st.session_state.setdefault("map_cache", {})
+    if tuple(enabled) not in cache:
+        with ANALYSIS_LOCK:
+            cache[tuple(enabled)] = map_data(store, enabled)
+    data = cache[tuple(enabled)]
     st.caption("Boxes are families and campaigns. A line is a stored relation in a chosen tier.")
     st.graphviz_chart(to_dot(data), width="stretch")
     st.subheader("Clusters")
@@ -180,17 +192,25 @@ def show_pattern_library() -> None:
     ids = [p.pattern_id for p in version.patterns]
     chosen = st.selectbox("Pattern", ids, key="library_pattern")
     name = st.text_input("New name", key="library_name")
-    target = st.selectbox("Merge it into", [i for i in ids if i != chosen] or [None])
+    active = [
+        p.pattern_id
+        for p in version.patterns
+        if p.pattern_id != chosen and not (p.metadata and p.metadata.analyst_retired_at)
+    ]
+    target = st.selectbox("Merge it into", active or [None])
     rename, retire, merge = st.columns(3)
     try:
         if rename.button("Rename"):
-            rename_pattern(library, chosen, name)
+            with ANALYSIS_LOCK:
+                rename_pattern(library, chosen, name)
             st.rerun()
         if retire.button("Retire"):
-            retire_pattern(library, chosen)
+            with ANALYSIS_LOCK:
+                retire_pattern(library, chosen)
             st.rerun()
         if merge.button("Merge", disabled=target is None):
-            merge_patterns(library, target, chosen)
+            with ANALYSIS_LOCK:
+                merge_patterns(library, target, chosen)
             st.rerun()
     except LibraryEditError as exc:
         st.error(str(exc))
@@ -233,15 +253,20 @@ def show_method() -> None:
     )
     apply, restore = st.columns(2)
     if apply.button("Save and recompute"):
-        errors = save({**edited, "artifact_min_groups": int(minimum)})
+        with ANALYSIS_LOCK:
+            errors = save({**edited, "artifact_min_groups": int(minimum)})
+            if not errors:
+                recompute()
         if errors:
             st.error("; ".join(errors))
         else:
-            recompute()
             st.rerun()
     if restore.button("Restore shipped settings"):
-        reset()
-        recompute()
+        with ANALYSIS_LOCK:
+            reset()
+            recompute()
+        for section in ("tier_weights", "group_weights", "thresholds"):
+            st.session_state.pop(f"method_{section}", None)
         st.rerun()
     show_pattern_library()
     st.subheader("Expectation profiles")

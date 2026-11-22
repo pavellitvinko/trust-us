@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from typing import Any
 
-from .contracts import RelationType, Tier
+from .contracts import Relation, RelationType, Tier
 from .fusion import DEFAULT, FusionConfig
+from .fusion.demotion import find_demotions
 from .grouping import build_groups
 from .registry import layers, load_plugins
 from .store import Store
@@ -20,18 +22,41 @@ TOGGLES = {
 _NOT_LINKS = {RelationType.UNRELATED, RelationType.INSUFFICIENT}
 
 
-def _thresholds(config: FusionConfig) -> dict[Tier, float]:
-    return {
-        Tier.IDENTITY: config.identity,
-        Tier.ARTIFACT: config.artifact,
-        Tier.KIT: config.kit,
-        Tier.PLAYBOOK: config.playbook,
-    }
+_DECIDING = re.compile(r"^(identity|artifact|kit|playbook) \d")
+_BY_TYPE = {
+    RelationType.DUPLICATE: "artifact",
+    RelationType.SAME_CAMPAIGN: "identity",
+    RelationType.SAME_FAMILY: "kit",
+    RelationType.SAME_PLAYBOOK: "playbook",
+}
 
 
-def _shared_values(store: Store) -> dict[tuple[str, str, Tier], list[str]]:
+def link_tiers(relation: Relation, config: FusionConfig) -> list[str]:
+    """Tiers that really support this link.
+
+    Identity and artifact have extra decision rules, so they count only when they decided the
+    relation. Kit and playbook need only their threshold.
+    """
+    deciding = None
+    if relation.type is RelationType.DUPLICATE:
+        deciding = "artifact"
+    else:
+        for reason in relation.reasons:
+            if match := _DECIDING.match(reason):
+                deciding = match.group(1)
+                break
+    tiers = {deciding or _BY_TYPE[relation.type]}
+    if relation.tier_scores.get(Tier.KIT.value, 0.0) >= config.kit:
+        tiers.add("kit")
+    if relation.tier_scores.get(Tier.PLAYBOOK.value, 0.0) >= config.playbook:
+        tiers.add("playbook")
+    return [name for name in TOGGLES if name in tiers]
+
+
+def _shared_values(store: Store, config: FusionConfig) -> dict[tuple[str, str, Tier], list[str]]:
     load_plugins()
     tiers = {layer.name: layer.tier for layer in layers.all()}
+    demoted, _ = find_demotions(store, config)
     out: dict[tuple[str, str, Tier], list[str]] = defaultdict(list)
     for e in store.evidence():
         tier = tiers.get(e.layer_id)
@@ -39,7 +64,10 @@ def _shared_values(store: Store) -> dict[tuple[str, str, Tier], list[str]]:
             continue
         for item in e.shared:
             if isinstance(item, dict) and "value" in item:
-                out[(e.view_a, e.view_b, tier)].append(f"{item.get('ns')}={item['value']}")
+                # A demoted identifier is kit evidence, as it is in fusion.
+                moved = (item.get("ns"), str(item["value"])) in demoted
+                key = (e.view_a, e.view_b, Tier.KIT if moved else tier)
+                out[key].append(f"{item.get('ns')}={item['value']}")
     return out
 
 
@@ -49,17 +77,12 @@ def map_data(
     """Views, groups and the links whose tier passed its threshold. Read-only."""
     wanted = list(TOGGLES) if enabled is None else enabled
     groups = build_groups(store, config, persist_funnel=False)
-    thresholds = _thresholds(config)
-    shared = _shared_values(store)
+    shared = _shared_values(store, config)
     edges = []
     for r in store.relations():
         if r.type in _NOT_LINKS:
             continue
-        tiers = [
-            name
-            for name in wanted
-            if r.tier_scores.get(TOGGLES[name].value, 0.0) >= thresholds[TOGGLES[name]]
-        ]
+        tiers = [name for name in link_tiers(r, config) if name in wanted]
         if tiers:
             values = [
                 value
