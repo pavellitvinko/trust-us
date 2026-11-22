@@ -371,6 +371,30 @@ def cmd_ground(args) -> None:
             print(f"  added      {key}")
 
 
+def cmd_narrate(args) -> None:
+    """Write a narrative for a pair or a campaign from the evidence table (model)."""
+    from .narrative import campaign_narrative, pair_narrative, render_narrative
+
+    store = _store()
+    try:
+        if args.campaign and args.views:
+            raise ValueError("give two view ids or --campaign, not both")
+        if args.campaign:
+            result = campaign_narrative(store, args.campaign)
+        elif len(args.views) == 2:
+            result = pair_narrative(store, *args.views)
+        else:
+            raise ValueError("give two view ids, or --campaign")
+    except (KeyError, ValueError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
+    print(render_narrative(result))
+    if result["status"] != "available":
+        raise SystemExit(1)
+    if result["rejected"]:
+        print(f"\n({result['rejected']} unsupported sentence(s) removed)")
+
+
 def cmd_views(args) -> None:
     for v in _store().views():
         print(f"{v.view_id}  {v.kind.value:5}  {v.label}")
@@ -664,6 +688,11 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--kind", action="append", help="only this kind of page; may be repeated")
     p.add_argument("--show", action="store_true", help="show stored results; run nothing")
     p.set_defaults(func=cmd_ground)
+
+    p = sub.add_parser("narrate", help="model-written narrative from the evidence table")
+    p.add_argument("views", nargs="*", help="two view ids")
+    p.add_argument("--campaign", help="a campaign id, instead of two views")
+    p.set_defaults(func=cmd_narrate)
 
     sub.add_parser("views", help="list views").set_defaults(func=cmd_views)
 
