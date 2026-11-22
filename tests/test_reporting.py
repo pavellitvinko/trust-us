@@ -1,9 +1,6 @@
 """Completeness and provenance of the analyst-facing comparison report."""
 
 import json
-import os
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -222,33 +219,8 @@ def test_interface_uses_the_complete_report(report_store, monkeypatch):
 
 
 @pytest.mark.skipif(not (ROOT / "testing_sample").is_dir(), reason="testing_sample/ not present")
-def test_real_sample_report_completeness_without_models(tmp_path):
-    env = {
-        **os.environ,
-        "FTF_DATA_DIR": str(tmp_path / "data"),
-        "TLDEXTRACT_CACHE": str(tmp_path / "tld-cache"),
-        "FTF_EMBEDDER": "fake",
-        "FTF_ENRICH": "off",
-        "OPENAI_API_KEY": "",
-        "GEMINI_API_KEY": "",
-        "PYTHONPATH": os.pathsep.join((str(ROOT / "src"), str(ROOT))),
-    }
-
-    def cli(*args):
-        audit = tmp_path / "audit.json"
-        result = subprocess.run(
-            [sys.executable, "-m", "tests._model_off_cli", *args],
-            env={**env, "FTF_MODEL_OFF_AUDIT": str(audit)},
-            cwd=ROOT,
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert json.loads(audit.read_text()) == {"model": [], "network": []}
-        return result.stdout
-
+def test_real_sample_report_completeness_without_models(tmp_path, model_off_cli):
+    cli = model_off_cli
     cli("ingest", str(ROOT / "testing_sample"))
     load_plugins()
     s = Store(tmp_path / "data/ftf.sqlite")

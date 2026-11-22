@@ -4,7 +4,6 @@ import json
 import shutil
 import subprocess
 import time
-from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace as NS
 
@@ -28,6 +27,8 @@ from ftf.perception.techniques import (
     searchable,
 )
 from ftf.registry import Context
+
+from ._fakes import FakeOpenAI
 
 BOX = {"x": 0.1, "y": 0.2, "width": 0.3, "height": 0.4}
 PAGE = """<html><head><title>Wielki sekret</title><style>.x{color:red}</style></head><body>
@@ -60,29 +61,9 @@ def message(*cards):
     return NS(status="completed", output=[NS(type="message", phase=None, content=[part])])
 
 
-class FakeOpenAI:
-    def __init__(self, *responses):
-        self.queue = list(responses)
-        self.requests = []
-        self.responses = NS(stream=self._stream)
-
-    @contextmanager
-    def _stream(self, **request):
-        self.requests.append(request)
-        response = self.queue.pop(0)
-        if isinstance(response, Exception):
-            raise response
-        yield NS(get_final_response=lambda: response)
-
-
 def image_bytes(path, colour=(200, 20, 20), size=(160, 120)):
     noise = Image.effect_noise(size, 90).convert("RGB")
     Image.blend(Image.new("RGB", size, colour), noise, 0.5).save(path, "PNG")
-
-
-@pytest.fixture
-def settings(tmp_path):
-    return Settings(tmp_path / "data", "", "", "openai-test", "embed-test", "video-test")
 
 
 @pytest.fixture

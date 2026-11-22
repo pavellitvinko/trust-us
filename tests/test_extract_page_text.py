@@ -9,7 +9,7 @@ from ftf.extract._lang import detect
 from ftf.extract.page_structure import PageStructure, comment_langs, evasion_filters
 from ftf.extract.page_text import PageText, primary_subtag
 
-from .test_extract_identifiers import page, run
+from .test_extract_identifiers import page, run, values
 
 PL = (
     "Wczoraj wieczorem na Alejach Jerozolimskich w Warszawie motocyklista oddał serię strzałów "
@@ -27,10 +27,6 @@ EN = (
 def _fresh_cache():
     _material.clear_cache()
     parse.cache_clear()
-
-
-def values(observations, namespace):
-    return [o.value for o in observations if o.namespace == namespace]
 
 
 # --- language ----------------------------------------------------------------------------

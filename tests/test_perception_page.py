@@ -2,13 +2,11 @@
 
 import json
 import re
-from contextlib import contextmanager
 from dataclasses import replace
 from types import SimpleNamespace as NS
 
 import pytest
 
-from ftf.config import Settings
 from ftf.contracts import Incident, Observation, Purpose, Source, State, View, ViewKind
 from ftf.perception.page import (
     CLEAN_TEXT_NAMESPACE,
@@ -24,6 +22,8 @@ from ftf.perception.page import (
     run_perceive_pages,
 )
 from ftf.registry import Context, extractors, load_plugins
+
+from ._fakes import FakeOpenAI
 
 ARTICLE = """<html><head><title>x</title><style>.a{}</style></head><body>
 <div id="google_translate_element">Wybierz język</div>
@@ -63,30 +63,6 @@ def reading(**fields):
 def message(body):
     part = NS(type="output_text", text=json.dumps(body))
     return NS(status="completed", output=[NS(type="message", phase=None, content=[part])])
-
-
-class FakeOpenAI:
-    def __init__(self, *responses):
-        self.queue = list(responses)
-        self.requests = []
-        self.responses = NS(stream=self._stream)
-
-    @contextmanager
-    def _stream(self, **request):
-        self.requests.append(request)
-        yield NS(get_final_response=lambda: self.queue.pop(0))
-
-
-@pytest.fixture
-def settings(tmp_path):
-    return Settings(
-        data_dir=tmp_path / "data",
-        openai_api_key="",
-        gemini_api_key="",
-        openai_model="openai-test",
-        embedding_model="embed-test",
-        video_model="video-test",
-    )
 
 
 @pytest.fixture

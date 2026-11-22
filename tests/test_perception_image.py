@@ -2,14 +2,12 @@
 
 import base64
 import json
-from contextlib import contextmanager
 from dataclasses import replace
 from types import SimpleNamespace as NS
 
 import pytest
 from PIL import Image
 
-from ftf.config import Settings
 from ftf.contracts import Incident, Purpose, State, View, ViewKind
 from ftf.perception.image import (
     FIELDS,
@@ -21,6 +19,8 @@ from ftf.perception.image import (
     sniff_media_type,
 )
 from ftf.registry import Context, extractors, load_plugins
+
+from ._fakes import FakeOpenAI
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 32
 BOX = {"x": 0.1, "y": 0.2, "width": 0.3, "height": 0.4}
@@ -37,30 +37,6 @@ def reading(**fields):
 def message(body):
     part = NS(type="output_text", text=json.dumps(body))
     return NS(status="completed", output=[NS(type="message", phase=None, content=[part])])
-
-
-class FakeOpenAI:
-    def __init__(self, *responses):
-        self.queue = list(responses)
-        self.requests = []
-        self.responses = NS(stream=self._stream)
-
-    @contextmanager
-    def _stream(self, **request):
-        self.requests.append(request)
-        yield NS(get_final_response=lambda: self.queue.pop(0))
-
-
-@pytest.fixture
-def settings(tmp_path):
-    return Settings(
-        data_dir=tmp_path / "data",
-        openai_api_key="",
-        gemini_api_key="",
-        openai_model="openai-test",
-        embedding_model="embed-test",
-        video_model="video-test",
-    )
 
 
 @pytest.fixture
