@@ -144,6 +144,7 @@ def run_stages(
         run_warning_lists(store, get_settings().data_dir / "warning_lists")
         stage("fingerprint")
         fingerprints = pipeline.run_fingerprint(store)
+        pipeline.run_cloaking(store)
         stage("compare")
         evidence = pipeline.run_compare_all(store)
         stage("group")

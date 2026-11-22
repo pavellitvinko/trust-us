@@ -63,6 +63,9 @@ def cmd_capture(args) -> None:
         print("error: give a URL, or --replay with an archived HAR", file=sys.stderr)
         raise SystemExit(2)
     incident_dir = Path(args.out) if args.out else _capture_dir(args.url, replay)
+    if args.cloaking or args.crawler:  # --crawler only makes sense inside a differential
+        _capture_cloaking(args, incident_dir)
+        return
     result = capture_url(
         args.url,
         incident_dir / "bundle",
@@ -92,6 +95,42 @@ def cmd_capture(args) -> None:
         for v in views:
             print(f"view {v.view_id}  {v.label}")
         cmd_run(args)
+    if not result.ok:
+        raise SystemExit(3)
+
+
+def _capture_cloaking(args, incident_dir: Path) -> None:
+    """One URL under several visitor profiles; with --ingest, the difference score per pair."""
+    from .capture import capture_differential, differential_profiles
+    from .ingest import ingest_folder
+
+    if not args.url or args.replay:
+        print("error: --cloaking needs a live URL (a replay serves one recording)", file=sys.stderr)
+        raise SystemExit(2)
+    result = capture_differential(
+        args.url,
+        incident_dir,
+        profiles=differential_profiles(crawler=args.crawler),
+        proxy=args.proxy,
+        timeout=args.timeout,
+    )
+    for name, r in result.captures.items():
+        man = r.manifest
+        landed = f" -> {man.final_url}" if man.final_url and man.final_url != man.page_url else ""
+        print(f"{name:9} {man.status.value:18} {man.page_url}{landed}")
+        if man.error:
+            print(f"          error: {man.error}")
+    print(f"  incident: {incident_dir}")
+    if args.ingest:
+        store = _store()
+        _, views = ingest_folder(incident_dir, store, args.incident)
+        for v in views:
+            print(f"view {v.view_id}  {v.label}")
+        cmd_run(args)
+        for v in views:
+            for o in store.observations(v.view_id):
+                if o.namespace.startswith("cloak."):
+                    print(f"  {o.signal_id} {o.namespace} [{o.state.value}] {o.raw}")
     if not result.ok:
         raise SystemExit(3)
 
@@ -127,6 +166,8 @@ def cmd_run(args) -> None:
         _print_enrich(pipeline.run_enrich(store))
     _cached_warning_lists(store)
     print(f"fingerprints: {pipeline.run_fingerprint(store)}")
+    if cloaking := pipeline.run_cloaking(store):
+        print(f"cloaking differential rows: {cloaking}")
     _compare_and_group(store, args)
 
 
@@ -472,6 +513,14 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--incident", help="incident id for --ingest (default: the folder name)")
     p.add_argument("--candidates", action="store_true", help="compare candidate pairs only")
     p.add_argument("--no-enrich", action="store_true", help="skip DNS and RDAP lookups")
+    p.add_argument(
+        "--cloaking",
+        action="store_true",
+        help="cloaking differential: capture as ad click (mobile, social referrer, query) and bare",
+    )
+    p.add_argument(
+        "--crawler", action="store_true", help="cloaking differential with a Googlebot profile too"
+    )
     p.set_defaults(func=cmd_capture)
 
     p = sub.add_parser("ingest", help="ingest an incident folder, or a folder of incident folders")

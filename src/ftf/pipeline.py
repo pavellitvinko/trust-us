@@ -90,6 +90,17 @@ def compare_views(store: Store, view_a: str, view_b: str) -> list[Evidence]:
     return out
 
 
+def run_cloaking(store: Store) -> int:
+    """Cloaking differential over the profile variants of each tested URL (HAC-15).
+
+    Runs after fingerprinting: it compares with the `text.shingle` and `kit.dom` signatures.
+    A no-op when no URL was captured under several profiles.
+    """
+    from .grouping.cloaking import run_cloaking as _run
+
+    return _run(store)
+
+
 def run_compare_all(store: Store) -> int:
     """Brute-force all pairs. Fine at sample size; the Method track replaces it with candidate generation."""
     load_plugins()

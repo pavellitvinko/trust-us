@@ -144,6 +144,29 @@ a hop says how the page was reached, history only that another page was visited 
 | `tls.validity_days` | days between `valid_from` and `valid_to`; both dates in `raw` | risk | C14 |
 | `capture.status` | `dns_failed`, `connection_failed`, `tls_failed`, `timeout`, `http_error`, `not_in_archive`, `failed`; browser error in `raw`. Absent when the capture succeeded | risk | C13 |
 
+## Cloaking differential (J1, J2, J5)
+
+Written by `cloak.differential` (`grouping/cloaking.py`) after fingerprinting, for a URL
+captured under several visitor profiles (`ftf capture URL --cloaking [--crawler]`): `ad_click`
+(mobile, `Referer: https://l.facebook.com/`, original query, a synthetic `fbclid` when the URL
+has no click id), `bare` (desktop, no referrer, no query), `crawler` (Googlebot, no query).
+Each profile is its own view. Variants are paired by run (`View.meta.capture_run`, from the
+manifest's `differential_run`), so a second run or a bundle left behind in the same folder
+is never compared with this one; bundles without a run id pair by URL and folder. Every
+profile sends client hints and `navigator.platform` matching its user agent, and
+`navigator.webdriver` is false. The ad-click variant is the reference. A variant counts as
+loaded when it saved a page, a timeout included. Difference = 1 − mean of text similarity
+(`text.shingle` MinHash, or exact shingle/word overlap for short text) and structure
+similarity (`dom.tag_paths` Jaccard, `kit.dom` MinHash); at least 0.9 when the variants land
+on different registrable domains. Threshold 0.5. Locators cite `differential.json` and
+`profile:<other>`.
+
+| Namespace | Value shape | Purpose | Catalogue |
+| --- | --- | --- | --- |
+| `cloak.differential` | on the ad-click view, one row per other profile: `{reference, against, against_view, difference, text_similarity, structure_similarity, final_hosts, threshold}`. `present` at or above the threshold, `absent` below, `not_observable` when a variant loaded no page | risk | J1 |
+| `cloak.gating` | on the ad-click view, when ad click and bare differ: `{against, difference, factors}`, the factors only the ad-click capture carried, read from the manifests (referrer, query string, synthetic click id, mobile device). Not written when bare got an HTTP error: the `cloak.differential` row then carries a `caveat` instead | risk | J5 |
+| `cloak.white_page` | on a variant that differs from the ad click: `{traits, hash_like_class_share, trackers_here, trackers_on_reference}`; traits are *no trackers while the ad click loads them* and *obfuscated hash-like class names* (≥ 30 % and at least 20 points above the ad click; `kit.dom` framework classes, Emotion/MUI `css-…`, react-native-web `r-…`, StyleX `x…` and dimensions such as `300x250` are not counted) | risk | J2 |
+
 ## Funnel evidence inside an incident (ad or screenshot view → page view)
 
 | Namespace | Value shape | Catalogue | Used for |
