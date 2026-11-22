@@ -332,7 +332,7 @@ def cmd_demo(args) -> None:
     def show(step) -> None:
         print(f"[{step.status.upper():7}] {step.name}: {step.detail}", flush=True)
 
-    print("mode: shipped settings, local text vectors, no model calls, no DNS or RDAP")
+    print("mode: shipped settings, local text vectors, no model calls, no DNS, RDAP or crt.sh")
     steps = run_demo(
         Path(args.sample), live_url=args.live_url, capture=not args.no_capture, on_step=show
     )
@@ -626,7 +626,7 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--ingest", action="store_true", help="ingest the bundle and run everything")
     p.add_argument("--incident", help="incident id for --ingest (default: the folder name)")
     p.add_argument("--candidates", action="store_true", help="compare candidate pairs only")
-    p.add_argument("--no-enrich", action="store_true", help="skip DNS and RDAP lookups")
+    p.add_argument("--no-enrich", action="store_true", help="skip DNS, RDAP and crt.sh lookups")
     p.add_argument(
         "--cloaking",
         action="store_true",
@@ -641,7 +641,7 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("path")
     p.add_argument("--no-run", action="store_true", help="only ingest; do not extract and compare")
     p.add_argument("--candidates", action="store_true", help="compare candidate pairs only")
-    p.add_argument("--no-enrich", action="store_true", help="skip DNS and RDAP lookups")
+    p.add_argument("--no-enrich", action="store_true", help="skip DNS, RDAP and crt.sh lookups")
     p.add_argument(
         "--replace-known", action="store_true", help="let this folder replace shipped incidents"
     )
@@ -649,14 +649,14 @@ def main(argv: list[str] | None = None) -> None:
 
     p = sub.add_parser("run", help="extract, enrich, fingerprint and compare everything stored")
     p.add_argument("--candidates", action="store_true", help="compare candidate pairs only")
-    p.add_argument("--no-enrich", action="store_true", help="skip DNS and RDAP lookups")
+    p.add_argument("--no-enrich", action="store_true", help="skip DNS, RDAP and crt.sh lookups")
     p.set_defaults(func=cmd_run)
 
     p = sub.add_parser("perceive", help="read images and pages, and observe techniques")
     p.add_argument("--view", action="append", help="only this view id; may be repeated")
     p.set_defaults(func=cmd_perceive)
 
-    p = sub.add_parser("enrich", help="DNS/RDAP enrichment plus CERT/KNF refresh and local checks")
+    p = sub.add_parser("enrich", help="DNS/RDAP/crt.sh enrichment plus CERT/KNF refresh and local checks")
     p.add_argument("--view", action="append", help="only this view id; repeatable")
     p.add_argument("--offline", action="store_true", help="use cached/bundled snapshots only")
     p.add_argument(

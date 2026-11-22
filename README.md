@@ -33,7 +33,7 @@ Needs [uv](https://docs.astral.sh/uv/).
 uv sync
 uv run playwright install chromium   # once, for ftf capture
 uv run ftf ingest testing_sample      # a folder of incident folders, or one incident folder
-uv run ftf enrich                     # DNS and RDAP lookups again (cached; also part of run)
+uv run ftf enrich                     # DNS, RDAP and crt.sh lookups again (cached; also part of run)
 uv run ftf views
 uv run ftf pairs
 uv run ftf compare <view_id> <view_id>
@@ -177,7 +177,7 @@ docker compose exec app ftf demo /sample --live-url https://example.com
 `ftf demo` runs the jury sequence on a temporary store and checks each step: ingest, 1↔2, the
 2↔3 bridge, 48↔61, the 61 funnel and decoy, video-only case 5, capture replay and live capture,
 and assignment of new material. It uses the shipped settings and local text vectors, with no
-model calls and no DNS or RDAP. It does not change your stored data and exits non-zero on failure.
+model calls and no DNS, RDAP or crt.sh. It does not change your stored data and exits non-zero on failure.
 
 ## Run in Docker
 
@@ -203,9 +203,9 @@ These paths make no warning-list network request. To download CERT Polska and KN
 at the start of an enrichment session, then check all stored views locally:
 
 ```bash
-uv run ftf enrich                         # DNS/RDAP, then CERT/KNF refresh and local checks
+uv run ftf enrich                         # DNS/RDAP/crt.sh, then CERT/KNF refresh and local checks
 uv run ftf enrich --view <view_id>         # restrict the views, not the source coverage
-uv run ftf enrich --offline               # skip DNS/RDAP; warning snapshots only
+uv run ftf enrich --offline               # skip DNS/RDAP/crt.sh; warning snapshots only
 ```
 
 Sources: [CERT Polska active domains](https://cert.pl/en/warning-list/) and
@@ -305,10 +305,10 @@ Comparators (`@comparators.register`) turn two fingerprints into an `Evidence`.
 
 ## Outside sources
 
-`ftf run` (and `ingest`) looks up each page's domain in DNS and RDAP after extraction; pass
+`ftf run` (and `ingest`) looks up each page's domain in DNS, RDAP and crt.sh after extraction; pass
 `--no-enrich` to skip. Answers are cached with their timestamp in `$FTF_DATA_DIR/enrich_cache/`
 (7 days; failures 1 hour), and a failed lookup is recorded as `not_observable`, never as a
-negative; network failures are not cached. `FTF_ENRICH=cache` uses the cache only,
+negative; network failures are not cached (in one process they are retried after 10 minutes). `FTF_ENRICH=cache` uses the cache only,
 `FTF_ENRICH=off` (also `0`, `false`, `no`, or any unknown value) makes no lookups.
 
 - DNS: the system resolver (dnspython), so domains are not sent to a third-party DNS service.
