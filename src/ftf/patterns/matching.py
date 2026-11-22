@@ -25,7 +25,7 @@ SIGNAL = "H"
 NAMESPACE = "pattern.score"
 NEAREST_PATTERNS = 12
 MAX_TEXT_CHARS = 40_000
-TEXT_NAMESPACES = ("page.read_text", "page.clean_text", "image.text")
+TEXT_NAMESPACES = ("page.read_text", "page.clean_text", "video.transcript", "image.text")
 STABLE_FAILURES = frozenset({"refusal", "no_text"})
 
 MATCHING_PROMPT = """You judge whether one suspicious page or image shows library techniques.
@@ -57,7 +57,7 @@ def view_text(observations: list[Observation]) -> str | None:
     """The redacted text the model reads: a page's text, or the text read from an image."""
     from ..models import redact_text
 
-    for namespace in TEXT_NAMESPACES[:2]:
+    for namespace in TEXT_NAMESPACES[:3]:
         for o in observations:
             if (
                 o.namespace == namespace

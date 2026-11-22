@@ -38,6 +38,8 @@ from .image import (
 from .image import NAME as IMAGE_READER
 from .page import NAME as PAGE_READER
 
+VIDEO_READER = "perception.video"
+
 log = logging.getLogger(__name__)
 
 NAME = "perception.technique"
@@ -667,6 +669,15 @@ def build_input(view: View, ctx: Context) -> _Input | None:
             images = [image] if image is not None else []
     else:
         blocks, metadata_failed = _video_metadata(view, ctx)
+        # What the video reader heard and saw, so cards can quote it as evidence.
+        blocks += [
+            (view.primary, o.value)
+            for o in observations
+            if o.extractor == VIDEO_READER
+            and o.namespace in ("video.transcript", "video.on_screen_text")
+            and o.state is State.PRESENT
+            and isinstance(o.value, str)
+        ]
         text_file = view.attachments[0] if view.attachments else view.primary
         images = _video_images(view, ctx)
         failed = failed or metadata_failed or (bool(view.primary) and not images)
