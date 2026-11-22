@@ -59,6 +59,51 @@ def test_cheap_relation_for_non_candidates_uses_coverage_only():
     s.close()
 
 
+def test_skipped_pairs_carry_the_fusion_reasons_and_a_marker():
+    """HAC-36: a pair that was not compared reads like the all-pairs result, plus one line."""
+    from ftf.fusion import fuse_pair, prepare
+    from ftf.grouping.candidates import NOT_COMPARED, candidate_pairs
+
+    s = store_from_fixtures()
+    pipeline.run_fingerprint(s)
+    prepare(s)
+    proposed = candidate_pairs(s)
+    views = sorted(v.view_id for v in s.views())
+    skipped = [
+        (a, b) for i, a in enumerate(views) for b in views[i + 1 :] if (a, b) not in proposed
+    ]
+    assert skipped
+    for a, b in skipped:
+        cheap = cheap_relation(s, a, b)
+        full = fuse_pair(s, a, b, persist=False)
+        assert (cheap.type, cheap.confidence, cheap.coverage) == (
+            full.type,
+            full.confidence,
+            full.coverage,
+        ), (a, b)
+        assert cheap.reasons == [*full.reasons, NOT_COMPARED], (a, b)
+        assert "groups comparable" in cheap.reasons[0]
+    weights.reset()
+    s.close()
+
+
+def test_cheap_relation_reads_comparability_from_the_comparator():
+    """Review of HAC-36: the cheap path and fusion must agree on which layers are comparable,
+    so the cheap path asks the comparator (`Evidence.comparable`), the same input fusion
+    reads, rather than a separate `compatible` check that can drift from `compare`."""
+    from ftf.pipeline import compare_views
+
+    s = store_from_fixtures()
+    pipeline.run_fingerprint(s)
+    layer_group = {layer.name: layer.group for layer in layers.all()}
+    views = sorted(v.view_id for v in s.views())
+    for a, b in list(combinations(views, 2))[:40]:
+        seen = {layer_group[e.layer_id] for e in compare_views(s, a, b) if e.comparable}
+        total = {layer.group for layer in layers.all()}
+        assert cheap_relation(s, a, b).coverage == pytest.approx(len(seen) / len(total), abs=1e-4)
+    s.close()
+
+
 def test_disabled_layers_restores_the_registry():
     before = layers.names()
     with disabled_layers(["ids.campaign", "kit.dom"]):

@@ -490,7 +490,7 @@ def cmd_validate(args) -> None:
     confidence audit, degradation, ablation and leave-one-out, as one Markdown document."""
     from .eval import sample
 
-    parts = [p for p in ("degrade", "ablate", "loio") if p not in (args.skip or [])]
+    parts = [p for p in ("candidates", "degrade", "ablate", "loio") if p not in (args.skip or [])]
     workdir = get_settings().data_dir / "tmp"
     text = sample.validation_report(Path(args.path), workdir=workdir, parts=parts)
     if args.out:
@@ -653,7 +653,10 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("path", help="a folder of incident folders")
     p.add_argument("--out", help="write the Markdown report here instead of printing it")
     p.add_argument(
-        "--skip", action="append", choices=["degrade", "ablate", "loio"], help="leave a part out"
+        "--skip",
+        action="append",
+        choices=["candidates", "degrade", "ablate", "loio"],
+        help="leave a part out",
     )
     p.set_defaults(func=cmd_validate)
 
