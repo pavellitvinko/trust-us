@@ -377,6 +377,8 @@ def cmd_narrate(args) -> None:
 
     store = _store()
     try:
+        if args.campaign and args.views:
+            raise ValueError("give two view ids or --campaign, not both")
         if args.campaign:
             result = campaign_narrative(store, args.campaign)
         elif len(args.views) == 2:

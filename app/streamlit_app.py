@@ -111,11 +111,6 @@ def add_material() -> None:
     )
 
 
-def _escape_markdown(text: str) -> str:
-    """Model text repeats hostile page content, so it must not render as links or images."""
-    return "".join(f"\\{c}" if c in "\\`*_{}[]()<>#+!|$~" else c for c in text)
-
-
 def show_status_table(title: str, section: dict) -> None:
     st.subheader(title)
     if section["status"] != "available":
@@ -393,6 +388,7 @@ with tab_match:
                 st.session_state["comparison_report"] = build_pair_report(
                     store, view.view_id, other.view_id
                 )
+            st.session_state.pop("narrative", None)
         report = st.session_state.get("comparison_report")
         if (
             report
@@ -423,7 +419,8 @@ with tab_match:
                     }
             written = st.session_state.get("narrative")
             if written and written["pair"] == pair_key:
-                st.markdown(_escape_markdown(render_narrative(written["result"])))
+                # Plain text: model output can repeat hostile links from the page.
+                st.text(render_narrative(written["result"]))
                 with st.expander("Facts given to the model"):
                     st.json(written["result"]["facts"])
 

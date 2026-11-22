@@ -60,9 +60,226 @@ class Narrative(_Schema):
     paragraphs: list[Paragraph]
 
 
-_NUMBER = re.compile(r"\d+(?:[.,]\d+)*")
+_NUMBER = re.compile(r"(?<![\w.-])\d+(?:[.,]\d+)*(?![\w-])")
 _IDENTIFIER = re.compile(r"[\w-]*(?:\d[\w-]*|\.[a-zA-Z]{2,})[\w.-]*")
 _WORD = re.compile(r"[^\W\d_]+(?:[-'’][^\W\d_]+)*")
+_COUNT_PAIR = re.compile(r"(\d+) of (\d+)")
+# Words a sentence may use without a fact. Anything else must appear in the facts it cites,
+# so an invented name, place, motive or actor cannot pass in any position or letter case.
+_PROSE = frozenset(
+    [
+        "a",
+        "about",
+        "across",
+        "additional",
+        "agree",
+        "agrees",
+        "agreement",
+        "all",
+        "also",
+        "an",
+        "and",
+        "any",
+        "are",
+        "as",
+        "at",
+        "available",
+        "based",
+        "be",
+        "because",
+        "been",
+        "both",
+        "but",
+        "by",
+        "can",
+        "cannot",
+        "cites",
+        "close",
+        "closely",
+        "common",
+        "compare",
+        "compared",
+        "comparison",
+        "comparable",
+        "confidence",
+        "confirm",
+        "considered",
+        "contain",
+        "contains",
+        "contradict",
+        "contradicted",
+        "contradicting",
+        "contradiction",
+        "contradictions",
+        "could",
+        "coverage",
+        "decision",
+        "decisions",
+        "demoted",
+        "described",
+        "despite",
+        "did",
+        "direct",
+        "directly",
+        "do",
+        "does",
+        "each",
+        "either",
+        "evidence",
+        "exact",
+        "exactly",
+        "except",
+        "features",
+        "few",
+        "for",
+        "from",
+        "further",
+        "group",
+        "groups",
+        "has",
+        "have",
+        "however",
+        "identical",
+        "identifier",
+        "identifiers",
+        "identity",
+        "if",
+        "in",
+        "include",
+        "included",
+        "includes",
+        "including",
+        "indicate",
+        "indicates",
+        "indirect",
+        "is",
+        "it",
+        "its",
+        "label",
+        "labels",
+        "layer",
+        "layers",
+        "limit",
+        "limited",
+        "limits",
+        "link",
+        "linked",
+        "linking",
+        "links",
+        "many",
+        "match",
+        "matched",
+        "matches",
+        "matching",
+        "may",
+        "measure",
+        "measures",
+        "member",
+        "members",
+        "membership",
+        "missing",
+        "more",
+        "most",
+        "multiple",
+        "no",
+        "none",
+        "nor",
+        "not",
+        "note",
+        "noted",
+        "of",
+        "on",
+        "one",
+        "only",
+        "or",
+        "other",
+        "others",
+        "overlap",
+        "overall",
+        "page",
+        "pages",
+        "pair",
+        "part",
+        "partial",
+        "proof",
+        "proven",
+        "reason",
+        "reasons",
+        "record",
+        "recorded",
+        "records",
+        "relation",
+        "remain",
+        "remains",
+        "report",
+        "reported",
+        "rule",
+        "rule-based",
+        "same",
+        "scored",
+        "score",
+        "scores",
+        "second",
+        "separate",
+        "several",
+        "share",
+        "shared",
+        "shares",
+        "sharing",
+        "show",
+        "showed",
+        "shows",
+        "similar",
+        "since",
+        "so",
+        "some",
+        "state",
+        "stated",
+        "states",
+        "still",
+        "strong",
+        "support",
+        "supported",
+        "supports",
+        "than",
+        "that",
+        "the",
+        "their",
+        "them",
+        "then",
+        "there",
+        "these",
+        "they",
+        "this",
+        "those",
+        "through",
+        "to",
+        "too",
+        "two",
+        "under",
+        "unknown",
+        "unavailable",
+        "values",
+        "value",
+        "verdict",
+        "very",
+        "view",
+        "views",
+        "was",
+        "weak",
+        "were",
+        "what",
+        "when",
+        "where",
+        "whether",
+        "which",
+        "while",
+        "with",
+        "within",
+        "without",
+        "yet",
+    ]
+)
 
 
 def _short(value: Any) -> str:
@@ -71,8 +288,21 @@ def _short(value: Any) -> str:
     return text if len(text) <= MAX_FACT_CHARS else text[: MAX_FACT_CHARS - 1] + "…"
 
 
+def _numbered(rows: list[str], optional: list[str]) -> dict[str, str]:
+    """Required rows always fit. Optional rows fill the rest, and a cut is stated as a fact."""
+    room = max(0, MAX_FACTS - len(rows) - 1)
+    chosen = [*rows, *optional[:room]]
+    if len(optional) > room:
+        chosen.append(f"{len(optional) - room} more evidence rows are not listed here")
+    return {f"F{i}": _short(text) for i, text in enumerate(chosen, 1)}
+
+
+def _side_values(difference: dict[str, Any], side: str) -> str:
+    return ", ".join(str(item.get("value")) for item in difference.get(side, [])[:3])
+
+
 def pair_facts(report: dict[str, Any]) -> dict[str, str]:
-    """Numbered facts taken from one pair report."""
+    """Numbered facts taken from one pair report, with their qualifiers."""
     a, b = report["objects"]["a"], report["objects"]["b"]
     coverage = report["coverage"]
     rows = [
@@ -83,23 +313,36 @@ def pair_facts(report: dict[str, Any]) -> dict[str, str]:
         f"coverage: {coverage['comparable_groups']} of {coverage['total_groups']} groups",
         *[f"decision reason: {reason}" for reason in report["reasons"]],
     ]
-    for row in report["layers"]:
-        layer = row["layer_id"]
-        if row["status"] != "compared":
-            rows.append(f"layer {layer}: not comparable")
-            continue
-        rows.append(f"layer {layer}: score {row['score']:.3f}")
-        rows += [
-            f"layer {layer} shares {item.get('ns')}={item.get('value')}"
-            for item in row["shared"][:MAX_SHARED_PER_LAYER]
-        ]
+    stored = report.get("stored_relation") or {}
+    if stored.get("agrees") is False:
+        rows.append(f"the stored relation disagrees with this result: {_short(stored)}")
     membership = report.get("membership") or {}
     if membership:
         rows.append(
-            f"same campaign: {membership['same_campaign']}; same family: {membership['same_family']}"
+            f"group context, not direct evidence: same campaign: {membership['same_campaign']}; "
+            f"same family: {membership['same_family']}"
         )
         rows += [f"funnel edge: {e['source']} to {e['target']}" for e in membership["funnel_edges"]]
-    return {f"F{i}": _short(text) for i, text in enumerate(rows[:MAX_FACTS], 1)}
+    evidence: list[str] = []
+    missing: list[str] = []
+    for row in report["layers"]:
+        layer = row["layer_id"]
+        for difference in row["differing"]:
+            if difference.get("exclusive_conflict"):
+                rows.append(
+                    f"layer {layer} exclusive contradiction in {difference['ns']}: "
+                    f"A {_side_values(difference, 'a')}; B {_side_values(difference, 'b')}"
+                )
+        if row["status"] != "compared":
+            why = "; ".join(f"{m['side']}: {m['reason']}" for m in row["missing"])
+            missing.append(f"layer {layer}: not comparable" + (f" ({why})" if why else ""))
+            continue
+        evidence.append(f"layer {layer}: score {row['score']:.3f}")
+        for item in row["shared"][:MAX_SHARED_PER_LAYER]:
+            note = " (demoted to kit)" if item.get("demoted_to_kit") else ""
+            evidence.append(f"layer {layer} shares {item.get('ns')}={item.get('value')}{note}")
+    limits = [f"limitation: {item}" for item in report.get("limitations", [])]
+    return _numbered(rows, [*evidence, *missing, *limits])
 
 
 def campaign_facts(store: Store, campaign_id: str) -> dict[str, str]:
@@ -111,10 +354,10 @@ def campaign_facts(store: Store, campaign_id: str) -> dict[str, str]:
     rows = [
         f"campaign {campaign_id} has {len(members)} views",
         f"family: {groups.family_of.get(campaign_id)}",
-        *[
-            f"view {v} ({labels[v].label}), incident {labels[v].incident_id}, {labels[v].kind.value}"
-            for v in members
-        ],
+    ]
+    listed = [
+        f"view {v} ({labels[v].label}), incident {labels[v].incident_id}, {labels[v].kind.value}"
+        for v in members
     ]
     inside = [
         r
@@ -127,22 +370,30 @@ def campaign_facts(store: Store, campaign_id: str) -> dict[str, str]:
     for r in inside[:MAX_CAMPAIGN_PAIRS]:
         rows.append(f"{r.view_a} and {r.view_b}: {r.type.value}, confidence {r.confidence}")
         rows += [f"{r.view_a} and {r.view_b} reason: {reason}" for reason in r.reasons[:3]]
-    return {f"F{i}": _short(text) for i, text in enumerate(rows[:MAX_FACTS], 1)}
+    return _numbered(rows, listed)
+
+
+def _tokens(text: str) -> set[str]:
+    numbers = {m.casefold() for m in _NUMBER.findall(text)}
+    identifiers = {m.rstrip(".").casefold() for m in _IDENTIFIER.findall(text)}
+    words = {m.group(0).casefold() for m in _WORD.finditer(text)}
+    return numbers | identifiers | words
 
 
 def unsupported_terms(text: str, cited: str) -> list[str]:
-    """Numbers, identifiers and names in a sentence that its cited facts do not contain."""
-    haystack = cited.casefold()
-    missing = [m for m in _NUMBER.findall(text) if m.casefold() not in haystack]
+    """Terms in a sentence that its cited facts do not contain, compared as whole tokens."""
+    known = _tokens(cited)
+    missing = [m for m in _NUMBER.findall(text) if m.casefold() not in known]
     missing += [
-        m.rstrip(".") for m in _IDENTIFIER.findall(text) if m.rstrip(".").casefold() not in haystack
+        m.rstrip(".") for m in _IDENTIFIER.findall(text) if m.rstrip(".").casefold() not in known
     ]
-    words = list(_WORD.finditer(text))
-    for index, match in enumerate(words):
-        word = match.group(0)
-        starts = index == 0 or text[: match.start()].rstrip().endswith((".", ":", "!", "?"))
-        if word[0].isupper() and not starts and word.casefold() not in haystack:
-            missing.append(word)
+    missing += [
+        m.group(0)
+        for m in _WORD.finditer(text)
+        if m.group(0).casefold() not in known and m.group(0).casefold() not in _PROSE
+    ]
+    pairs = set(_COUNT_PAIR.findall(cited))
+    missing += [f"{a} of {b}" for a, b in _COUNT_PAIR.findall(text) if (a, b) not in pairs]
     return list(dict.fromkeys(missing))
 
 
@@ -165,8 +416,10 @@ def verify(narrative: Narrative, facts: dict[str, str]) -> tuple[list[dict[str, 
 
 
 def _write(facts: dict[str, str], settings: Settings | None, client: Any) -> dict[str, Any]:
-    from .models import read_structured
+    from .models import read_structured, redact_text
 
+    # Verified and shown as sent: the gateway redacts secrets before the model sees them.
+    facts = {key: redact_text(value) for key, value in facts.items()}
     result = read_structured(
         TASK,
         PROMPT_VERSION,
