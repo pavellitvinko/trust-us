@@ -5,7 +5,7 @@ import { Picture, plural } from "./bits";
 import { buildTree, filterTree, groupKeys, shortCase, type TreeNode } from "./mapTree";
 import { VideoThumbnail } from "./video";
 
-function ItemRow({ row, linkNote }: { row: Row; linkNote?: string }) {
+function ItemRow({ row, linkNote }: { row: Row; linkNote?: { text: string; detail: string } }) {
   return (
     <li className="tree-item">
       <Link to={`/item/${encodeURIComponent(row.id)}`}>
@@ -23,7 +23,7 @@ function ItemRow({ row, linkNote }: { row: Row; linkNote?: string }) {
             {row.duplicateOf && <span className="tree-copy"> · same page also in {shortCase(row.duplicateOf)}</span>}
             {row.links === 0 && row.possible > 0 && <span> · {plural(row.possible, "possible link")}</span>}
             {row.links === 0 && !row.comparable && <span> · too little to compare</span>}
-            {linkNote && <span className="tree-link"> · {linkNote}</span>}
+            {linkNote && <span className="tree-link" title={linkNote.detail}> · {linkNote.text}</span>}
           </span>
         </span>
       </Link>
@@ -60,14 +60,17 @@ function Branch({
           <span className="caret" aria-hidden="true">
             {open ? "▾" : "▸"}
           </span>
-          <span className="tree-title">{node.title}</span>
+          <span className="tree-title">
+            {node.title}
+            {node.name && <span className="tree-name"> {node.name}</span>}
+          </span>
           <span className="tree-count">
             {plural(node.count, "item")}
             {node.copies > 0 && ` + ${node.copies} ${node.copies === 1 ? "copy" : "copies"}`}
           </span>
         </button>
         {node.href && (
-          <Link className="tree-open" to={node.href} aria-label={`Open ${node.title}`}>
+          <Link className="tree-open" to={node.href} aria-label={`Open ${node.title} ${node.name}`.trim()}>
             Open
           </Link>
         )}
@@ -77,7 +80,6 @@ function Branch({
           <div className="tree-why small">
             {node.note}
             {node.reasons.length > 0 && <b> Linked by: {node.reasons.join(", ")}.</b>}
-            {node.name && <span className="muted"> {node.name}</span>}
           </div>
           <ul>
             {node.children.map((c) => (

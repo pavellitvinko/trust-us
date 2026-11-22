@@ -24,7 +24,7 @@ export interface TreeNode {
   count: number;
   copies: number;
   /** On a case: what each item is linked to outside its own group. */
-  linkNotes?: Record<string, string>;
+  linkNotes?: Record<string, { text: string; detail: string }>;
 }
 
 const compare = new Intl.Collator("pl", { numeric: true, sensitivity: "base" }).compare;
@@ -229,44 +229,54 @@ export function buildTree(rows: Row[], map: MapData): TreeNode[] {
     });
   }
 
-  attachLinkNotes(tree, rows, edges, map.journeys);
+  attachLinkNotes(tree, rows, edges, map.journeys, repeatOf);
   return tree;
 }
 
 /** Tell each item about firm links that its own group doesn't already show. */
-function attachLinkNotes(tree: TreeNode[], rows: Row[], edges: MapEdge[], journeys: MapData["journeys"]) {
+function attachLinkNotes(
+  tree: TreeNode[],
+  rows: Row[],
+  edges: MapEdge[],
+  journeys: MapData["journeys"],
+  repeatOf: Map<string, string>,
+) {
   const home = new Map<string, string>();
   const cases: TreeNode[] = [];
   const walk = (node: TreeNode, parent: string) => {
     if (node.kind !== "case") return node.children.forEach((c) => walk(c, node.key));
     cases.push(node);
-    for (const r of node.rows) home.set(r.id, parent === "one-to-one" ? `one:${r.id}` : parent);
+    // These two branches don't claim their items belong together, so each item speaks for itself.
+    const separate = parent === "one-to-one" || parent.endsWith("/loose");
+    for (const r of node.rows) home.set(r.id, separate ? `one:${repeatOf.get(r.id) ?? r.id}` : parent);
   };
   tree.forEach((n) => walk(n, n.key));
 
   const byId = new Map(rows.map((r) => [r.id, r]));
   const others = new Map<string, Map<string, Set<string>>>();
-  const add = (from: string, to: string, label: string) => {
+  const details = new Map<string, Set<string>>();
+  const add = (from: string, to: string, label: string, detail: string) => {
     if (!byId.has(from) || !byId.has(to) || home.get(from) === home.get(to)) return;
     const mine = others.get(from) ?? new Map<string, Set<string>>();
     mine.set(to, (mine.get(to) ?? new Set<string>()).add(label));
     others.set(from, mine);
+    details.set(from, (details.get(from) ?? new Set<string>()).add(detail));
   };
   for (const e of edges) {
     // Items of one template are already shown together under it.
     if (e.kind === "kit" && byId.get(e.a)?.kitId && byId.get(e.a)?.kitId === byId.get(e.b)?.kitId) continue;
-    add(e.a, e.b, linkLabel(e));
-    add(e.b, e.a, linkLabel(e));
+    add(e.a, e.b, linkLabel(e), e.reason);
+    add(e.b, e.a, linkLabel(e), e.reason);
   }
-  for (const [id, path] of Object.entries(journeys)) for (const to of path) add(id, to, "same visitor path");
+  for (const [id, path] of Object.entries(journeys)) for (const to of path) add(id, to, "same visitor path", "On the same visitor path");
 
-  const notes: Record<string, string> = {};
+  const notes: Record<string, { text: string; detail: string }> = {};
   for (const [id, targets] of others) {
     const parts = [...targets.entries()].map(([to, labels]) => {
       const target = byId.get(to)!;
       return `${target.title} in ${shortCase(target.case)} (${[...labels].sort(compare).join(", ")})`;
     });
-    notes[id] = `linked to ${parts.sort(compare).join("; ")}`;
+    notes[id] = { text: `linked to ${parts.sort(compare).join("; ")}`, detail: [...details.get(id)!].join("; ") };
   }
   for (const node of cases) node.linkNotes = notes;
 }
@@ -277,7 +287,7 @@ const plain = (text: string) =>
 
 const rowText = (r: Row) => plain([r.title, r.host, r.case, shortCase(r.case), r.type, r.campaign, r.kit].join(" "));
 
-/** Only the branches holding a matching item. Group names are part of each item's text. */
+/** Only the branches holding an item whose title, site, case or group name matches. */
 export function filterTree(nodes: TreeNode[], query: string, repeats: string[][]): TreeNode[] {
   const q = plain(query.trim());
   if (!q) return nodes;
