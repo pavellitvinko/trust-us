@@ -45,6 +45,92 @@ def test_library_lists_items_with_words_for_a_newcomer(client):
     assert set(meta["groups"]) >= {"case", "campaign", "kit", "duplicate"}
 
 
+def test_campaigns_screen_counts_what_is_left_over(client):
+    data = client.get("/api/campaigns").json()
+    assert data["campaigns"] == [] and data["kits"] == [] and data["repeats"] == ""
+    assert data["unlinked"] == "2 items aren't linked to anything yet."
+    assert "busy" in data and "generation" in data
+    assert client.get("/api/campaigns/nope").status_code == 404
+    assert client.get("/api/kits/nope").status_code == 404
+
+
+def test_a_campaign_row_and_page_say_what_it_is_and_why():
+    from ftf.library import UNCHECKED_PLAIN, Campaign, Case, Item, Library, Match, Risk
+    from ftf.web.views import campaign_detail, campaigns_payload
+
+    blank = list(UNCHECKED_PLAIN)  # nothing was looked at
+
+    pixel = Match(view_id="b", same_case=False, verdict="Same campaign", tiers=("identity",),
+                  confidence="high", observed_groups=1, total_groups=1,
+                  clue="Same pixel 1071875908635809", clue_ns="fb_pixel", clue_value="1071875908635809")  # fmt: skip
+    items = [
+        Item(
+            "a",
+            "1",
+            ViewKind.PAGE,
+            "Metabo RX",
+            "a.top",
+            [],
+            Risk("none", unchecked=blank),
+            matches=[pixel],
+        ),
+        Item("b", "2", ViewKind.PAGE, "Metabo RX", "b.top", [], Risk("none", unchecked=blank)),
+        Item("c", "2", ViewKind.IMAGE, "shot.png", None, [], Risk("none")),
+    ]
+    campaign = Campaign("c1", "Campaign 1071875908635809", ["a", "b"], ["1", "2"],
+                        "2026-11-20T10:00:00+00:00", [], title="Metabo RX")  # fmt: skip
+    lib = Library(cases=[Case("1", "Case 1", "", items[:1]), Case("2", "Case 2", "", items[1:])],
+                  journeys={}, links={}, campaigns={"c1": campaign})  # fmt: skip
+    data = campaigns_payload(lib)
+    row = data["campaigns"][0]
+    assert row["title"] == "Metabo RX" and row["kit"] == ""
+    assert row["sub"] == "2 pages · a.top, b.top" and row["cases"] == "1, 2"
+    assert row["linkedBy"] == "same Facebook tracking pixel" and row["strength"] == "Strong"
+    assert row["signs"]["text"] == "not checked"  # nothing was looked at
+    assert data["count"] == "1 campaign in 3 items"
+    assert data["unlinked"] == "1 item isn't linked to anything yet."
+
+    page = campaign_detail(lib, campaign)
+    assert {f["label"]: f["value"] for f in page["facts"]} == {
+        "Made of": "2 pages",
+        "Websites": "a.top, b.top",
+        "Found in": "Cases 1, 2",
+        "First seen": "20 Nov 2026",
+    }
+    assert page["title"] == "Metabo RX campaign" and page["short"] == "Metabo RX"
+    assert page["summary"] == "2 pages on 2 websites, linked by same Facebook tracking pixel"
+    assert page["why"]["text"] == "Same Facebook tracking pixel 1071875908635809"
+    assert page["why"]["note"].startswith("Only whoever runs the pages")
+    assert page["empty"] == "Not checked." and page["path"] is None and page["kit"] is None
+    assert [(p["a"]["id"], p["b"]["id"], p["kind"]) for p in page["pairs"]] == [
+        ("a", "b", "campaign")
+    ]
+
+
+def test_warning_signs_say_how_many_pages_show_them():
+    from ftf.library import Campaign, Case, Finding, Item, Library, Risk
+    from ftf.web.views import campaign_detail
+
+    def risk(*signs):
+        return Risk(
+            "warning",
+            findings=[Finding(kind="Domain", summary=s, source="page.html") for s in signs],
+        )
+
+    items = [
+        Item("a", "1", ViewKind.PAGE, "A", "x.top", [], risk(".top address", "countdown")),
+        Item("b", "1", ViewKind.PAGE, "B", "x.top", [], risk(".top address")),
+    ]
+    campaign = Campaign("c1", "Campaign x", ["a", "b"], ["1"], "", [], title="A")
+    lib = Library(cases=[Case("1", "Case 1", "", items)], journeys={}, links={},
+                  campaigns={"c1": campaign})  # fmt: skip
+    signs = campaign_detail(lib, campaign)["signs"]
+    assert [(s["text"], s["where"]) for s in signs] == [
+        (".top address", "on 2 of 2 pages"),
+        ("countdown", "on 1 of 2 pages"),
+    ]
+
+
 def test_item_page_and_pictures(client):
     item = client.get("/api/items/7:page").json()
     assert item["title"] == "page" and [b["id"] for b in item["sameCase"]] == ["7:shot"]

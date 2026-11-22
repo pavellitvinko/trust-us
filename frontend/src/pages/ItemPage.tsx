@@ -1,118 +1,27 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
-import { api, compareUrl, pictureUrl, type ItemData, type MatchInfo } from "../api";
+import { Link, useParams } from "react-router-dom";
+import { api, pictureUrl, type ItemData, type MatchInfo } from "../api";
 import { Chip, Help, Picture, plural, useMeta } from "../components/bits";
-
-const itemUrl = (id: string) => `/item/${encodeURIComponent(id)}`;
-
-function Comparison({ a, b }: { a: string; b: string }) {
-  const [text, setText] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    api
-      .compare(a, b)
-      .then((r) => setText(r.markdown))
-      .catch((e) => setError(e.message));
-  }, [a, b]);
-  if (error) return <p className="error">{error}</p>;
-  if (text === null) return <p className="muted">Building the comparison…</p>;
-  return (
-    <div style={{ textAlign: "left", marginTop: 8 }}>
-      <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
-        <a className="btn" href={compareUrl(a, b, "md")}>
-          Download Markdown
-        </a>
-        <a className="btn" href={compareUrl(a, b, "json")}>
-          Download JSON
-        </a>
-      </div>
-      {/* Plain text: the report quotes values from scam pages. */}
-      <pre className="report">{text}</pre>
-    </div>
-  );
-}
+import { itemUrl, LinkPair, PathView } from "../components/links";
+import { Band, Crumbs } from "../components/pagetop";
+import { campaignUrl, kitUrl } from "../hooks";
 
 function Pair({ item, match }: { item: ItemData; match: MatchInfo }) {
-  const [open, setOpen] = useState(false);
+  const detail = [match.strength && `${match.strength} link`, match.sameCase ? "same case" : `in ${match.case}`]
+    .filter(Boolean)
+    .join(" · ");
   return (
-    <>
-      <div className="pair">
-        <Picture id={item.id} has={item.picture} type={item.type} width={156} height={96} />
-        <div className="mid">
-          <Chip kind={match.kind}>{match.name}</Chip>
-          <Help topic={match.kind} />
-          <div className={`bar ${match.kind}`} />
-          {match.reason}
-          <div className="small">
-            {[match.strength && `${match.strength} link`, match.sameCase ? "same case" : `in ${match.case}`]
-              .filter(Boolean)
-              .join(" · ")}
-          </div>
-          <div className="actions">
-            <button className="btn ghost small" onClick={() => setOpen((o) => !o)}>
-              {open ? "Hide the full comparison" : "Compare in full"}
-            </button>
-          </div>
-        </div>
-        <Link className="other" to={itemUrl(match.id)}>
-          <Picture id={match.id} has={match.picture} type={match.type} width={156} height={96} />
-          <div className="t">{match.title}</div>
-        </Link>
-      </div>
-      {open && <Comparison a={item.id} b={match.id} />}
-    </>
+    <LinkPair a={item} b={match} kind={match.kind} name={match.name} reason={match.reason} detail={detail} linkA={false} />
   );
 }
 
 function Path({ item }: { item: ItemData }) {
-  const path = item.path;
-  if (!path) return <p className="small">No proven step to or from this item.</p>;
-  return (
-    <div className="path">
-      {path.ad && (
-        <>
-          <div className="adbox">
-            <b>Facebook ad</b>
-            <span>
-              ID {path.ad.slice(0, 6)}…{path.ad.slice(-4)}
-            </span>
-            <span className="muted">not added yet</span>
-          </div>
-          <div className="arrow">
-            <b>→</b>The page address carries this ad's ID
-          </div>
-        </>
-      )}
-      {path.steps.map((s, n) => (
-        <div key={s.id} style={{ display: "contents" }}>
-          <Link className={`step ${s.id === item.id ? "me" : ""}`} to={itemUrl(s.id)}>
-            <Picture id={s.id} has={s.picture} type={s.type} width={176} height={108} />
-            <div className="t">
-              {n + 1}. {s.title}
-            </div>
-            <div className="small">
-              {n === 0 ? "first page" : "next page"}
-              {s.id === item.id && " · this item"}
-            </div>
-          </Link>
-          {n < path.steps.length - 1 && (
-            <div className="arrow">
-              <b>→</b>
-              {path.reasons[n]}
-            </div>
-          )}
-        </div>
-      ))}
-      <div className="arrow">
-        <b style={{ color: "#c3c2b7" }}>⇢</b>next page not captured
-      </div>
-    </div>
-  );
+  if (!item.path) return <p className="small">No proven step to or from this item.</p>;
+  return <PathView path={item.path} current={item.id} />;
 }
 
 export default function ItemPage() {
   const { id = "" } = useParams();
-  const navigate = useNavigate();
   const meta = useMeta();
   const [item, setItem] = useState<ItemData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -126,27 +35,23 @@ export default function ItemPage() {
     window.scrollTo(0, 0);
   }, [id]);
 
-  const back = (
-    <a
-      className="back"
-      href="/library"
-      onClick={(e) => {
-        e.preventDefault();
-        if (window.history.state?.idx > 0) navigate(-1);
-        else navigate("/library");
-      }}
-    >
-      ← Library
-    </a>
+  const back = (here?: { case: string; type: string }) => (
+    <Crumbs
+      parts={[
+        { label: "Library", to: "/library" },
+        ...(here ? [{ label: here.case, to: "/library" }, { label: here.type.toLowerCase() }] : []),
+      ]}
+    />
   );
-  if (error) return <>{back}<p className="error">{error}</p></>;
-  if (!item) return <>{back}<p className="muted">Loading…</p></>;
+  if (error) return <>{back()}<p className="error">{error}</p></>;
+  if (!item) return <>{back()}<p className="muted">Loading…</p></>;
+  const campaign = item.groups.find((g) => g.kind === "campaign");
 
   const firm = item.matches.filter((m) => m.kind !== "possible");
   const possible = item.matches.filter((m) => m.kind === "possible");
   return (
     <>
-      {back}
+      {back(item)}
       <div className="dgrid">
         <div>
           {item.picture ? (
@@ -158,17 +63,29 @@ export default function ItemPage() {
           )}
         </div>
         <div>
+          <Band kind="item" text={`One ${item.type === "Image" ? "picture" : item.type.toLowerCase()}`} />
           <h1 style={{ fontSize: 20, lineHeight: 1.3 }}>{item.title}</h1>
-          <div className="small" style={{ margin: "6px 0 14px" }}>
+          <div className="small" style={{ margin: "6px 0 6px" }}>
             {item.type}
             {item.host && ` · ${item.host}`} · <Chip kind="case">{item.case}</Chip>
             <Help topic="case" /> · added {item.added}
           </div>
+          {campaign && (
+            <div className="partof">
+              Part of <Link to={campaignUrl(campaign.id)}>{campaign.title}</Link> →
+            </div>
+          )}
+          <div style={{ height: 8 }} />
           {item.groups.length > 0 && (
             <div className="box">
               {item.groups.map((g) => (
                 <div className="grp" key={g.name}>
-                  <Chip kind={g.kind}>{g.name}</Chip>
+                  <Link
+                    to={g.kind === "kit" ? kitUrl(g.id) : campaignUrl(g.id)}
+                    title={g.kind === "kit" ? "See this kit" : "See this campaign"}
+                  >
+                    <Chip kind={g.kind}>{g.name}</Chip>
+                  </Link>
                   <div>
                     {g.reason && <>{g.reason}. </>}
                     <span className="small">{meta?.groups[g.kind]}</span>
