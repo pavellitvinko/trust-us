@@ -1,22 +1,31 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, compareUrl, type Brief, type LinkKind, type PathData } from "../api";
+import { api, compareUrl, type Brief, type LinkKind, type PathData, type ComparisonData } from "../api";
 import { Chip, Help, Picture } from "./bits";
+import { evidenceValue, PivotButton, SourceButton } from "./evidence";
 
 export const itemUrl = (id: string) => `/item/${encodeURIComponent(id)}`;
 
 /** The full comparison report of two items, fetched on request. */
 export function Comparison({ a, b }: { a: string; b: string }) {
-  const [text, setText] = useState<string | null>(null);
+  const [data, setData] = useState<ComparisonData | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     api
       .compare(a, b)
-      .then((r) => setText(r.markdown))
+      .then(setData)
       .catch((e) => setError(e.message));
   }, [a, b]);
   if (error) return <p className="error">{error}</p>;
-  if (text === null) return <p className="muted">Building the comparison…</p>;
+  if (data === null) return <p className="muted">Building the comparison…</p>;
+  const seen = new Set<string>();
+  const shared = (data.sharedRefs ?? []).map((ref) => data.sources[ref]).filter((row) => {
+    if (!row?.pivot) return false;
+    const key = `${row.namespace}:${JSON.stringify(row.value)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
   return (
     <div style={{ textAlign: "left", marginTop: 8 }}>
       <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
@@ -27,8 +36,17 @@ export function Comparison({ a, b }: { a: string; b: string }) {
           Download JSON
         </a>
       </div>
-      {/* Plain text: the report quotes values from scam pages. */}
-      <pre className="report">{text}</pre>
+      {shared.length > 0 && <details className="more"><summary>Shared identifiers ({shared.length})</summary>
+        <table className="findings"><tbody>{shared.map((row) => <tr key={row.ref}>
+          <td>{row.namespace}</td><td className="evidence-value">{evidenceValue(row.value)}</td>
+          <td><SourceButton row={row} /><br /><PivotButton row={row} /></td>
+        </tr>)}</tbody></table>
+      </details>}
+      {/* Keep hostile report text escaped; only known source tokens become controls. */}
+      <pre className="report">{data.markdown.split(/(\[[ab]:\d+\])/g).map((part, n) => {
+        const row = data.sources?.[part.slice(1, -1)];
+        return row ? <SourceButton key={n} row={row}>{part}</SourceButton> : part;
+      })}</pre>
     </div>
   );
 }

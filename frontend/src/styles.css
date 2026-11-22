@@ -217,3 +217,29 @@ pre.report { white-space: pre-wrap; font-size: 12px; background: #fafaf7; border
 .partof { font-size: 13px; }
 .partof a { color: var(--camp); font-weight: 550; }
 .page-kit .box.why { border-left: 3px dashed var(--kit-line); }
+
+/* Stored evidence and media inspection. Source content is always escaped text. */
+.text-link { border: 0; padding: 0; background: none; color: var(--accent); text-decoration: underline;
+  cursor: pointer; font: inherit; text-align: left; overflow-wrap: anywhere; }
+.text-link:disabled { color: var(--text-2); cursor: default; text-decoration: none; }
+.text-link.small { font-size: 12px; }
+.inspector { width: min(1000px, calc(100vw - 32px)); max-height: calc(100vh - 40px); overflow: auto;
+  border: 1px solid var(--line); border-radius: 12px; padding: 20px; color: var(--text); background: #fff; }
+.inspector::backdrop { background: #0007; }
+.inspector-head { display: flex; gap: 12px; align-items: center; justify-content: space-between; }
+.inspector-head h2 { margin: 0; }
+.source-label { display: block; overflow-wrap: anywhere; font-size: 12px; }
+.observed-value, .transcript { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 260px;
+  overflow: auto; font-size: 13px; }
+.source-text mark { background: #fff1a6; }
+.source-image { display: block; max-width: 100%; max-height: 65vh; margin: 12px 0; object-fit: contain; }
+.lookup-results li { margin: 12px 0; }
+.evidence-scroll { overflow-x: auto; }
+.evidence-table { width: 100%; border-collapse: collapse; text-align: left; }
+.evidence-table th { padding: 6px 8px; font-size: 12px; }
+.evidence-value { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 420px; max-height: 120px; overflow: auto; }
+.video-player { display: block; width: 100%; max-height: 640px; background: #171715; border-radius: 10px; }
+.media-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+.video-frames { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 160px)); gap: 10px; margin-top: 12px; }
+.video-frame img { display: block; width: 100%; aspect-ratio: 16/10; object-fit: contain; background: var(--soft); }
+.video-frame .text-link { font-size: 12px; }

@@ -33,6 +33,8 @@ from ..registry import load_plugins
 from ..reporting import build_pair_report, render_pair_report
 from ..store import Store
 from . import views
+from .inspection import cleaner_for, comparison_sources
+from .inspection_routes import router as inspection_router
 
 MAX_UPLOAD_FILES = 50_000  # parts in one upload: a saved site is hundreds of files
 
@@ -97,6 +99,7 @@ def create_app() -> FastAPI:
     cards: dict[tuple[str, float], bytes] = {}
 
     app = FastAPI(title="Follow the Fake", docs_url="/api/docs", openapi_url="/api/openapi.json")
+    app.include_router(inspection_router(settings))
 
     def library_or_none() -> Library | None:
         return cache.get()
@@ -218,6 +221,8 @@ def create_app() -> FastAPI:
             reader = Store(settings.db_path)
             try:
                 report = build_pair_report(reader, a, b)
+                sources = comparison_sources(reader, report) if format == "view" else {}
+                clean_a, clean_b = cleaner_for(reader, a), cleaner_for(reader, b)
             finally:
                 reader.close()
         finally:
@@ -235,7 +240,12 @@ def create_app() -> FastAPI:
                 media_type="application/json",
                 headers={"Content-Disposition": 'attachment; filename="comparison.json"'},
             )
-        return {"markdown": markdown}  # format=view: what the item page shows
+        shared_refs = {
+            ref for layer in report["layers"] for shared in layer["shared"]
+            for refs in shared["sources"].values() for ref in refs
+        }
+        return {"markdown": clean_b(clean_a(markdown)), "sources": sources,
+                "sharedRefs": sorted(shared_refs)}
 
     @app.get("/api/report/{name}")
     def report(name: str):

@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api, type Row } from "../api";
 import { Chip, Help, Legend, Picture, plural } from "../components/bits";
 import MapView from "../components/MapView";
+import { VideoThumbnail } from "../components/video";
 import { campaignUrl, kitUrl, usePolled } from "../hooks";
 
 /** The Library, refreshed every 1.5 s while an analysis runs. */
@@ -60,7 +61,8 @@ function ItemsTable({ rows }: { rows: Row[] }) {
         {sorted.map((r) => (
           <tr key={r.id} onClick={() => navigate(`/item/${encodeURIComponent(r.id)}`)}>
             <td>
-              <Picture id={r.id} has={r.picture} type={r.type} width={96} height={60} />
+              {r.type === "Video" ? <VideoThumbnail id={r.id} /> :
+                <Picture id={r.id} has={r.picture} type={r.type} width={96} height={60} />}
             </td>
             <td>
               <Link className="title" to={`/item/${encodeURIComponent(r.id)}`} onClick={(e) => e.stopPropagation()}>

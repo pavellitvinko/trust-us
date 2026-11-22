@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api, pictureUrl, type ItemData, type MatchInfo } from "../api";
-import { Chip, Help, Picture, plural, useMeta } from "../components/bits";
+import { Chip, Help, Picture, useMeta } from "../components/bits";
+import { ItemEvidence } from "../components/evidence";
+import { VideoInspection } from "../components/video";
 import { itemUrl, LinkPair, PathView } from "../components/links";
 import { Band, Crumbs } from "../components/pagetop";
 import { campaignUrl, kitUrl } from "../hooks";
@@ -54,7 +56,7 @@ export default function ItemPage() {
       {back(item)}
       <div className="dgrid">
         <div>
-          {item.picture ? (
+          {item.type === "Video" ? <VideoInspection key={item.id} id={item.id} /> : item.picture ? (
             <a href={pictureUrl(item.id, "full")} target="_blank" rel="noreferrer" title="Open the full picture">
               <img className="big" src={pictureUrl(item.id, "full")} alt="" />
             </a>
@@ -168,27 +170,7 @@ export default function ItemPage() {
         </>
       )}
 
-      {item.findings.length > 0 && (
-        <details className="more">
-          <summary>Evidence details</summary>
-          <p className="small">
-            Each warning sign as the analysis recorded it, with the file and place it was found. {plural(item.findings.length, "finding")}.
-          </p>
-          <table className="findings">
-            <tbody>
-              {item.findings.map((f, n) => (
-                <tr key={n}>
-                  <td>{f.kind}</td>
-                  <td>{f.summary}</td>
-                  <td>
-                    <code>{f.source}</code>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </details>
-      )}
+      <ItemEvidence key={item.id} item={item} />
     </>
   );
 }

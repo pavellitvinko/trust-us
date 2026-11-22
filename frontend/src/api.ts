@@ -169,6 +169,57 @@ export interface Meta {
   links: Record<LinkKind, string>;
 }
 
+export interface EvidenceRow {
+  ref: string;
+  viewId: string;
+  namespace: string;
+  value: unknown;
+  state: string;
+  extractor: string;
+  version: string;
+  source: string;
+  pivot: boolean;
+}
+
+export interface SourceData {
+  record: EvidenceRow;
+  before: string;
+  highlight: string;
+  after: string;
+  resolution: string;
+  message: string;
+  truncated: boolean;
+  download: string | null;
+  image: string | null;
+  videoTime: number | null;
+}
+
+export interface LookupData {
+  record: EvidenceRow;
+  hits: { id: string; title: string; case: string; namespaces: string[]; exact: boolean; origin: boolean }[];
+}
+
+export interface ComparisonData {
+  markdown: string;
+  sources: Record<string, EvidenceRow>;
+  sharedRefs: string[];
+}
+
+export interface MediaData {
+  available: boolean;
+  error: string | null;
+  compatible: boolean;
+  prepared: boolean;
+  duration: number | null;
+  download: string | null;
+  analysis: "not_run" | "available" | "unavailable";
+  analysisReason: string;
+  transcript: string;
+  onScreen: string[];
+  scenes: { seconds: number; text: string }[];
+  frames: { seconds: number; sampled: boolean }[];
+}
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -178,8 +229,8 @@ export class ApiError extends Error {
   }
 }
 
-async function get<T>(url: string): Promise<T> {
-  const res = await fetch(url);
+async function get<T>(url: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, init);
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new ApiError(body.detail ?? res.statusText, res.status);
@@ -195,8 +246,18 @@ export const api = {
   kit: (id: string) => get<GroupDetail>(`/api/kits/${encodeURIComponent(id)}`),
   item: (id: string) => get<ItemData>(`/api/items/${encodeURIComponent(id)}`),
   compare: (a: string, b: string) =>
-    get<{ markdown: string }>(`/api/compare/${encodeURIComponent(a)}/${encodeURIComponent(b)}?format=view`),
+    get<ComparisonData>(`/api/compare/${encodeURIComponent(a)}/${encodeURIComponent(b)}?format=view`),
+  evidence: (id: string) => get<{ rows: EvidenceRow[] }>(`${itemApi(id)}/evidence`),
+  source: (row: EvidenceRow) => get<SourceData>(`${itemApi(row.viewId)}/evidence/${row.ref}`),
+  lookup: (row: EvidenceRow, allNamespaces: boolean) => get<LookupData>("/api/lookup", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ viewId: row.viewId, ref: row.ref, allNamespaces }),
+  }),
+  media: (id: string) => get<MediaData>(`${itemApi(id)}/media`),
+  prepareVideo: (id: string) => get<{ prepared: boolean }>(`${itemApi(id)}/media/prepare`, { method: "POST" }),
 };
+
+export const itemApi = (id: string) => `/api/items/${encodeURIComponent(id)}`;
 
 export const pictureUrl = (id: string, size: "card" | "full" = "card") =>
   `/api/pictures/${encodeURIComponent(id)}?size=${size}`;
