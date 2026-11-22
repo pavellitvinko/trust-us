@@ -19,14 +19,17 @@ from pathlib import Path, PurePosixPath
 from typing import Any, NamedTuple
 from urllib.parse import urlsplit
 
+from .ad_links import AdLink, AdLinks, build_ad_links
 from .campaign_map import TOGGLES, _shared_values, link_tiers
 from .compare.weights import WeightTable
-from .contracts import RelationType, Tier, View, ViewKind
+from .contracts import RelationType, State, Tier, View, ViewKind
 from .fusion import DEFAULT
 from .fusion.demotion import find_demotions
 from .grouping.funnel import AD_ID
 from .grouping.levels import Groups
 from .grouping.suspicion import reason_summary_for_view
+from .perception.ad_library_id import Evidence as LibraryIdEvidence
+from .perception.ad_library_id import read_library_id
 from .previews import picture
 from .registry import layers, load_plugins
 from .store import Store
@@ -119,6 +122,12 @@ class Item:
     step: Step | None = None
     thumbnail: str | None = None  # absolute path of an image to show
     library_id: str | None = None  # Meta Ad Library ID, when the item is a Library ad
+    library_source: str | None = None  # metadata | ocr | same_post: where library_id was found
+    library_evidence: tuple[LibraryIdEvidence, ...] = ()  # the OCR lines it was read from
+    library_via: str | None = None  # same_post: the screenshot the ID was found on
+    library_origin: str | None = None  # same_post: how it was found there (metadata | ocr)
+    advertiser: str | None = None  # the advertiser name read on the screenshot
+    ad_links: list[AdLink] = field(default_factory=list)  # same post, shared advertiser/account
     note: str | None = None  # what the latest add changed for this item
     matches: list[Match] = field(default_factory=list)
     campaign: str | None = None  # campaign id, when the campaign is named (several items)
@@ -200,6 +209,7 @@ class Library:
     playbook_run: bool = False
     campaigns: dict[str, Campaign] = field(default_factory=dict)  # linked ones only
     kits: dict[str, Kit] = field(default_factory=dict)
+    ads: AdLinks = field(default_factory=AdLinks)  # same post, shared advertiser or account
     view_cache: dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
 
     def items(self) -> list[Item]:
@@ -294,6 +304,53 @@ def library_id(view: View, root: str) -> str | None:
         if match := _LIBRARY_URL.search(str(data.get("webpage_url") or "")):
             return match.group(1)
     return None
+
+
+@dataclass(frozen=True)
+class LibraryRef:
+    value: str
+    source: str  # metadata | ocr | same_post
+    evidence: tuple[LibraryIdEvidence, ...] = ()
+    via: str | None = None  # same_post: the screenshot the ID was found on
+    origin: str | None = None  # same_post: how it was found there (metadata | ocr)
+
+
+def library_ref(view: View, root: str, observations=()) -> LibraryRef | None:
+    """The item's Library ID and where it came from: the material first, then a screenshot's
+    OCR, where only an explicitly labelled Library ID counts."""
+    if value := library_id(view, root):
+        return LibraryRef(value, "metadata")
+    if view.kind is ViewKind.IMAGE and (found := read_library_id(observations)):
+        return LibraryRef(found.value, "ocr", found.evidence)
+    return None
+
+
+def post_library_refs(
+    refs: dict[str, LibraryRef], posts: dict[str, set[str]]
+) -> dict[str, LibraryRef]:
+    """A Library ID found on a screenshot, for the screenshots directly linked to it as the
+    same post. Never along a chain: A and C both like B says nothing about A and C. Only when
+    the direct links agree on a single ID; the item's own ID always wins.
+    """
+    out = dict(refs)
+    for vid, linked in posts.items():
+        if vid in refs:
+            continue
+        found = {refs[o].value: o for o in sorted(linked) if o in refs}
+        if len(found) == 1:
+            ((value, source),) = found.items()
+            ref = refs[source]
+            out[vid] = LibraryRef(value, "same_post", ref.evidence, via=source, origin=ref.source)
+    return out
+
+
+def advertiser_name(observations) -> str | None:
+    names = [
+        o
+        for o in observations
+        if o.namespace == "image.advertiser" and o.state is State.PRESENT and (o.raw or "").strip()
+    ]
+    return max(names, key=lambda o: o.confidence).raw.strip() if names else None
 
 
 def case_title(incident_id: str) -> str:
@@ -810,6 +867,24 @@ def build_library(
                 journeys[vid] = journey
                 steps[vid] = Step(chain=number, position=position, total=len(chain))
 
+    # Only screenshots of cases that are still here: they are what the links and IDs are for.
+    shots = {
+        vid: v
+        for vid, v in views.items()
+        if v.kind is ViewKind.IMAGE and v.incident_id in incidents
+    }
+    observations_of = {vid: store.observations(vid) for vid in shots}
+    ad = build_ad_links(shots, observations_of)
+    refs = {
+        vid: ref
+        for vid, view in views.items()
+        if view.incident_id in incidents
+        and (
+            ref := library_ref(view, incidents[view.incident_id].root, observations_of.get(vid, ()))
+        )
+    }
+    refs = post_library_refs(refs, ad.posts)
+
     cases = []
     for incident_id, incident in incidents.items():
         items = []
@@ -842,6 +917,10 @@ def build_library(
                 if gained:
                     other = min(gained)
                     note = f"New link to {titles[other][0]}"
+            observations = (
+                observations_of[vid] if vid in observations_of else store.observations(vid)
+            )
+            ref = refs.get(vid)
             items.append(
                 Item(
                     view_id=vid,
@@ -850,10 +929,16 @@ def build_library(
                     title=title,
                     host=host,
                     labels=labels,
-                    risk=risk_for(vid, store.observations(vid)),
+                    risk=risk_for(vid, observations),
                     step=steps.get(vid),
                     thumbnail=thumbnail,
-                    library_id=library_id(view, incident.root),
+                    library_id=ref.value if ref else None,
+                    library_source=ref.source if ref else None,
+                    library_origin=ref.origin if ref else None,
+                    library_evidence=ref.evidence if ref else (),
+                    library_via=ref.via if ref else None,
+                    advertiser=advertiser_name(observations),
+                    ad_links=ad.links.get(vid, []),
                     note=note,
                     matches=matches[vid],
                     campaign=cid if campaign and campaign.name else None,
@@ -894,6 +979,7 @@ def build_library(
         playbook_run=playbook_status(store),
         campaigns=campaigns,
         kits=kits,
+        ads=ad,
     )
 
 

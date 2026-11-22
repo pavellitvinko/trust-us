@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { api, pictureUrl, type ItemData, type MatchInfo } from "../api";
+import { api, pictureUrl, type AdInfo, type ItemData, type MatchInfo } from "../api";
 import { Chip, Help, Picture, useMeta } from "../components/bits";
 import { ItemEvidence } from "../components/evidence";
 import { VideoInspection } from "../components/video";
@@ -15,6 +15,62 @@ function Pair({ item, match }: { item: ItemData; match: MatchInfo }) {
     .join(" · ");
   return (
     <LinkPair a={item} b={match} kind={match.kind} name={match.name} reason={match.reason} detail={detail} linkA={false} />
+  );
+}
+
+function AdDetails({ ad }: { ad: AdInfo }) {
+  return (
+    <div className="box">
+      <b>Ad details</b>
+      {ad.libraryId && (
+        <div className="grp">
+          <span className="small" style={{ minWidth: 84 }}>Library ID</span>
+          <div>
+            <code>{ad.libraryId}</code>
+            <div className="small">
+              {ad.librarySource}
+              {ad.via && (
+                <>
+                  : <Link to={itemUrl(ad.via.id)}>{ad.via.title}</Link>
+                </>
+              )}
+              {ad.libraryEvidence.map((e, i) => (
+                <div key={i} title={e.where}>
+                  “{e.text}”
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+      {ad.advertiser && (
+        <div className="grp">
+          <span className="small" style={{ minWidth: 84 }}>Advertiser</span>
+          <div>
+            {ad.advertiser} <span className="small">· as written on the screenshot</span>
+          </div>
+        </div>
+      )}
+      {ad.links.map((l) => (
+        <div className="grp" key={`${l.kind}${l.id}`}>
+          <span className="small" style={{ minWidth: 84 }}>{l.name}</span>
+          <div>
+            <Link to={itemUrl(l.id)}>{l.title}</Link>
+            <div className="small">{l.evidence.join(" · ")}</div>
+          </div>
+        </div>
+      ))}
+      {ad.moreAdvertiserPeers > 0 && (
+        <div className="small">
+          …and {ad.moreAdvertiserPeers} more screenshots with the same advertiser name in this case.
+        </div>
+      )}
+      {ad.links.length > 0 && (
+        <div className="small" style={{ marginTop: 6 }}>
+          One advertiser can run many ads and campaigns: these links do not put items in one campaign.
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -148,6 +204,7 @@ export default function ItemPage() {
               </div>
             )}
           </div>
+          {item.ad && <AdDetails ad={item.ad} />}
           {item.actions.length > 0 && (
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               {item.actions.map((a) => (

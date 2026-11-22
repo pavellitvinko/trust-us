@@ -126,7 +126,24 @@ export interface ItemData extends Row {
   matches: MatchInfo[];
   sameCase: Brief[];
   actions: { label: string; url: string; help?: string }[];
+  ad: AdInfo | null;
   findings: { kind: string; summary: string; source: string }[];
+}
+
+export interface AdLinkInfo extends Brief {
+  kind: "same_post" | "same_account" | "possible_advertiser" | "different_account";
+  name: string;
+  evidence: string[];
+}
+
+export interface AdInfo {
+  libraryId: string | null;
+  librarySource: string;
+  libraryEvidence: { text: string; where: string; file: string }[];
+  via: Brief | null;
+  advertiser: string | null;
+  links: AdLinkInfo[];
+  moreAdvertiserPeers: number;
 }
 
 export interface PathData {

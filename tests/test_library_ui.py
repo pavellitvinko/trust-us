@@ -330,6 +330,51 @@ def test_library_ids_come_only_from_the_ad_library(tmp_path):
     assert library_id(landing, str(tmp_path)) is None  # an Ads Manager ID is not a Library ID
 
 
+def _ocr(view_id, raw, locator="image:region[0.08,0.29,0.6,0.02]"):
+    return Observation(
+        view_id=view_id, signal_id="E11", namespace="image.text", value=raw.casefold(), raw=raw,
+        source=Source(file=f"{view_id}.webp", locator=locator),
+        extractor="perception.image", version="2",
+    )  # fmt: skip
+
+
+def test_a_screenshot_shows_the_library_id_written_on_it(store, tmp_path):
+    from ftf.web.views import detail
+
+    shots = [
+        View(view_id=v, incident_id="7", kind=ViewKind.IMAGE, label=f"7 · {v}.webp",
+             primary=f"{v}.webp")
+        for v in ("library", "feed", "landing_shot")
+    ]  # fmt: skip
+    _store_with(store, shots)
+    store.put_observations("library", "perception.image", [
+        _ocr("library", "Identyfikator biblioteki: 2186769435230928"),
+        _ocr("library", "Identyfikator biblioteki: 2186769435230928",
+             "image:region[0.24,0.48,0.3,0.03]"),
+    ])  # fmt: skip
+    store.put_observations("feed", "perception.image", [_ocr("feed", "1 wyświetlenie")])
+    store.put_observations(
+        "landing_shot", "perception.image", [_ocr("landing_shot", "Ad ID: 120200000000000000")]
+    )
+    groups = Groups(campaign_of={}, campaigns={}, family_of={}, families={}, funnel_edges={})
+    lib = build_library(store, groups, tmp_path)
+
+    item = lib.get("library")
+    assert item.library_id == "2186769435230928" and item.library_source == "ocr"
+    assert [e.locator for e in item.library_evidence] == [
+        "image:region[0.08,0.29,0.6,0.02]",
+        "image:region[0.24,0.48,0.3,0.03]",
+    ]
+    assert detail(lib, item)["actions"] == [
+        {
+            "label": "Find the Meta ad in Ad Library",
+            "url": "https://www.facebook.com/ads/library/?active_status=all&ad_type=all&id=2186769435230928",
+        }
+    ]
+    assert lib.get("feed").library_id is None
+    assert lib.get("landing_shot").library_id is None  # an Ads Manager ID is not a Library ID
+
+
 def test_a_journey_knows_its_entry_host(store, tmp_path):
     views = [
         View(
