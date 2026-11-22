@@ -35,9 +35,13 @@ page to the downstream capture, independent of view-ID ordering. Its own landing
 does not establish a transition. The stored state supports navigation, not an independently
 verified HTTP redirect or exact visit sequence.
 
-Still missing on the sample and read from fixtures only: `asset.sha256`, `image.phash`,
-`creative.phash`, `video.frame_phash`, `dom.class`, `firstparty.sha256`, `code.evasion_filter`,
-`expect.element`. `pattern.score` is written by `ftf patterns discover`.
+Flowing on the sample model off (2026-11-22): every identity, kit and infra namespace above
+that has an extractor, `asset.sha256`, `image.phash`, `creative.phash`, `dom.class_set`,
+`firstparty.sha256`, `dom.evasion_filter` and the body text. Still read from fixtures only:
+`video.frame_phash` (no extractor), and the model-fed namespaces `expect.element`,
+`pattern.score` (written by `ftf patterns discover`), `entity.cast`, `screenshot.embedding` and
+the OCR namespaces, which need `ftf perceive` with a key. The measured list of layers that built
+a fingerprint is in `docs/method-results-real-sample.md`, "Unavailable in this mode".
 
 ## Identity tier (T1): supports *same campaign*
 
