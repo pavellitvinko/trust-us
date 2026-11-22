@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import http.client
 import json
 import os
 import secrets
@@ -54,9 +55,12 @@ def _send(url: str, method: str, body: bytes | None, headers: dict[str, str]) ->
         with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response:
             raw = response.read()
     except urllib.error.HTTPError as exc:
-        detail = exc.read()[:500].decode("utf-8", "replace")
+        try:
+            detail = exc.read()[:500].decode("utf-8", "replace")
+        except (http.client.HTTPException, OSError):
+            detail = ""
         raise FaceServiceError(f"http_{exc.code}: {detail}") from exc
-    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+    except (urllib.error.URLError, http.client.HTTPException, TimeoutError, OSError) as exc:
         raise FaceServiceError("unreachable") from exc
     try:
         return json.loads(raw) if raw else {}
@@ -99,6 +103,9 @@ class FaceClient:
     def delete_example(self, image_id: str) -> None:
         self._call("DELETE", f"faces/{image_id}")
 
+    def subjects(self) -> list[str]:
+        return list(self._call("GET", "subjects").get("subjects", []))
+
 
 def _read_state() -> dict[str, Any]:
     try:
@@ -125,16 +132,58 @@ def service_client() -> FaceClient | None:
     return FaceClient(url, key) if url and key else None
 
 
+def _login(base_url: str, email: str, password: str) -> str:
+    """CompreFace's admin API reads the session from cookies, not from a bearer header."""
+    form = urllib.parse.urlencode(
+        {"grant_type": "password", "username": email, "password": password, "scope": "all"}
+    ).encode()
+    basic = base64.b64encode(OAUTH_CLIENT.encode()).decode()
+    request = urllib.request.Request(
+        f"{base_url}/admin/oauth/token",
+        data=form,
+        headers={
+            "Authorization": f"Basic {basic}",
+            "Content-Type": "application/x-www-form-urlencoded",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response:
+            cookies = response.headers.get_all("Set-Cookie") or []
+    except urllib.error.HTTPError as exc:
+        raise FaceServiceError(f"http_{exc.code}: login failed") from exc
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        raise FaceServiceError("unreachable") from exc
+    if not cookies:
+        raise FaceServiceError("no_session")
+    return "; ".join(cookie.split(";", 1)[0] for cookie in cookies)
+
+
+def _find_or_create(url: str, list_path: str, body: dict[str, str], auth: dict[str, str]) -> Any:
+    """Reuse an entry from an earlier, interrupted setup instead of creating a duplicate."""
+    for item in _send(list_path, "GET", None, auth):
+        if item.get("name") == body["name"]:
+            return item
+    return _send(url, "POST", json.dumps(body).encode(), auth)
+
+
 def bootstrap(base_url: str) -> FaceClient:
     """Create the private admin account, app and recognition service once."""
     state = _read_state()
     if state.get("api_key"):
-        return FaceClient(base_url, state["api_key"])
+        client = FaceClient(base_url, state["api_key"])
+        try:
+            client.subjects()
+            return client
+        except FaceServiceError as exc:
+            if not exc.reason.startswith(("http_400", "http_401", "http_403", "http_404")):
+                raise
+        state = {}  # the service's database was reset, so its account and key are gone
     email = state.get("email") or f"ftf-{uuid.uuid4().hex[:10]}@localhost.invalid"
     password = state.get("password") or secrets.token_urlsafe(24)
     write_state({**state, "email": email, "password": password})  # before it can be lost
     json_headers = {"Content-Type": "application/json"}
-    if not state.get("email"):
+    if not state.get("registered"):
         body = {
             "email": email,
             "password": password,
@@ -143,26 +192,19 @@ def bootstrap(base_url: str) -> FaceClient:
             "isAllowStatistics": False,
         }
         _send(f"{base_url}/admin/user/register", "POST", json.dumps(body).encode(), json_headers)
-    form = urllib.parse.urlencode(
-        {"grant_type": "password", "username": email, "password": password, "scope": "all"}
-    ).encode()
-    basic = base64.b64encode(OAUTH_CLIENT.encode()).decode()
-    token = _send(
-        f"{base_url}/admin/oauth/token",
-        "POST",
-        form,
-        {"Authorization": f"Basic {basic}", "Content-Type": "application/x-www-form-urlencoded"},
-    )["access_token"]
-    auth = {**json_headers, "Authorization": f"Bearer {token}"}
-    app = _send(f"{base_url}/admin/app", "POST", json.dumps({"name": "ftf"}).encode(), auth)
-    model = _send(
+        write_state({**state, "email": email, "password": password, "registered": True})
+    auth = {**json_headers, "Cookie": _login(base_url, email, password)}
+    app = _find_or_create(f"{base_url}/admin/app", f"{base_url}/admin/apps", {"name": "ftf"}, auth)
+    model = _find_or_create(
         f"{base_url}/admin/app/{app['id']}/model",
-        "POST",
-        json.dumps({"name": MODEL_NAME, "type": "RECOGNITION"}).encode(),
+        f"{base_url}/admin/app/{app['id']}/models",
+        {"name": MODEL_NAME, "type": "RECOGNITION"},
         auth,
     )
     key = model.get("apiKey") or model.get("id")
     if not key:
         raise FaceServiceError("no_api_key")
-    write_state({"email": email, "password": password, "api_key": key, "enrolled": {}})
+    write_state(
+        {"email": email, "password": password, "registered": True, "api_key": key, "enrolled": {}}
+    )
     return FaceClient(base_url, key)

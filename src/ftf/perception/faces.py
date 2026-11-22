@@ -20,6 +20,7 @@ SIGNAL = "G1"
 NAMESPACE = "face.reference"
 MATCH_SIMILARITY = 0.95
 MAX_IMAGES_PER_VIEW = 6
+MAX_SERVICE_IMAGE_BYTES = 5 * 1024 * 1024  # the service's own upload limit
 NOTE = "possible match, needs verification"
 
 
@@ -47,15 +48,19 @@ def _unavailable(view: View, reason: str) -> list[Observation]:
 
 
 def view_images(view: View, ctx: Context) -> list[_Image]:
+    """Images small enough for the service. A file that cannot be read raises `_MediaError`."""
     if view.kind is ViewKind.IMAGE:
         if view.primary is None:
             return []
         image = _read_image(ctx.path(view, view.primary), view.primary)
-        return [image] if image is not None else []
-    if view.kind is ViewKind.VIDEO:
-        return _video_images(view, ctx)[:MAX_IMAGES_PER_VIEW]
-    images, _ = _page_images(view, ctx, _material.load(view, ctx))
-    return images[:MAX_IMAGES_PER_VIEW]
+        images = [image] if image is not None else []
+    elif view.kind is ViewKind.VIDEO:
+        images = _video_images(view, ctx)
+    else:
+        images, failed = _page_images(view, ctx, _material.load(view, ctx))
+        if failed:
+            raise _MediaError("some page images could not be read")
+    return [i for i in images if len(i.data) <= MAX_SERVICE_IMAGE_BYTES][:MAX_IMAGES_PER_VIEW]
 
 
 def check_view(
@@ -68,11 +73,15 @@ def check_view(
     if not images:
         return _unavailable(view, "no_image"), "no_image"
     best: dict[str, tuple[float, _Image, dict[str, Any]]] = {}
+    rejected = 0
     for image in images:
         try:
             faces = client.recognize(image.data)
         except FaceServiceError as exc:
             reason = exc.reason.split(":", 1)[0]
+            if reason in ("http_400", "http_413", "http_415"):  # this image only
+                rejected += 1
+                continue
             return _unavailable(view, reason), reason
         for face in faces:
             subjects = face.get("subjects") or []
@@ -81,6 +90,8 @@ def check_view(
             person, score = subjects[0].get("subject"), float(subjects[0].get("similarity", 0.0))
             if person and score >= MATCH_SIMILARITY and score > best.get(person, (0.0,))[0]:
                 best[person] = (score, image, face.get("box") or {})
+    if not best and rejected:  # an unread image cannot support "no match"
+        return _unavailable(view, "image_rejected"), "image_rejected"
     if not best:
         source = Source(file=view.primary or view.har, locator="faces")
         checked = f"{len(images)} image(s) checked: no reference match"

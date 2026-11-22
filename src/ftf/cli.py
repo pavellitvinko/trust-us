@@ -439,6 +439,8 @@ def cmd_suspicions(args) -> None:
             print(f"  {kind}:")
             for r in reasons:
                 print(f"    [{r.signal_id}] {r.summary} ({r.source.file}:{r.source.locator})")
+        for r in summary.face_matches:
+            print(f"  context: {r.summary} ({r.source.file}:{r.source.locator})")
         if summary.unchecked_kinds:
             print(f"  not checked: {', '.join(summary.unchecked_kinds)}")
 

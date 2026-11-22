@@ -7,6 +7,7 @@ the repository. The first photo anchors a person; later ones must match it.
 from __future__ import annotations
 
 import json
+import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable
@@ -17,6 +18,8 @@ from .client import FaceClient, FaceServiceError, _read_state, write_state
 
 MANIFEST = Path(__file__).with_name("reference_people.json")
 MAX_PHOTO_BYTES = 5 * 1024 * 1024
+DOWNLOAD_ATTEMPTS = 4
+DOWNLOAD_PAUSE_SECONDS = 2.0
 SAME_PERSON_SIMILARITY = 0.85
 USER_AGENT = "ftf-reference-builder/0.1 (non-commercial research)"
 
@@ -27,9 +30,18 @@ def load_manifest(path: Path = MANIFEST) -> dict[str, list[dict[str, str]]]:
 
 
 def download(url: str) -> bytes:
+    """Fetch one photo, politely: Wikimedia rate-limits fast clients."""
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(request, timeout=30) as response:
-        data = response.read(MAX_PHOTO_BYTES + 1)
+    for attempt in range(DOWNLOAD_ATTEMPTS):
+        time.sleep(DOWNLOAD_PAUSE_SECONDS)
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                data = response.read(MAX_PHOTO_BYTES + 1)
+            break
+        except urllib.error.HTTPError as exc:
+            if exc.code != 429 or attempt == DOWNLOAD_ATTEMPTS - 1:
+                raise
+            time.sleep(min(int(exc.headers.get("Retry-After") or 30), 60))
     if len(data) > MAX_PHOTO_BYTES:
         raise ValueError("photo is too large")
     return data
@@ -58,7 +70,18 @@ def enroll(
     people = people if people is not None else load_manifest()
     state = _read_state()
     enrolled: dict[str, dict[str, str]] = state.get("enrolled", {})
-    report: dict[str, Any] = {"added": 0, "already": 0, "skipped": []}
+    report: dict[str, Any] = {"added": 0, "already": 0, "removed": 0, "skipped": []}
+    # The list is closed: anything no longer on it must stop matching.
+    for person in list(enrolled):
+        wanted = {file["title"] for file in people.get(person, [])}
+        for title, image_id in list(enrolled[person].items()):
+            if title not in wanted:
+                client.delete_example(image_id)
+                del enrolled[person][title]
+                report["removed"] += 1
+        if not enrolled[person]:
+            del enrolled[person]
+    write_state({**state, "enrolled": enrolled})
     for person, files in people.items():
         done = enrolled.setdefault(person, {})
         for file in files:

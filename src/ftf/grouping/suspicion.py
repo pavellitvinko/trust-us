@@ -19,7 +19,7 @@ YOUNG_DOMAIN_DAYS = 365
 # A kind counts as checked when one of these inputs was observed.
 _INPUTS = {
     "domain": ("rdap.", "warning."),  # the host alone does not show age or listing
-    "impersonation": ("page.read_text", "image.text", "face.reference"),
+    "impersonation": ("page.read_text", "image.text"),
     "absent_elements": ("expect.element",),
     "evasion": ("page.clean_text", "page.body_text", "cloak."),
     "persuasion": ("pattern.score", "markup."),
@@ -51,6 +51,9 @@ class SuspicionSummary(BaseModel):
     level: int
     reasons_by_kind: dict[str, list[SuspicionReason]] = Field(default_factory=dict)
     unchecked_kinds: list[str] = Field(default_factory=list)
+    # Shown as context and not counted in the level: a real news photo of a public figure is
+    # not suspicious by itself.
+    face_matches: list[SuspicionReason] = Field(default_factory=list)
 
 
 def _compact(text: str) -> str:
@@ -101,9 +104,6 @@ def _describe(o: Observation, hosts: list[str]) -> tuple[str, str, str] | None:
     is_org = ns == "page.entity.organisation" and isinstance(value, dict)
     if is_org and value.get("role") == "regulator_invoked":
         return "impersonation", "G3", f"invokes institution: {value.get('name')}"
-    if ns == "face.reference" and isinstance(value, dict):
-        person, score = value.get("person"), float(value.get("similarity", 0))
-        return "impersonation", "G1", f"possible face match to {person} ({score:.0%}), verify"
     if ns == "dom.evasion_filter":
         return "evasion", "E13", f"visual-evasion filter: {value}"
     if ns == "kit.cloaker":
@@ -158,9 +158,28 @@ def reason_summary_for_view(view_id: str, observations: list[Observation]) -> Su
             )
         )
     ordered = {kind: grouped[kind] for kind in KINDS if kind in grouped}
+    faces = [
+        SuspicionReason(
+            kind="face_context",
+            signal_id="G1",
+            namespace=o.namespace,
+            summary=(
+                f"possible face match to {o.value.get('person')} "
+                f"({float(o.value.get('similarity', 0)):.0%}), needs verification"
+            ),
+            value=o.value,
+            observation_ref=f"{o.extractor}/{o.namespace}#{position}",
+            source=o.source,
+        )
+        for position, o in enumerate(observations)
+        if o.namespace == "face.reference"
+        and o.state is State.PRESENT
+        and isinstance(o.value, dict)
+    ]
     return SuspicionSummary(
         view_id=view_id,
         level=len(ordered),
         reasons_by_kind=ordered,
+        face_matches=faces,
         unchecked_kinds=[k for k in KINDS if k not in ordered and not _checked(k, observations)],
     )

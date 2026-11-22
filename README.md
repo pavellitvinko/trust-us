@@ -171,7 +171,8 @@ The Match screen has the same action under the evidence table. Without a key, it
 
 `docker compose up` also starts a private CompreFace service with no published port and loads a
 closed list of public figures from `src/ftf/faces/reference_people.json`. `ftf perceive` then
-reports "possible face match, verify" as risk evidence.
+reports "possible face match, needs verification" as context. It is not counted in the suspicion
+level, because a real news photo of a public figure is not suspicious by itself.
 
 - Matching runs only against that list. Unmatched faces are not stored, and a match cannot link campaigns.
 - Photos come from Wikimedia Commons under free licences, are not stored in the repository, and

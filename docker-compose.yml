@@ -23,12 +23,12 @@ services:
 
   # Private face service: no published port, so only the containers here can reach it.
   compreface:
-    image: exadel/compreface:1.2.0-facenet
+    image: exadel/compreface:1.2.0-facenet@sha256:c575ebd73b471c54695aea9c4a974a3cbc618e0091bf0e98a3347e455d29b68e
     restart: unless-stopped
     mem_limit: 5g
     environment:
-      save_images_to_db: "false"
-      enable_email_server: "false"
+      SAVE_IMAGES_TO_DB: "false"  # keep face templates only, not the photos
+      ENABLE_EMAIL_SERVER: "false"
       API_JAVA_OPTS: "-Xmx1g"
       ADMIN_JAVA_OPTS: "-Xmx512m"
     volumes:
@@ -56,6 +56,7 @@ services:
     depends_on:
       compreface:
         condition: service_healthy
+        required: false  # the app must start even when the face service cannot
 
 volumes:
   compreface-db:

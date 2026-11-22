@@ -54,9 +54,8 @@ def test_match_is_risk_evidence_with_its_source(ctx):
     assert row.purpose is Purpose.RISK
     assert row.raw == pf.NOTE and row.source.locator == "image:box[1,2,3,4]"
     summary = reason_summary_for_view("v", rows(ctx))
-    assert (
-        "possible face match to Donald Tusk" in summary.reasons_by_kind["impersonation"][0].summary
-    )
+    assert "possible face match to Donald Tusk" in summary.face_matches[0].summary
+    assert summary.level == 0  # context only: a real photo is not suspicious by itself
 
 
 def test_weak_or_unknown_face_is_not_stored(ctx):
@@ -148,3 +147,80 @@ def test_no_face_answer_is_an_empty_list(monkeypatch):
 
     monkeypatch.setattr(fc, "_send", refuse)
     assert fc.FaceClient("http://x", "k").recognize(b"x") == []
+
+
+class RejectsFirst(FakeService):
+    def recognize(self, image, threshold=0.8):
+        if image == b"big":
+            raise FaceServiceError("http_400: too large")
+        return super().recognize(image, threshold)
+
+
+def test_one_rejected_image_keeps_matches_from_others(ctx, monkeypatch):
+    images = [_Image("image/jpeg", b"big", "b.jpg", ""), _Image("image/jpeg", b"img", "a.jpg", "")]
+    monkeypatch.setattr(pf, "view_images", lambda *a: images)
+    pf.run_perceive_faces(ctx, client=RejectsFirst({b"img": [face("Donald Tusk", 0.99)]}))
+    assert rows(ctx)[0].state is State.PRESENT
+
+
+def test_rejected_image_cannot_prove_no_match(ctx, monkeypatch):
+    images = [_Image("image/jpeg", b"big", "b.jpg", ""), _Image("image/jpeg", b"img", "a.jpg", "")]
+    monkeypatch.setattr(pf, "view_images", lambda *a: images)
+    pf.run_perceive_faces(ctx, client=RejectsFirst({b"img": []}))
+    assert rows(ctx)[0].state is State.NOT_OBSERVABLE
+
+
+def test_unreadable_images_keep_the_earlier_match(ctx, monkeypatch):
+    from ftf.perception.techniques import _MediaError
+
+    pf.run_perceive_faces(ctx, client=FakeService({b"img": [face("Donald Tusk", 0.99)]}))
+
+    def broken(*args):
+        raise _MediaError("x")
+
+    monkeypatch.setattr(pf, "view_images", broken)
+    assert pf.run_perceive_faces(ctx, client=FakeService())["kept"] == 1
+    assert rows(ctx)[0].state is State.PRESENT
+
+
+def test_person_removed_from_the_list_stops_matching(data):
+    class Deleting(FakeService):
+        deleted = ()
+
+        def delete_example(self, image_id):
+            self.deleted = (*self.deleted, image_id)
+
+    service = Deleting({b"u1": [face()]})
+    enroll(service, {"A B": PEOPLE["A B"][:1]}, fetch=str.encode)
+    report = enroll(service, {}, fetch=str.encode)
+    assert report["removed"] == 1 and service.deleted == ("id-1",)
+    assert fc._read_state()["enrolled"] == {}
+
+
+def test_reset_service_is_set_up_again(data, monkeypatch):
+    fc.write_state({"api_key": "old", "email": "e", "password": "p", "registered": True})
+    calls = []
+
+    def send(url, method, body, headers):
+        calls.append(url.rsplit("/admin", 1)[-1])
+        if "/api/v1" in url:
+            raise FaceServiceError("http_401: bad key")
+        if url.endswith(("/apps", "/models")):
+            return []
+        return {"id": "app", "apiKey": "new"}
+
+    monkeypatch.setattr(fc, "_send", send)
+    monkeypatch.setattr(fc, "_login", lambda *a: "c=1")
+    assert fc.bootstrap("http://x").api_key == "new"
+    assert any(c.endswith("/user/register") for c in calls)
+
+
+def test_dropped_response_is_a_service_error(monkeypatch):
+    import http.client
+
+    def dropped(*args, **kwargs):
+        raise http.client.IncompleteRead(b"")
+
+    monkeypatch.setattr(fc.urllib.request, "urlopen", dropped)
+    with pytest.raises(FaceServiceError):
+        fc._send("http://x", "GET", None, {})
