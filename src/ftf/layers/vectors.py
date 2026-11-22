@@ -22,11 +22,20 @@ MIN_WORDS = 20
 # Seed lists: enough for the sample; the Perception track's entity observations extend them.
 CELEBRITIES = (
     "Rafał Brzoska",
+    "Rafała Brzoskę",
+    "Rafała Brzoski",
     "Brzoska",
     "Brzoskę",
+    "Brzoski",
+    "Brzosce",
     "Monika Olejnik",
+    "Moniki Olejnik",
+    "Monikę Olejnik",
     "Olejnik",
     "Tomasz Lis",
+    "Tomasza Lisa",
+    "Tomaszowi Lisowi",
+    "Tomaszem Lisem",
     "Lis",
     "Donald Tusk",
     "Tusk",
@@ -83,6 +92,14 @@ _CAP_NAME = re.compile(
 )
 _AMOUNT = re.compile(r"\b\d[\d\s.,]*\s?(zł|złotych|PLN|%|kg|tys\.?|mln|miejsc|opakowań|osób)\b")
 _NUMBER = re.compile(r"\b\d+([.,]\d+)?\b")
+# Editorial bylines name the (invented) author, which is cast, not story: "oprac. Jan Nowak".
+# Name tokens are Capitalised-then-lowercase, so an all-caps agency credit ("fot. PAP") and
+# the sentence after it are left alone (a capitalised agency, "fot. Reuters", is masked like a
+# name, which costs the skeleton nothing); a full stop after the first token ends the byline.
+_NAME_TOKEN = r"[A-ZĄĆĘŁŃÓŚŹŻ][a-ząćęłńóśźż-]+"
+_BYLINE = re.compile(
+    rf"\b(oprac\.|autor:|autorka:|tekst:|fot\.)\s+{_NAME_TOKEN}(?:\s+{_NAME_TOKEN})?(?![\w-])"
+)
 _DATE = re.compile(
     r"\b(w\s+)?(poniedziałek|wtorek|środ[ęa]|czwartek|piątek|sobot[ęa]|niedziel[ęa])\b|"
     r"\b\d{1,2}\s+(stycznia|lutego|marca|kwietnia|maja|czerwca|lipca|sierpnia|września|"
@@ -114,6 +131,7 @@ def mask(text: str, observations: list[Observation] = ()) -> str:
     text = _replace_all(text, list(CELEBRITIES) + people + cast, "[CELEBRITY]")
     text = _replace_all(text, BANKS, "[BANK]")
     text = _replace_all(text, INSTITUTIONS, "[INSTITUTION]")
+    text = _BYLINE.sub(lambda m: f"{m.group(1)} [PERSON]", text)
     text = _DATE.sub("[DATE]", text)
     text = _AMOUNT.sub("[AMOUNT]", text)
     text = _NUMBER.sub("[NUMBER]", text)
