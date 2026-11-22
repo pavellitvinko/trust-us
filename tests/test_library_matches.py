@@ -217,7 +217,6 @@ def test_match_filter_compare_close_and_previous_mode(tmp_path, monkeypatch):
     app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "app/streamlit_app.py")).run()
     assert not app.exception
     assert app.button(key="matches-alone").disabled
-    app.segmented_control(key="mode").set_value("By case").run()
     from ftf.intake import ANALYSIS_LOCK
 
     with ANALYSIS_LOCK:  # another thread holds analysis; the complete snapshot is still usable
@@ -247,5 +246,5 @@ def test_match_filter_compare_close_and_previous_mode(tmp_path, monkeypatch):
     app.button(key="close-matches").click().run()
     assert not app.exception
     assert "library_filter" not in app.session_state
-    assert app.segmented_control(key="mode").value == "By case"
+    assert app.button(key="title-alone")  # back to the case list
     assert app.session_state["selected"] == "a"

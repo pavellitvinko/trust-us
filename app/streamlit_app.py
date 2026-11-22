@@ -442,12 +442,13 @@ def pending_rows(library: Library | None, show: bool) -> None:
                 st.markdown(f"{ICONS[KIND_NAMES[view.kind]]} {view.label} {stage}")
 
 
-def case_block(case, selected: str | None, kinds: set[str]) -> None:
-    items = [i for i in case.items if KIND_NAMES[i.kind] in kinds]
+def case_block(case, selected: str | None) -> None:
+    items = case.items
     if not items:
         return
     with st.container(border=True):
-        st.markdown(f"**{case.title}** :gray[· {len(case.items)} items]")
+        count = len(case.items)
+        st.markdown(f"**{case.title}** :gray[· {count} item{'' if count == 1 else 's'}]")
         quiet = [
             i
             for i in items
@@ -769,7 +770,7 @@ def comparison_panel(report: dict) -> None:
             st.markdown(markdown)
 
 
-def match_table(library: Library, anchor: Item, selected: str, kinds: set[str]) -> None:
+def match_table(library: Library, anchor: Item, selected: str) -> None:
     heading, close = st.columns([20, 1], vertical_alignment="top")
     heading.markdown(f"#### Matches for {anchor.title}")
     with close:
@@ -784,7 +785,7 @@ def match_table(library: Library, anchor: Item, selected: str, kinds: set[str]) 
     item_row(anchor, True, anchor.view_id == selected)
     if not library.playbook_run:
         st.caption("Playbook: not run")
-    rows = [m for m in filter_matches(anchor) if KIND_NAMES[library.get(m.view_id).kind] in kinds]
+    rows = list(filter_matches(anchor))
     st.caption("Scroll sideways for coverage, clues and Compare.")
     st.html(
         """<style>
@@ -849,7 +850,7 @@ def match_table(library: Library, anchor: Item, selected: str, kinds: set[str]) 
                 args=(anchor.view_id, item.view_id),
             )
     if not rows:
-        st.caption("No matches for the selected material types.")
+        st.caption("No matches yet.")
 
 
 def library_body() -> None:
@@ -862,34 +863,15 @@ def library_body() -> None:
         if active:
             job = active[0]
             st.markdown(f":material/progress_activity: :gray[Analysing · {job.stage_name}]")
-        st.space("stretch")
-        mode = st.segmented_control(
-            "View",
-            ["Newest", "By case"],
-            default="Newest",
-            key="mode",
-            label_visibility="collapsed",
-        )
-        kinds = st.pills(
-            "Show",
-            ["Page", "Image", "Video"],
-            format_func=lambda k: f"{k}s",
-            selection_mode="multi",
-            default=["Page", "Image", "Video"],
-            key="kinds",
-            label_visibility="collapsed",
-        )
-    kinds = set(kinds or ["Page", "Image", "Video"])
     if library is None or not library.cases:
         pending_rows(library, True)
         if not worker.jobs:
             st.info("Nothing here yet.")
             st.page_link(PAGES["add"], label="Add material", icon=":material/add:")
         return
-    items = library.newest()
     selected = st.session_state.get("selected")
-    if library.get(selected or "") is None:
-        selected = items[0].view_id
+    if library.get(selected or "") is None:  # the newest case's first item
+        selected = library.items()[0].view_id
         st.session_state["selected"] = selected
     matches_of = st.session_state.get("library_filter", {}).get("matches_of")
     anchor = library.get(matches_of) if matches_of else None
@@ -899,14 +881,10 @@ def library_body() -> None:
     with left:
         pending_rows(library, True)
         if anchor:
-            match_table(library, anchor, selected, kinds)
-        elif mode == "By case":
-            for case in library.cases:
-                case_block(case, selected, kinds)
+            match_table(library, anchor, selected)
         else:
-            for item in items:
-                if KIND_NAMES[item.kind] in kinds:
-                    item_row(item, True, item.view_id == selected)
+            for case in library.cases:  # newest case first
+                case_block(case, selected)
     with right:
         report = st.session_state.get("library_compare")
         if report:
