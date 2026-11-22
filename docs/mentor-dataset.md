@@ -34,6 +34,8 @@ Setup takes five steps; the first start then builds the app, which takes several
 
 1. **Download** `ftf-data-full-fd9e296.tgz` from the
    [shared Google Drive folder](https://drive.google.com/drive/folders/15ZPzXXKlonNejb-YxbDXpbDtSzDRHpup?usp=sharing).
+   If Drive won't let you download it, use the
+   [reserve copy on MEGA](https://mega.nz/folder/jYJghYgZ#Vq_dOvSMbuj7u2qyS5eANw).
 2. **Get the code** at the exact version the dataset was made with:
 
    ```bash
@@ -81,8 +83,9 @@ each link.
 - **Run it with Docker only.** The database points to files inside the container (`/data/...`).
   Started without Docker, the app can't find the original files.
 - **Model reading is optional.** Results we already have show without keys. To run new model
-  reading, copy `.env.example` to `.env`, add `OPENAI_API_KEY` and `GEMINI_API_KEY`, and restart
-  with `docker compose up -d`.
+  reading, download the `.env` file from the same Google Drive or MEGA folder, put it next to
+  `docker-compose.yml` and restart with `docker compose up -d`. If your browser saves it as `env`
+  or `.env.txt`, rename it to `.env`.
 - **Face matching** prepares itself in the background on the first start, in about 2 minutes. The
   app is usable meanwhile.
 
