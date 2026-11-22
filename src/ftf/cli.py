@@ -240,6 +240,20 @@ def cmd_patterns(args) -> None:
     print("run `ftf run` to rebuild fingerprints, comparisons and groups with pattern.score")
 
 
+def cmd_report(args) -> None:
+    """Write the corpus report and JSON/CSV exports from stored results."""
+    from .corpus_report import write_export
+
+    store = _store()
+    if not store.views():
+        print("error: nothing ingested yet", file=sys.stderr)
+        raise SystemExit(1)
+    out = Path(args.out) if args.out else get_settings().data_dir / "export"
+    paths = write_export(store, out)
+    print(f"wrote {len(paths)} files to {out}")
+    print("private project material: do not publish or redistribute")
+
+
 def cmd_views(args) -> None:
     for v in _store().views():
         print(f"{v.view_id}  {v.kind.value:5}  {v.label}")
@@ -500,6 +514,10 @@ def main(argv: list[str] | None = None) -> None:
     )
     p.add_argument("--snapshot-date", metavar="YYYY-MM-DD", help="date of the manual export")
     p.set_defaults(func=cmd_enrich)
+
+    p = sub.add_parser("report", help="corpus report (Markdown) and JSON/CSV export")
+    p.add_argument("--out", help="output folder (default: $FTF_DATA_DIR/export)")
+    p.set_defaults(func=cmd_report)
 
     sub.add_parser("views", help="list views").set_defaults(func=cmd_views)
 
