@@ -106,42 +106,47 @@ table.items { width: 100%; border-collapse: separate; border-spacing: 0; backgro
   text-decoration: none; display: block; }
 .empty { text-align: center; padding: 60px 20px; color: var(--text-2); }
 
-/* map: template > campaign > case > item */
+/* map: a graph read left to right, template > campaign > case > item */
 .tree-tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .tree-tools .input { flex: 1 1 240px; width: auto; }
-.tree-help { margin: 8px 0 14px; }
-.tree, .tree ul { list-style: none; margin: 0; padding: 0; }
-.tree { display: grid; gap: 12px; }
-.tree > .tree-group { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; min-width: 0; }
-.tree > .tree-group.kit { border-left: 4px solid var(--kit-line); }
-.tree > .tree-group.campaign { border-left: 4px solid var(--camp-line); }
-.tree > .tree-group.links { border-left: 4px solid var(--dup-line); }
-.tree-group ul { margin-left: 8px; padding-left: 14px; border-left: 1px solid var(--line-2); }
-.tree-group .tree-group { margin-top: 8px; }
-.tree-head { display: flex; align-items: center; gap: 8px; }
-.tree-head button { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; border: 0; background: none;
-  padding: 4px 2px; cursor: pointer; text-align: left; border-radius: 6px; }
-.tree-head button:hover { background: var(--soft); }
-.caret { width: 14px; flex: none; color: var(--text-2); }
-.tree-title { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
-.tree-group.campaign > .tree-head .tree-title { color: var(--camp); }
-.tree-name { font-size: 12px; font-weight: 400; color: var(--text-3); }
-.tree-count { flex: none; margin-left: auto; font-size: 12px; color: var(--text-2); background: var(--soft);
-  border-radius: 10px; padding: 1px 8px; }
-.tree-open { flex: none; font-size: 12.5px; color: var(--accent); text-decoration: none; padding: 2px 6px; }
-.tree-open:hover { text-decoration: underline; }
-.tree-why { margin: 0 0 6px 24px; }
-.tree-why b { font-weight: 600; color: var(--text); }
-.tree-case { margin-top: 6px; }
-.tree-case-name { font-size: 12px; font-weight: 600; color: var(--text-2); padding: 2px 0; overflow-wrap: anywhere; }
-.tree-item a { display: flex; gap: 10px; align-items: center; padding: 4px 6px; border-radius: 8px; text-decoration: none; min-width: 0; }
-.tree-item a:hover, .tree-item a:focus-visible { background: #f5f8fc; }
-.tree-item .pic, .tree-item img, .tree-item video { flex: none; width: 72px; height: 46px; }
-.tree-item .pic.none { font-size: 10.5px; line-height: 1.15; text-align: center; padding: 2px; }
-.tree-item-text { display: grid; min-width: 0; }
-.tree-item-text .t { font-weight: 550; font-size: 13px; overflow-wrap: anywhere; }
-.tree-copy { color: var(--dup); }
-.tree-link { color: var(--text); }
+.tree-help { margin: 8px 0 12px; }
+.graph-zoom { display: inline-flex; align-items: center; gap: 6px; }
+.graph-zoom .btn { padding: 6px 11px; }
+.graph-zoom .small { min-width: 40px; text-align: center; }
+.graph-scroll { overflow: auto; max-height: 78vh; background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+.graph-canvas { position: relative; transform-origin: 0 0; }
+.graph-canvas svg { position: absolute; inset: 0; pointer-events: none; }
+.graph-column { position: absolute; top: 4px; font-size: 12px; font-weight: 600; color: var(--text-3); text-transform: uppercase; letter-spacing: .04em; }
+.graph-line { fill: none; stroke: var(--line-2); stroke-width: 1.5; }
+.graph-line.campaign { stroke: var(--camp-line); stroke-width: 2; }
+.graph-line.links { stroke: var(--dup-line); stroke-width: 2; }
+.graph-line.loose { stroke: var(--kit-line); stroke-dasharray: 5 4; }
+.graph-arc { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 5 4; pointer-events: stroke; cursor: help; }
+.graph-card { position: absolute; }
+.graph-group { height: 100%; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr auto; gap: 1px; padding: 6px 10px; background: #fff;
+  border: 1px solid var(--line-2); border-left: 4px solid var(--line-2); border-radius: 8px; overflow: hidden; }
+.graph-group.kit { border-left-color: var(--kit-line); background: var(--soft); }
+.graph-group.campaign { border-left-color: var(--camp-line); background: var(--camp-bg); }
+.graph-group.links { border-left-color: var(--dup-line); background: var(--dup-bg); }
+.graph-group button { display: flex; align-items: center; gap: 5px; min-width: 0; border: 0; padding: 0; background: none; cursor: pointer; text-align: left; }
+.caret { width: 12px; flex: none; color: var(--text-2); }
+.graph-title { font-size: 13px; font-weight: 650; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.graph-why { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.graph-foot { display: flex; gap: 8px; align-items: center; white-space: nowrap; }
+.graph-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.graph-foot a { flex: none; margin-left: auto; color: var(--accent); }
+.graph-case { height: 100%; display: flex; align-items: center; justify-content: center; padding: 0 6px; font-size: 12px; font-weight: 600;
+  color: var(--text-2); background: var(--soft); border: 1px solid var(--line-2); border-radius: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.graph-item { height: 100%; display: flex; align-items: center; gap: 8px; padding: 0 8px; background: #fff; border: 1px solid var(--line-2);
+  border-radius: 8px; text-decoration: none; min-width: 0; }
+.graph-item:hover, .graph-item:focus-visible { border-color: var(--accent); background: #f5f8fc; }
+.graph-item.linked { border-color: var(--accent); }
+.graph-item .pic { flex: none; width: 56px; height: 40px; }
+.graph-item .pic.none { font-size: 9px; line-height: 1.1; text-align: center; padding: 2px; }
+.graph-text { display: grid; min-width: 0; }
+.graph-text .t { font-size: 12.5px; font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.graph-text .small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.graph-copy { color: var(--dup); }
 
 /* item page */
 .back { display: inline-flex; gap: 6px; text-decoration: none; color: var(--text-2); font-size: 13px; margin-bottom: 14px; }

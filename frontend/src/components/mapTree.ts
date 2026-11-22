@@ -27,6 +27,14 @@ export interface TreeNode {
   linkNotes?: Record<string, { text: string; detail: string }>;
 }
 
+/** A firm link between items that sit in different groups. */
+export interface CrossLink {
+  a: string;
+  b: string;
+  labels: string[];
+  detail: string;
+}
+
 const compare = new Intl.Collator("pl", { numeric: true, sensitivity: "base" }).compare;
 
 /** A case named by a long run id reads better shortened. */
@@ -83,7 +91,7 @@ const repeatIndex = (repeats: string[][]) =>
 const distinctItems = (rows: Row[], repeatOf: Map<string, string>) =>
   new Set(rows.map((r) => repeatOf.get(r.id) ?? r.id)).size;
 
-export function buildTree(rows: Row[], map: MapData): TreeNode[] {
+export function buildTree(rows: Row[], map: MapData): { tree: TreeNode[]; crossLinks: CrossLink[] } {
   const edges = map.edges.filter((e) => e.kind !== "possible");
   const byId = new Map(rows.map((r) => [r.id, r]));
   const repeatOf = repeatIndex(map.repeats);
@@ -229,8 +237,7 @@ export function buildTree(rows: Row[], map: MapData): TreeNode[] {
     });
   }
 
-  attachLinkNotes(tree, rows, edges, map.journeys, repeatOf);
-  return tree;
+  return { tree, crossLinks: attachLinkNotes(tree, rows, edges, map.journeys, repeatOf) };
 }
 
 /** Tell each item about firm links that its own group doesn't already show. */
@@ -240,7 +247,7 @@ function attachLinkNotes(
   edges: MapEdge[],
   journeys: MapData["journeys"],
   repeatOf: Map<string, string>,
-) {
+): CrossLink[] {
   const home = new Map<string, string>();
   const cases: TreeNode[] = [];
   const walk = (node: TreeNode, parent: string) => {
@@ -255,12 +262,18 @@ function attachLinkNotes(
   const byId = new Map(rows.map((r) => [r.id, r]));
   const others = new Map<string, Map<string, Set<string>>>();
   const details = new Map<string, Set<string>>();
+  const pairs = new Map<string, { a: string; b: string; labels: Set<string>; details: Set<string> }>();
   const add = (from: string, to: string, label: string, detail: string) => {
     if (!byId.has(from) || !byId.has(to) || home.get(from) === home.get(to)) return;
     const mine = others.get(from) ?? new Map<string, Set<string>>();
     mine.set(to, (mine.get(to) ?? new Set<string>()).add(label));
     others.set(from, mine);
     details.set(from, (details.get(from) ?? new Set<string>()).add(detail));
+    const [a, b] = from < to ? [from, to] : [to, from];
+    const pair = pairs.get(`${a}\n${b}`) ?? { a, b, labels: new Set<string>(), details: new Set<string>() };
+    pair.labels.add(label);
+    pair.details.add(detail);
+    pairs.set(`${a}\n${b}`, pair);
   };
   for (const e of edges) {
     // Items of one template are already shown together under it.
@@ -279,6 +292,12 @@ function attachLinkNotes(
     notes[id] = { text: `linked to ${parts.sort(compare).join("; ")}`, detail: [...details.get(id)!].join("; ") };
   }
   for (const node of cases) node.linkNotes = notes;
+  return [...pairs.values()].map((p) => ({
+    a: p.a,
+    b: p.b,
+    labels: [...p.labels].sort(compare),
+    detail: [...p.details].join("; "),
+  }));
 }
 
 /** Lower case with Polish letters flattened, so "lodz" finds "Łódź". */
