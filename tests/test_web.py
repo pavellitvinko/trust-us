@@ -535,6 +535,163 @@ def test_table_and_item_detail_share_live_per_item_check_state(client):
     assert detail["processing"]["checks"][0]["runId"] == "live"
 
 
+def test_library_report_counts_the_whole_library():
+    from ftf.library import UNCHECKED_PLAIN, Campaign, Case, Finding, Item, Library, Match, Risk
+    from ftf.web.library_report import build_stats, render_html
+
+    blank = list(UNCHECKED_PLAIN)
+    pixel = Match(view_id="b", same_case=False, verdict="Same campaign", tiers=("identity",),
+                  confidence="high", observed_groups=1, total_groups=1,
+                  clue="Same pixel 1071875908635809", clue_ns="fb_pixel", clue_value="1071875908635809")  # fmt: skip
+    back = Match(view_id="a", same_case=False, verdict="Same campaign", tiers=("identity",),
+                 confidence="high", observed_groups=1, total_groups=1,
+                 clue="Same pixel 1071875908635809", clue_ns="fb_pixel", clue_value="1071875908635809")  # fmt: skip
+    timer = Finding("Persuasion", "countdown timer", "page.html", plain="A countdown <timer>")
+    items = [
+        Item("a", "1", ViewKind.PAGE, "Metabo RX", "a.top", [], Risk("warning", [timer]),
+             matches=[pixel], campaign="c1"),
+        Item("b", "2", ViewKind.PAGE, "Metabo RX", "a.top", [], Risk("none", unchecked=blank),
+             matches=[back], campaign="c1"),
+        Item("c", "2", ViewKind.IMAGE, "shot.png", None, [], Risk("none", unchecked=blank)),
+    ]  # fmt: skip
+    campaign = Campaign("c1", "Campaign 1071875908635809", ["a", "b"], ["1", "2"],
+                        "2026-11-20T10:00:00+00:00", [], title="Metabo <RX>")  # fmt: skip
+    lib = Library(
+        cases=[Case("1", "Case 1", "2026-11-20T10:00:00+00:00", items[:1]),
+               Case("2", "Case 2", "2026-11-21T10:00:00+00:00", items[1:])],
+        journeys={}, links={}, campaigns={"c1": campaign},
+    )  # fmt: skip
+    stats = build_stats(lib, generated_at="2026-11-22T08:00:00+00:00")
+    assert "by_type" not in stats and "link_status" not in stats
+    assert stats["totals"] == {
+        "items": 3, "cases": 2, "campaigns": 1, "kits": 0, "linked": 2, "linked_pct": 67,
+        "with_signs": 1, "checked": 1, "websites": 1,
+    }  # fmt: skip
+    assert [(c["label"], c["items"], c["cases"]) for c in stats["campaigns"]] == [
+        ("Metabo <RX>", 2, "1, 2")
+    ]
+    assert stats["kits"] == []
+    for gone in ("risk", "signs", "strength", "linked_by", "hosts"):
+        assert gone not in stats
+    assert stats["latest"] == {"case": "Case 2", "day": "2026-11-21", "items": 2,
+                               "linked_to_earlier": 1}  # fmt: skip
+    together = Library(
+        cases=[Case("1", "Case 1", "2026-11-21T10:00:00+00:00", items[:1]),
+               Case("2", "Case 2", "2026-11-21T10:00:00+00:00", items[1:])],
+        journeys={}, links={},
+    )  # fmt: skip
+    assert build_stats(together)["latest"]["case"] == "2 cases"  # one addition, two cases
+    assert build_stats(together)["latest"]["items"] == 3
+    assert stats["campaigns_across_cases"] == 1
+
+    page = render_html(stats)
+    assert "3 items in 2 cases" in page
+    assert "Metabo &lt;RX&gt;" in page and "<RX>" not in page  # material stays text
+    assert "<svg" not in page  # the overview is tables, no charts
+    assert "<script" not in page and "http" not in page  # self-contained
+
+    empty = render_html(build_stats(Library(cases=[], journeys={}, links={})))
+    assert "The library is empty" in empty
+
+
+def test_library_report_is_served_as_a_page_and_a_pdf(client, monkeypatch):
+    stats = client.get("/api/library/report.json").json()
+    assert stats["totals"]["items"] == 2 and stats["totals"]["cases"] == 1
+    page = client.get("/api/library/report.html")
+    assert page.status_code == 200 and "Library report" in page.text
+    method = stats["method"]
+    from ftf.registry import comparators, extractors, layers
+
+    assert [f["id"] for f in method["fingerprints"]] and method["items"] == 2
+    assert {f["id"] for f in method["fingerprints"]} == set(layers.names())  # all of them
+    assert {e["id"] for e in method["extractors"]} == set(extractors.names())
+    assert {c["id"] for c in method["comparators"]} == set(comparators.names())
+    for row in method["extractors"] + method["enrichers"] + method["comparators"]:
+        assert row["what"], row["id"]  # every method says what it does
+    for heading in ("What happens to every added item", "Fingerprints", "Methods applied"):
+        assert heading in page.text
+    assert "1. Ingest" in page.text and "6. Group" in page.text
+    assert "Items by type" not in page.text and "How items are linked" not in page.text
+    assert client.get("/api/library/report.exe").status_code == 404
+
+    monkeypatch.setattr("ftf.web.library_report.to_pdf", lambda html: b"%PDF-fake")
+    pdf = client.get("/api/library/report.pdf")
+    assert pdf.content == b"%PDF-fake" and pdf.headers["content-type"] == "application/pdf"
+    assert pdf.headers["content-disposition"].startswith('attachment; filename="library-report-')
+
+    def missing(html):
+        from ftf.web.library_report import PdfUnavailable
+
+        raise PdfUnavailable("no browser")
+
+    monkeypatch.setattr("ftf.web.library_report.to_pdf", missing)
+    assert client.get("/api/library/report.pdf").status_code == 503
+
+    import threading
+
+    from ftf.intake import ANALYSIS_LOCK
+
+    held, done = threading.Event(), threading.Event()
+
+    def analysis():
+        with ANALYSIS_LOCK:
+            held.set()
+            done.wait(10)
+
+    worker = threading.Thread(target=analysis)
+    worker.start()
+    held.wait(10)
+    try:  # an analysis is running: half-written results are never reported
+        assert client.get("/api/library/report.json").status_code == 409
+    finally:
+        done.set()
+        worker.join()
+
+
+def test_library_report_describes_a_new_plugin_from_its_own_docstring():
+    from ftf.web.library_report import _described
+
+    class NewReader:
+        """Reads the favicon.
+
+        Added after the report was written.
+        """
+
+        name = "new.reader"
+
+    assert _described(NewReader(), {}) == "Reads the favicon"
+    assert _described(NewReader(), {"new.reader": "Written by hand"}) == "Written by hand"
+
+
+def test_library_report_counts_match_the_store(client):
+    from ftf.config import get_settings
+    from ftf.contracts import Fingerprint, FingerprintKind
+    from ftf.web.library_report import build_method
+
+    store = Store(get_settings().db_path)
+    try:
+        store.put_fingerprint(Fingerprint(view_id="7:page", layer_id="ids.domain",
+                                          kind=FingerprintKind.SET, version="1", payload={}))  # fmt: skip
+        method = build_method(store)
+        assert method["items"] == len(store.views()) == 2
+        by_id = {f["id"]: f["items"] for f in method["fingerprints"]}
+        assert by_id["ids.domain"] == len(store.fingerprints(layer_id="ids.domain")) == 1
+        assert method["counts"]["fingerprints"] == 1
+        assert method["counts"]["evidence"] == len(store.evidence())
+        assert method["counts"]["relations"] == len(store.relations())
+    finally:
+        store.close()
+
+
+@pytest.mark.browser
+def test_library_report_prints_to_a_real_pdf(chromium):
+    from ftf.library import Library
+    from ftf.web.library_report import build_stats, render_html, to_pdf
+
+    pdf = to_pdf(render_html(build_stats(Library(cases=[], journeys={}, links={}))))
+    assert pdf.startswith(b"%PDF-") and len(pdf) > 1000
+
+
 def test_library_map_says_why_campaigns_hold_together(client):
     library_map = client.get("/api/library").json()["map"]
     assert isinstance(library_map["campaignWhy"], dict)

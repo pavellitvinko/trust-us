@@ -33,7 +33,7 @@ from ..processing import item_processing
 from ..registry import load_plugins
 from ..reporting import build_pair_report, render_pair_report
 from ..store import Store
-from . import views
+from . import library_report, views
 from .inspection import cleaner_for, comparison_sources
 from .inspection_routes import router as inspection_router
 from .probe import probe_router
@@ -356,6 +356,44 @@ def create_app() -> FastAPI:
         return Response(
             export_zip(files),
             media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{name}"'},
+        )
+
+    @app.get("/api/library/report.{kind}")
+    def library_report_file(kind: str):
+        """The state of the whole library: `pdf` to keep, `html` or `json` to look at."""
+        if kind not in ("pdf", "html", "json"):
+            raise HTTPException(404)
+        # Counted between analyses, so the library and the store describe the same moment.
+        if not ANALYSIS_LOCK.acquire(blocking=False):
+            raise HTTPException(409, "Available when the current analysis finishes.")
+        try:
+            lib = library_or_none()
+            reader = Store(settings.db_path)
+            try:
+                method = library_report.build_method(reader)
+            finally:
+                reader.close()
+        finally:
+            ANALYSIS_LOCK.release()
+        stats = library_report.build_stats(
+            lib if lib else Library(cases=[], journeys={}, links={}), method
+        )
+        if kind == "json":
+            return stats
+        page = library_report.render_html(stats)
+        if kind == "html":
+            return Response(page, media_type="text/html; charset=utf-8")
+        try:
+            pdf = library_report.to_pdf(page)
+        except library_report.PdfUnavailable as exc:
+            raise HTTPException(
+                503, f"The PDF needs Chromium (`playwright install chromium`): {exc}"
+            ) from exc
+        name = f"library-report-{stats['generated_at'][:10]}.pdf"
+        return Response(
+            pdf,
+            media_type="application/pdf",
             headers={"Content-Disposition": f'attachment; filename="{name}"'},
         )
 
