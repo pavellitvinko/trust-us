@@ -1,6 +1,6 @@
 """Command line: ftf start | lookup | capture | ingest | run | enrich | perceive | views | suspicions | observations |
 compare | pairs | relations | explain | groups | incidents | assign | eval | loio | ablate |
-validate | load-fixtures."""
+validate | load-fixtures | victim."""
 
 from __future__ import annotations
 
@@ -1062,6 +1062,10 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--fixtures", action="store_true", help="evaluate the fixtures in memory")
     p.add_argument("--all", action="store_true", help="also list the agreed pairs")
     p.set_defaults(func=cmd_eval)
+
+    from .victim.cli import add_parser as add_victim_parser
+
+    add_victim_parser(sub)
 
     args = parser.parse_args(argv)
     # Evaluation measures the shipped method, so analyst edits must not change its results.

@@ -27,6 +27,8 @@ class Settings:
     embedding_model: str
     video_model: str
     enrich_mode: str = "on"  # on | cache | off — outside lookups (DNS, RDAP, crt.sh)
+    victim_contacts: Path | None = None  # victim contacts file; default src/ftf/victim/contacts.json
+    victim_out_dir: Path | None = None  # where victim runs are written; default data_dir/victim
 
     @property
     def db_path(self) -> Path:
@@ -40,6 +42,10 @@ class Settings:
     def model_cache_dir(self) -> Path:
         return self.data_dir / "model_cache"
 
+    @property
+    def victim_dir(self) -> Path:
+        return self.victim_out_dir or self.data_dir / "victim"
+
 
 def get_settings() -> Settings:
     _load_dotenv()
@@ -52,4 +58,6 @@ def get_settings() -> Settings:
         embedding_model=env("FTF_EMBEDDING_MODEL", "gemini-embedding-2"),
         video_model=env("FTF_VIDEO_MODEL", "gemini-4-hydrogen"),
         enrich_mode=env("FTF_ENRICH", "on"),
+        victim_contacts=Path(env("FTF_VICTIM_CONTACTS")) if env("FTF_VICTIM_CONTACTS") else None,
+        victim_out_dir=Path(env("FTF_VICTIM_DIR")) if env("FTF_VICTIM_DIR") else None,
     )

@@ -236,8 +236,9 @@ def test_solo_identity_groups_are_configurable():
 
 def test_separation_needs_the_evidence_that_could_have_linked():
     """Missing evidence is unavailable: it never becomes a separation, let alone a confident one."""
-    from ftf.fusion.fuse import set_active_groups
+    from ftf.fusion.fuse import active_groups, set_active_groups
 
+    saved = active_groups()  # the module's fused store set it; later tests recompute with it
     try:
         set_active_groups({"domain", "text", "kit_url"})
         seen = [ev("ids.domain", 0.0), ev("text.shingle", 0.0), ev("kit.url", 0.0)]
@@ -258,12 +259,13 @@ def test_separation_needs_the_evidence_that_could_have_linked():
         assert (r.type, r.confidence, r.coverage) == (RelationType.INSUFFICIENT, "", 1.0)
         assert any("identity tier not comparable" in x for x in r.reasons)
     finally:
-        set_active_groups(None)
+        set_active_groups(saved)
 
 
 def test_weak_similarity_below_threshold_is_reported_not_used():
-    from ftf.fusion.fuse import set_active_groups
+    from ftf.fusion.fuse import active_groups, set_active_groups
 
+    saved = active_groups()  # the module's fused store set it; later tests recompute with it
     try:
         set_active_groups({"domain", "text", "kit_url"})
         weak = ev("kit.url", 0.33, [{"ns": "url.path_shape", "value": "/lander/", "weight": 0.33}])
@@ -271,7 +273,7 @@ def test_weak_similarity_below_threshold_is_reported_not_used():
         assert r.type is RelationType.UNRELATED
         assert any(x.startswith("below threshold, not used: kit") for x in r.reasons)
     finally:
-        set_active_groups(None)
+        set_active_groups(saved)
 
 
 def test_host_equal_to_its_registrable_domain_is_one_fact():
@@ -367,8 +369,9 @@ def test_basis_names_the_path_taken_not_the_strongest_tier():
 
 
 def test_basis_separates_the_two_insufficient_causes_and_the_unrelated_label():
-    from ftf.fusion.fuse import set_active_groups
+    from ftf.fusion.fuse import active_groups, set_active_groups
 
+    saved = active_groups()
     try:
         set_active_groups({"asset", "creative"})
         rtype, _, _, basis = _explain([ev("asset.exact", 0.0), ev("ad.creative", 0.0)])
@@ -392,4 +395,4 @@ def test_basis_separates_the_two_insufficient_causes_and_the_unrelated_label():
         assert basis["artifact_seen"] is False
         assert str(DEFAULT.unrelated_high_coverage) in basis["label_rule"]["high"]
     finally:
-        set_active_groups(None)
+        set_active_groups(saved)

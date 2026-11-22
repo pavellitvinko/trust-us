@@ -1,0 +1,47 @@
+{
+  "id": "weight-loss",
+  "version": "1",
+  "summary": "44, woman, tried diets, active on Instagram",
+  "matches": "Health offers like sample case 14",
+  "identity": {
+    "first_name": "Agnieszka",
+    "surname": "Zalewska",
+    "age": 44,
+    "sex": "female",
+    "town": "Kielce",
+    "voivodeship": "świętokrzyskie"
+  },
+  "situation": {
+    "occupation": "office administrator",
+    "monthly_income_pln": "5200",
+    "savings_band": "a few thousand zł",
+    "family": "married, one teenage child",
+    "health_worries": "overweight for years, tried several diets, low energy"
+  },
+  "interests": ["losing weight", "Instagram fitness profiles", "natural supplements", "celebrity transformations"],
+  "fears": ["diets that do not work", "health problems from weight"],
+  "goal": "find out how to order this and how fast it works",
+  "digital": {
+    "device": "phone",
+    "browser": "chrome",
+    "phone_model": "Samsung Galaxy A54",
+    "viewport": {"width": 412, "height": 915},
+    "platform": "instagram",
+    "reading": "skims",
+    "reading_wpm": 230,
+    "typing_cps": 4.5
+  },
+  "disposition": {"trust": "hopeful but has been let down before", "urgency": "gives in to limited-stock offers"},
+  "locale": {"locale": "pl-PL", "timezone": "Europe/Warsaw"},
+  "answers": [
+    {"topic": "sex", "patterns": ["płeć", "plec", "gender"], "prefer": ["kobieta", "female"]},
+    {"topic": "age", "patterns": ["ile masz lat", "wiek", "how old", "age"], "prefer": ["40", "41-50", "40–55", "35-45"]},
+    {"topic": "weight_goal", "patterns": ["ile.*(schudnąć|kilogram|kg)", "how much weight"], "prefer": ["10", "10-15", "powyżej 10"]},
+    {"topic": "tried_diets", "patterns": ["diet", "próbowała", "tried"], "prefer": ["tak", "wiele", "yes"]},
+    {"topic": "duration", "patterns": ["jak długo", "od kiedy", "how long"], "prefer": ["kilka lat", "lata", "years"]},
+    {"topic": "residence", "patterns": ["gdzie.*mieszka", "kraj"], "prefer": ["w polsce", "polska"]},
+    {"topic": "quantity", "patterns": ["ile opakowań", "zestaw", "pakiet"], "prefer": ["1", "jedno", "najmniejszy"]},
+    {"topic": "consent", "patterns": ["zgod", "akceptuj", "agree"], "prefer": ["tak", "zgadzam", "yes"]}
+  ],
+  "suggest_keywords": ["schudn", "odchudz", "kilogram", "kg", "dieta", "tłuszcz", "metabolizm", "kapsułk", "suplement", "sylwetk", "brzuch"]
+}
