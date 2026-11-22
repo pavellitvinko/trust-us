@@ -13,7 +13,7 @@ CHECK_EXTRACTORS = {
 STATE_LABELS = {
     "not_run": "Not checked", "queued": "Waiting", "running": "Processing",
     "complete": "Complete", "partial": "Partly checked", "unavailable": "Unavailable",
-    "retained": "Earlier result kept", "skipped": "Skipped", "failed": "Failed",
+    "retained": "Needs retry", "skipped": "Skipped", "failed": "Failed", "not_ready": "No patterns yet", "not_applicable": "Not applicable",
     "deferred": "Continuing in background", "on_demand": "Analyze on item page",
 }
 REASONS = {
@@ -40,15 +40,19 @@ def applicable_checks(view: View) -> list[dict]:
 def check_result(check: str, observations: list, summary: dict | None = None) -> dict:
     rows = [o for o in observations if o.extractor == CHECK_EXTRACTORS[check]]
     observable = sum(o.state != State.NOT_OBSERVABLE for o in rows)
-    unavailable = len(rows) - observable
+    unavailable_rows = [o for o in rows if o.state == State.NOT_OBSERVABLE
+                        and not (check == "warnings" and isinstance(o.value, dict) and o.value.get("message") == "no supported input")]
+    unavailable = len(unavailable_rows)
     # A successful read with zero findings is still a completed check.
     if summary and (summary.get("kept") or (summary.get("reason") and observable)):
         state, message = "retained", "The latest attempt did not finish; earlier results were kept."
     elif unavailable:
         state = "partial" if observable else "unavailable"
         reasons = list(dict.fromkeys(REASONS.get(o.raw or "", "Some source evidence could not be checked.")
-                                    for o in rows if o.state == State.NOT_OBSERVABLE))
+                                    for o in unavailable_rows))
         message = " ".join(reasons[:3])
+    elif rows and not observable and not unavailable:
+        state, message = "not_applicable", "No domain or organization found to check."
     elif observable or (summary and not summary.get("not_observable") and not summary.get("reason")):
         state, message = "complete", "Check completed."
     elif summary and (summary.get("not_observable") or summary.get("reason")):
@@ -62,7 +66,7 @@ def check_result(check: str, observations: list, summary: dict | None = None) ->
             ).encode()).hexdigest()}
 
 
-def item_processing(view: View, observations: list, tracked: dict | None = None) -> dict:
+def item_processing(view: View, observations: list, tracked: dict | None = None, *, patterns_available: bool | None = None) -> dict:
     checks = []
     for spec in applicable_checks(view):
         key = spec["id"]
@@ -85,7 +89,12 @@ def item_processing(view: View, observations: list, tracked: dict | None = None)
             message += " Earlier results remain available while this check runs."
         if state == "on_demand":
             message = "Full video analysis runs when you choose Analyze video on this item's page."
+        if key == "warnings" and state in ("retained", "unavailable") and stored["state"] == "partial":
+            state = "partial"
+        if key == "patterns" and patterns_available is False and state not in ("queued", "running"):
+            state, message = "not_ready", "Process more cases and discover patterns in Library first."
         checks.append({"id": key, "label": spec["label"], "state": state,
+                       "canRun": not view.meta.get("shipped", False) and state != "not_ready",
                        "status": STATE_LABELS[state], "message": message, "hasResult": has_result,
                        "updatedAt": attempt.get("updatedAt"), "runId": attempt.get("runId"),
                        "observations": stored["observations"]})
@@ -99,7 +108,7 @@ def item_processing(view: View, observations: list, tracked: dict | None = None)
         state = "failed"
     elif all(s == "complete" for s in states):
         state = "complete"
-    elif all(s == "not_run" for s in states):
+    elif all(s in ("not_run", "not_ready", "not_applicable") for s in states):
         state = "not_run"
     elif all(s == "skipped" for s in states):
         state = "skipped"

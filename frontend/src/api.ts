@@ -2,8 +2,9 @@
 
 export type LinkKind = "campaign" | "kit" | "duplicate" | "possible";
 
-export type CheckState = "not_run" | "queued" | "running" | "complete" | "partial" | "unavailable" | "retained" | "skipped" | "failed" | "deferred" | "on_demand";
+export type CheckState = "not_run" | "queued" | "running" | "complete" | "partial" | "unavailable" | "retained" | "skipped" | "failed" | "deferred" | "on_demand" | "not_ready" | "not_applicable";
 export interface ItemCheck {
+  canRun?: boolean;
   id: string; label: string; state: CheckState; status: string; message: string;
   hasResult: boolean; updatedAt: string | null; runId: string | null; observations: number;
 }

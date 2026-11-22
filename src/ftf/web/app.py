@@ -105,6 +105,11 @@ def create_app() -> FastAPI:
     def library_or_none() -> Library | None:
         return cache.get()
 
+    def patterns_ready() -> bool:
+        from ..patterns.library import PatternLibraryStore
+        version = PatternLibraryStore(settings.data_dir / "patterns/library").latest_version()
+        return bool(version and version.patterns)
+
     def item_or_404(view_id: str):
         library = library_or_none()
         item = library.get(view_id) if library else None
@@ -130,7 +135,7 @@ def create_app() -> FastAPI:
         try:
             for row in payload["items"]:
                 view = reader.get_view(row["id"])
-                row["processing"] = item_processing(view, reader.observations(view.view_id), tracked.get(view.view_id))
+                row["processing"] = item_processing(view, reader.observations(view.view_id), tracked.get(view.view_id), patterns_available=patterns_ready())
         finally:
             reader.close()
         return {
@@ -195,7 +200,7 @@ def create_app() -> FastAPI:
         reader = Store(settings.db_path)
         try:
             view = reader.get_view(view_id)
-            processing = item_processing(view, reader.observations(view_id), worker.item_checks_snapshot().get(view_id))
+            processing = item_processing(view, reader.observations(view_id), worker.item_checks_snapshot().get(view_id), patterns_available=patterns_ready())
         finally:
             reader.close()
         video_runs = [j for j in worker.jobs.values() if j.kind == "video" and j.view_ids == [view_id]]

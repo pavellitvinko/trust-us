@@ -338,7 +338,7 @@ class Sources:
 
 
 def load_sources(
-    cache: Path, *, refresh=False, fetch=download, gambling: Path | None = None
+    cache: Path, *, refresh=False, fetch_missing=False, fetch=download, gambling: Path | None = None
 ) -> Sources:
     """One refresh per source per session. Failed refreshes never replace valid data."""
     result = Sources()
@@ -364,7 +364,7 @@ def load_sources(
                 break
             except (OSError, ValueError, KeyError, TypeError) as exc:
                 result.errors[source] = f"snapshot unavailable: {type(exc).__name__}"
-        if refresh and source in ("cert", "knf"):
+        if (refresh or fetch_missing and source not in result.snapshots) and source in ("cert", "knf"):
             try:
                 content = fetch(URLS[source]).decode("utf-8-sig")
                 snapshot = make_snapshot(source, content, datetime.now(UTC).isoformat())

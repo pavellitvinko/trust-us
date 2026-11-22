@@ -222,7 +222,9 @@ def compute(snapshot: bytes, task: dict, settings, seconds: float):
                 )
             elif stage == "warnings":
                 from .enrich.warning_lists import run_warning_lists
-                summary = run_warning_lists(store, settings.data_dir / "warning_lists", view_ids=ids)
+                from .enrich.warning_sources import load_sources
+                sources = load_sources(settings.data_dir / "warning_lists", fetch_missing=settings.enrich_mode != "off")
+                summary = run_warning_lists(store, settings.data_dir / "warning_lists", view_ids=ids, sources=sources)
             elif stage == "semantic":
                 from .layers._embedder import FakeEmbedder, GatewayEmbedder, using_embedder
 
@@ -869,6 +871,7 @@ class Scheduler:
                         continue
                     obs = store.observations(vid)
                     result = check_result(key, obs, task.get("result"))
+                    coverage_state = result["state"]
                     state = task["state"]
                     if state != "complete":
                         result.update(
@@ -885,10 +888,12 @@ class Scheduler:
                                 "cancelled": "Analysis cancelled; earlier results remain available.",
                             }.get(state, result["message"]),
                         )
-                        if state == "unavailable" and result["hasResult"]:
+                        if state == "unavailable" and coverage_state == "partial":
+                            result.update(state="partial")
+                        elif state == "unavailable" and result["hasResult"]:
                             result.update(
                                 state="retained",
-                                message="The latest attempt could not finish; earlier results remain available.",
+                                message="Check could not finish. Try again.",
                             )
                     result.update(
                         runId=job.job_id,

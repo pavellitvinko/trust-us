@@ -291,9 +291,16 @@ class Worker:
                 if view.meta.get("shipped"):
                     raise IntakeError("This item has no source material to check.")
                 allowed = {s["id"] for s in applicable_checks(view)}
+                from .patterns.library import PatternLibraryStore
+                version = PatternLibraryStore(self.data_dir / "patterns/library").latest_version()
+                patterns_ready = bool(version and version.patterns)
             finally:
                 reader.close()
             selected = set(allowed if checks is None else checks)
+            if not patterns_ready:
+                if checks is not None and "patterns" in selected:
+                    raise IntakeError("Process more cases and discover patterns in Library first.")
+                selected.discard("patterns")
             if not selected or selected - allowed:
                 raise IntakeError("Choose applicable checks for this item.")
             existing = next((j for j in self.active() if j.kind == "item" and j.view_ids == [view_id]

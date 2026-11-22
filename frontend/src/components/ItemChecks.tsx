@@ -21,17 +21,14 @@ function CheckMenu({ processing, id, refresh }: { processing: ItemProcessing; id
         <ProgressRing state={check.state} value={check.state === "running" ? undefined : check.state === "complete" ? 1 : 0}
           label={`${check.label}: ${check.status}`} size={25} text={check.state === "not_run" || check.state === "queued" ? "" : undefined} />
         <div className="checks-menu-copy"><strong>{check.label}</strong><span className={`check-${check.state}`}>{check.status}</span>
-          {["partial", "unavailable", "retained", "failed", "deferred", "on_demand"].includes(check.state) && <small>{check.message}</small>}
-          {check.hasResult && check.state !== "complete" && <small>{check.state === "partial" ? "Stored results available" : "Earlier results available"}</small>}
         </div>
-        {id && processing.canRun !== false && <button className="text-link small" disabled={!!pending || busy}
+        {id && processing.canRun !== false && check.canRun !== false && <button className="text-link small" disabled={!!pending || busy}
           onClick={() => run(check.id)} aria-label={`Run ${check.label}`}>{pending === check.id ? "Starting…" : check.hasResult ? "Run again" : "Run"}</button>}
       </li>)}
     </ul>
     {id && processing.canRun !== false && <div className="checks-menu-footer"><button className="btn primary" disabled={!!pending || busy}
       onClick={() => run()}>{pending === "all" ? "Starting…" : "Run all item checks"}</button></div>}
     {error && <p className="error checks-menu-note" role="alert">{error}</p>}
-    <p className="checks-menu-note">{id ? "Runs checks for this item only. Required reading runs first. Cached answers are reused; API charges may apply. Pattern checks match the existing library." : "Progress shows check coverage. Skipped and unavailable checks remain incomplete."}</p>
   </>;
 }
 

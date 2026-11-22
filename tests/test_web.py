@@ -306,7 +306,8 @@ def test_item_check_endpoint_validates_scope_and_deduplicates(client, monkeypatc
     assert first.status_code == 202
     assert client.post("/api/items/7:shot/checks", json=["image"]).json()["id"] == first.json()["id"]
     assert client.get("/api/items/7:shot").json()["processing"]["checks"][0]["state"] == "queued"
-    assert all(c["state"] == "not_run" for c in client.get("/api/items/7:page").json()["processing"]["checks"])
+    assert all(c["state"] == ("not_ready" if c["id"] == "patterns" else "not_run")
+               for c in client.get("/api/items/7:page").json()["processing"]["checks"])
 
 
 def test_video_analysis_endpoint_is_explicit_idempotent_and_cancellable(client, monkeypatch):
