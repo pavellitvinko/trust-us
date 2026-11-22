@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 
 
 def load_har(path: Path) -> list[dict[str, Any]]:
@@ -91,3 +91,37 @@ def main_document(
         return None
     _, index, url = min(candidates)
     return index, url
+
+
+MAX_HOPS = 20
+
+
+def document_redirects(entries: list[dict[str, Any]]) -> list[tuple[int, str, str, int]]:
+    """(entry index, from URL, to URL, status) of the HTTP redirects into the main document,
+    in the order they happened."""
+    doc = main_document(entries)
+    if doc is None:
+        return []
+    target, hops, seen = doc[1], [], set()
+    while len(hops) < MAX_HOPS:
+        found = None
+        for i, entry in enumerate(entries):
+            if i in seen:
+                continue
+            req, resp = entry.get("request") or {}, entry.get("response") or {}
+            status = resp.get("status") or 0
+            location = resp.get("redirectURL") or ""
+            url = req.get("url") or ""
+            if not (300 <= status < 400 and location and url):
+                continue
+            if entry.get("_resourceType") not in (None, "document"):
+                continue
+            if urljoin(url, location).split("#")[0] == target.split("#")[0]:
+                found = (i, url, target, status)
+                break
+        if found is None:
+            break
+        seen.add(found[0])
+        hops.append(found)
+        target = found[1]
+    return hops[::-1]

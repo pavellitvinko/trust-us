@@ -1,4 +1,4 @@
-"""Command line: ftf ingest | run | enrich | perceive | views | suspicions | observations |
+"""Command line: ftf capture | ingest | run | enrich | perceive | views | suspicions | observations |
 compare | pairs | relations | explain | groups | incidents | assign | eval | loio | ablate |
 validate | load-fixtures."""
 
@@ -41,6 +41,59 @@ def cmd_ingest(args) -> None:
         raise SystemExit(1)
     if not args.no_run:
         cmd_run(args)
+
+
+def _capture_dir(url: str | None, replay: Path | None) -> Path:
+    from datetime import UTC, datetime
+    from urllib.parse import urlsplit
+
+    host = urlsplit(url if url and "//" in url else f"//{url or ''}").hostname
+    name = host or (replay.stem if replay else "capture")
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    return get_settings().data_dir / "captures" / f"{name}-{stamp}"
+
+
+def cmd_capture(args) -> None:
+    """Capture a URL (or replay an archived HAR) into a bundle; optionally ingest and run it."""
+    from .capture import capture_url
+    from .ingest import ingest_folder
+
+    replay = Path(args.replay) if args.replay else None
+    if not args.url and replay is None:
+        print("error: give a URL, or --replay with an archived HAR", file=sys.stderr)
+        raise SystemExit(2)
+    incident_dir = Path(args.out) if args.out else _capture_dir(args.url, replay)
+    result = capture_url(
+        args.url,
+        incident_dir / "bundle",
+        replay_har=replay,
+        proxy=args.proxy,
+        timeout=args.timeout,
+    )
+    man = result.manifest
+    print(f"capture {man.mode}: {man.status.value}  {man.page_url}")
+    if man.error:
+        print(f"  error: {man.error}")
+    if man.final_url and man.final_url != man.page_url:
+        print(f"  landed on: {man.final_url}")
+    for hop in man.redirects:
+        status = f" {hop.status}" if hop.status else ""
+        print(f"  hop {hop.index}: {hop.kind.value}{status}  {hop.from_url} -> {hop.to_url}")
+    if man.server and man.server.ip:
+        print(f"  server: {man.server.ip}:{man.server.port}  HTTP {man.server.status}")
+    print(
+        f"  files: {', '.join(sorted(man.files.values())) or 'manifest only'}; "
+        f"resources: {len(man.resources)}; blocked: {len(man.blocked)}"
+    )
+    print(f"  bundle: {result.bundle}")
+    if args.ingest:
+        # A dead domain is still material: its view keeps the failure and gets DNS and RDAP.
+        _, views = ingest_folder(incident_dir, _store(), args.incident)
+        for v in views:
+            print(f"view {v.view_id}  {v.label}")
+        cmd_run(args)
+    if not result.ok:
+        raise SystemExit(3)
 
 
 def _compare_and_group(store, args) -> None:
@@ -408,6 +461,18 @@ def cmd_ablate(args) -> None:
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="ftf", description="Follow the Fake")
     sub = parser.add_subparsers(dest="command", required=True)
+
+    p = sub.add_parser("capture", help="capture a URL with a headless browser into a bundle")
+    p.add_argument("url", nargs="?", help="page to capture; optional with --replay")
+    p.add_argument("--replay", metavar="HAR", help="serve the browser from this archived HAR")
+    p.add_argument("--out", help="incident folder to write (default: $FTF_DATA_DIR/captures/…)")
+    p.add_argument("--proxy", help="proxy server, e.g. http://host:3128 (egress is recorded)")
+    p.add_argument("--timeout", type=float, default=30.0, help="navigation timeout, seconds")
+    p.add_argument("--ingest", action="store_true", help="ingest the bundle and run everything")
+    p.add_argument("--incident", help="incident id for --ingest (default: the folder name)")
+    p.add_argument("--candidates", action="store_true", help="compare candidate pairs only")
+    p.add_argument("--no-enrich", action="store_true", help="skip DNS and RDAP lookups")
+    p.set_defaults(func=cmd_capture)
 
     p = sub.add_parser("ingest", help="ingest an incident folder, or a folder of incident folders")
     p.add_argument("path")
