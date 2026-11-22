@@ -177,7 +177,7 @@ def test_saved_pages_are_named_after_their_title():
 
 
 @pytest.fixture(scope="module")
-def sample_library(tmp_path_factory):
+def sample_library(tmp_path_factory, sample_observations):
     if not SAMPLE.is_dir():
         pytest.skip("testing_sample/ not present")
     mp = pytest.MonkeyPatch()
@@ -185,18 +185,14 @@ def sample_library(tmp_path_factory):
                        ("OPENAI_API_KEY", ""), ("GEMINI_API_KEY", "")):  # fmt: skip
         mp.setenv(key, value)
     from ftf import pipeline
+    from ftf.eval import sample
     from ftf.fusion import run_method
     from ftf.grouping import build_groups
-    from ftf.ingest import ingest_path
     from ftf.registry import load_plugins
-    from ftf.store import Store
 
     load_plugins()
-    s = Store(":memory:")
-    ingest_path(SAMPLE, s)
-    pipeline.run_extract(s)
+    s = sample.clone(sample_observations)
     pipeline.run_fingerprint(s)
-    pipeline.run_compare_all(s)
     run_method(s)
     lib = build_library(s, build_groups(s, persist_funnel=False), tmp_path_factory.mktemp("d"))
     yield lib

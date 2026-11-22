@@ -303,10 +303,16 @@ def test_mask_covers_the_inflections_the_sample_uses():
     assert m.count("[CELEBRITY]") == 5
 
 
+@pytest.mark.sample
 @pytest.mark.skipif(not Path("testing_sample").is_dir(), reason="testing_sample/ not present")
-def test_gateway_report_runs_every_part_on_the_injected_embedder(settings):
+def test_gateway_report_runs_every_part_on_the_injected_embedder(
+    settings, sample_observations, monkeypatch
+):
     """The whole report, probes included, embeds with the gateway embedder: the run record
     names the model and the cache, and no vector in it comes from the hashed-word embedder."""
+    # Extraction has separate real-file coverage. Keep the full report and ablation
+    # path here, without decoding the same recordings again just to test embedding mode.
+    monkeypatch.setattr(sample, "extracted", lambda _: sample.clone(sample_observations))
     client = FakeGemini()
     emb = GatewayEmbedder(settings.embedding_model, settings=settings, client=client)
     text = sample.validation_report(

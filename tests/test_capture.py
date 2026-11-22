@@ -280,18 +280,8 @@ def test_bundle_redirects_and_server_become_sourced_observations(tmp_path, store
 # --- browser: live capture against a local server ---------------------------------------
 
 
-def _chromium_available() -> bool:
-    try:
-        from playwright.sync_api import sync_playwright
+browser = pytest.mark.usefixtures("chromium")
 
-        with sync_playwright() as pw:
-            pw.chromium.launch(headless=True).close()
-        return True
-    except Exception:  # noqa: BLE001
-        return False
-
-
-browser = pytest.mark.skipif(not _chromium_available(), reason="Chromium not installed")
 
 PAGES = {
     "/meta": '<html><head><meta http-equiv="refresh" content="0;url=/js"></head></html>',
@@ -366,12 +356,15 @@ class _Handler(BaseHTTPRequestHandler):
 def site():
     _Handler.posts = []
     server = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
     thread.start()
     yield f"http://127.0.0.1:{server.server_address[1]}"
     server.shutdown()
+    server.server_close()
+    thread.join()
 
 
+@pytest.mark.browser
 @browser
 def test_live_capture_traces_redirects_and_never_submits(tmp_path, store, site):
     from ftf.capture import capture_url
@@ -401,6 +394,7 @@ def test_live_capture_traces_redirects_and_never_submits(tmp_path, store, site):
     assert _obs(store, view.view_id, "url.host_path")
 
 
+@pytest.mark.browser
 @browser
 def test_dead_domain_capture_records_failure(tmp_path):
     import socket
@@ -416,6 +410,7 @@ def test_dead_domain_capture_records_failure(tmp_path):
     assert not (tmp_path / "b" / "dom.html").exists()
 
 
+@pytest.mark.browser
 @browser
 def test_replay_serves_the_archive(tmp_path, store):
     from ftf.capture import capture_url
@@ -447,7 +442,9 @@ def test_replay_serves_the_archive(tmp_path, store):
     assert [o.value for o in _obs(store, view.view_id, "fb_pixel")] == ["2012165449475163"]
 
 
+@pytest.mark.browser
 @browser
+@pytest.mark.sample
 @pytest.mark.skipif(not SAMPLE.is_dir(), reason="testing_sample/ not present")
 def test_replay_of_a_sample_har(tmp_path, store):
     from ftf.capture import capture_url
@@ -469,11 +466,12 @@ def _closed_port() -> int:
         return sock.getsockname()[1]
 
 
+@pytest.mark.browser
 @browser
 def test_download_is_refused(tmp_path, site):
     from ftf.capture import capture_url
 
-    result = capture_url(f"{site}/dl", tmp_path / "b", timeout=15, settle=1)
+    result = capture_url(f"{site}/dl", tmp_path / "b", timeout=3, settle=1)
     man = result.manifest
     assert result.ok, man.error
     assert man.final_url == f"{site}/dl"
@@ -481,6 +479,7 @@ def test_download_is_refused(tmp_path, site):
     assert not any(r.url.endswith(".zip") for r in man.resources)
 
 
+@pytest.mark.browser
 @browser
 def test_script_navigation_to_a_dead_host_keeps_the_landing(tmp_path, site):
     from ftf.capture import capture_url
@@ -497,6 +496,7 @@ def test_script_navigation_to_a_dead_host_keeps_the_landing(tmp_path, site):
     assert man.redirects[0].to_url == _Handler.onward
 
 
+@pytest.mark.browser
 @browser
 def test_replay_walks_the_archived_redirect(tmp_path, store):
     from ftf.capture import capture_url
@@ -523,6 +523,7 @@ def test_replay_walks_the_archived_redirect(tmp_path, store):
     assert [o.value for o in _obs(store, view.view_id, "domain.registrable")] == ["offer.live"]
 
 
+@pytest.mark.browser
 @browser
 def test_cli_capture_ingests_and_runs(tmp_path, monkeypatch, site, capsys):
     from ftf.cli import main
@@ -542,6 +543,7 @@ def test_cli_capture_ingests_and_runs(tmp_path, monkeypatch, site, capsys):
     assert exc.value.code == 3
 
 
+@pytest.mark.browser
 @browser
 def test_interface_replay_runs_inside_an_event_loop(tmp_path, store, monkeypatch):
     """The interface path: replay a HAR into a new incident and run every stage. Called from a
@@ -566,6 +568,7 @@ def test_interface_replay_runs_inside_an_event_loop(tmp_path, store, monkeypatch
     assert [o.value for o in _obs(store, view.view_id, "fb_pixel")] == ["2012165449475163"]
 
 
+@pytest.mark.browser
 @browser
 def test_public_only_capture_never_reaches_a_local_address(tmp_path, site):
     from ftf.capture import capture_url
@@ -586,6 +589,7 @@ def fake_dns(monkeypatch):
     monkeypatch.setattr(gate, "is_public", lambda address: address == "127.0.0.1")
 
 
+@pytest.mark.browser
 @browser
 def test_public_only_capture_goes_through_the_gate(tmp_path, site, fake_dns):
     from ftf.capture import capture_url
@@ -598,6 +602,7 @@ def test_public_only_capture_goes_through_the_gate(tmp_path, site, fake_dns):
     assert result.manifest.server.ip == "127.0.0.1"  # the address the gate pinned, not its own
 
 
+@pytest.mark.browser
 @browser
 def test_redirect_to_a_private_address_is_refused(tmp_path, site, fake_dns):
     """route() never sees redirect hops; the gate does."""
@@ -617,6 +622,7 @@ def test_redirect_to_a_private_address_is_refused(tmp_path, site, fake_dns):
     assert not (tmp_path / "b" / "dom.html").exists()
 
 
+@pytest.mark.browser
 @browser
 def test_unresolved_host_through_the_gate_is_a_dns_failure(tmp_path, fake_dns):
     from ftf.capture import capture_url
@@ -627,6 +633,7 @@ def test_unresolved_host_through_the_gate_is_a_dns_failure(tmp_path, fake_dns):
     assert result.manifest.status is Status.DNS_FAILED
 
 
+@pytest.mark.browser
 @browser
 def test_hung_capture_is_killed(tmp_path, store, site, monkeypatch):
     import time as clock
@@ -643,6 +650,7 @@ def test_hung_capture_is_killed(tmp_path, store, site, monkeypatch):
     assert not list((tmp_path / "data" / "captures").iterdir())
 
 
+@pytest.mark.browser
 @browser
 def test_replay_with_a_url_needs_no_document_in_the_archive(tmp_path):
     from ftf.capture import capture_url
@@ -655,6 +663,7 @@ def test_replay_with_a_url_needs_no_document_in_the_archive(tmp_path):
     assert result.manifest.mode == "replay" and result.manifest.status is Status.NOT_IN_ARCHIVE
 
 
+@pytest.mark.browser
 @browser
 def test_interface_captures_a_live_url(tmp_path, monkeypatch, site):
     """Add material → link in the web interface: the background worker captures it through

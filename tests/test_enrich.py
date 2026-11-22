@@ -374,6 +374,7 @@ def test_domain_shape_extractor(store, tmp_path):
 # --- done criterion on the sample -------------------------------------------------------
 
 
+@pytest.mark.sample
 @pytest.mark.skipif(not SAMPLE.is_dir(), reason="testing_sample/ not present")
 def test_every_sample_page_has_age_and_name_servers(store, fake):
     """HAC-16 done-when: each page view has domain-age and name-server rows, or not_observable.

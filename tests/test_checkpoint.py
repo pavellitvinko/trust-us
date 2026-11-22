@@ -14,10 +14,10 @@ ROOT = Path(__file__).resolve().parents[1]
 SAMPLE = ROOT / "testing_sample"
 
 
+@pytest.mark.sample
 @pytest.mark.skipif(not SAMPLE.is_dir(), reason="testing_sample/ not present")
-def test_real_sample_cli_checkpoint_without_models(tmp_path, model_off_cli):
-    cli = model_off_cli
-    assert "relations:" in cli("ingest", str(SAMPLE))
+def test_real_sample_cli_checkpoint_without_models(tmp_path, model_off_sample):
+    cli = model_off_sample
     load_plugins()
     store = Store(tmp_path / "data" / "ftf.sqlite")
     try:

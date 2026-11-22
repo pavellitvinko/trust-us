@@ -3,9 +3,6 @@
 import csv
 import io
 import json
-import os
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -189,34 +186,10 @@ def test_commit_belongs_to_this_code(tmp_path, monkeypatch):
     assert _commit() == expected
 
 
+@pytest.mark.sample
 @pytest.mark.skipif(not SAMPLE.is_dir(), reason="testing_sample/ not present")
-def test_one_command_on_the_sample_without_models(tmp_path):
-    env = {
-        **os.environ,
-        "FTF_DATA_DIR": str(tmp_path / "data"),
-        "TLDEXTRACT_CACHE": str(tmp_path / "tld"),
-        "FTF_EMBEDDER": "fake",
-        "FTF_ENRICH": "off",
-        "OPENAI_API_KEY": "",
-        "GEMINI_API_KEY": "",
-        "PYTHONPATH": os.pathsep.join((str(ROOT / "src"), str(ROOT))),
-    }
-
-    def cli(*args):
-        audit = tmp_path / f"{args[0]}.json"
-        result = subprocess.run(
-            [sys.executable, "-m", "tests._model_off_cli", *args],
-            cwd=ROOT,
-            env={**env, "FTF_MODEL_OFF_AUDIT": str(audit)},
-            text=True,
-            capture_output=True,
-            timeout=240,
-            check=False,
-        )
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert json.loads(audit.read_text()) == {"model": [], "network": []}
-
-    cli("ingest", str(SAMPLE))
+def test_one_command_on_the_sample_without_models(tmp_path, model_off_sample):
+    cli = model_off_sample
     out = tmp_path / "export"
     cli("report", "--out", str(out))
     report = json.loads((out / "report.json").read_text())
