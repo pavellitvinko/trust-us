@@ -27,6 +27,7 @@ from .fusion.demotion import find_demotions
 from .grouping.funnel import AD_ID
 from .grouping.levels import Groups
 from .grouping.suspicion import reason_summary_for_view
+from .previews import picture
 from .registry import layers, load_plugins
 from .store import Store
 
@@ -62,6 +63,7 @@ class Finding:
     kind: str
     summary: str
     source: str
+    plain: str = ""  # the summary in words a newcomer can read
 
 
 @dataclass
@@ -73,6 +75,11 @@ class Risk:
     @property
     def count(self) -> int:
         return len(self.findings)
+
+    @property
+    def signs(self) -> list[str]:
+        """The findings in plain words, each said once (three timers are one sign)."""
+        return list(dict.fromkeys(f.plain or f.summary for f in self.findings))
 
 
 @dataclass
@@ -126,6 +133,19 @@ class Match:
     @property
     def coverage(self) -> str:
         return f"{self.observed_groups} of {self.total_groups} evidence groups observed"
+
+    @property
+    def kind(self) -> str:
+        """campaign | kit | duplicate | possible, the words the screen explains."""
+        return _MATCH_KINDS[self.verdict]
+
+    @property
+    def reason(self) -> str:
+        return plain_clue(self.clue)
+
+    @property
+    def label(self) -> str:
+        return short_clue(self.clue)
 
 
 @dataclass
@@ -261,6 +281,7 @@ def risk_for(view_id: str, observations) -> Risk:
             summary=reason.summary,
             source=":".join(x for x in (reason.source.file, reason.source.locator) if x)
             or reason.namespace,
+            plain=plain_finding(reason.summary),
         )
         for kind, reasons in summary.reasons_by_kind.items()
         for reason in reasons
@@ -274,6 +295,123 @@ def risk_for(view_id: str, observations) -> Risk:
     level = "error" if kinds >= 2 or listed else "warning" if kinds == 1 else "none"
     unchecked = [KIND_TITLES.get(k, k) for k in summary.unchecked_kinds]
     return Risk(level=level, findings=findings, unchecked=unchecked)
+
+
+# -- words for a reader with no context ----------------------------------------------------
+
+# What each group is for. Shown in the key, column help, link labels and the item page.
+EXPLAIN = {
+    "case": (
+        "Everything added in one go: one folder, a set of files or a link. "
+        "It stays together because it was found together."
+    ),
+    "campaign": (
+        "Items that share something only the scammer controls, such as a tracking pixel, "
+        "a campaign ID or a phone number. Very likely run by the same people."
+    ),
+    "kit": (
+        "Items built from the same page template or code. Scam kits are sold and reused, "
+        "so one kit can serve campaigns run by different people."
+    ),
+    "duplicate": "The same page or picture, added more than once.",
+    "possible": (
+        "Something similar, such as a persuasion style, but not enough to say the items "
+        "are connected."
+    ),
+}
+LINK_NAMES = {
+    "campaign": "Campaign link",
+    "kit": "Kit link",
+    "duplicate": "Same page",
+    "possible": "Possible link",
+}
+UNCHECKED_PLAIN = {
+    "Domain": "the web address",
+    "Impersonation": "pretending to be a known brand or person",
+    "Expected but absent": "details a real site would show",
+    "Evasion": "tricks that hide the page from reviewers",
+    "Persuasion": "pressure tactics",
+}
+_FINDINGS = (
+    (
+        "visual-evasion filter",
+        lambda v: "Page colours are shifted, a trick to get past image filters",
+    ),
+    (
+        "cloaking kit marker",
+        lambda v: f"Contains code from a cloaking tool ({v}) that shows reviewers a harmless page",
+    ),
+    ("low-stock counter", lambda v: f"A fake scarcity counter (“{v}”) to rush the visitor"),
+    ("countdown timer", lambda v: "A countdown timer to rush the visitor"),
+    (
+        "crossed-out price",
+        lambda v: f"A crossed-out “old” price ({v}) to make the offer look like a bargain",
+    ),
+    (
+        "high-risk TLD class",
+        lambda v: (
+            f"Its web address ends in .{v.rsplit('.', 1)[-1]}, an ending often used by scam sites"
+        ),
+    ),
+    ("listed in warning source", lambda v: f"Listed on a public warning list ({v})"),
+    ("possible warning-list match, verify", lambda v: f"May be on a warning list ({v}); verify"),
+    ("imitates interface", lambda v: f"Imitates {v}"),
+    ("invokes institution", lambda v: f"Uses the name of {v} to look trustworthy"),
+    ("white-page traits", lambda v: f"Looks like a harmless decoy page ({v})"),
+    ("technique pattern", lambda v: f"Follows a known scam pattern: {v}"),
+)
+_CLUES = (
+    ("Same pixel ", "Same Facebook tracking pixel "),
+    ("Same campaign record ", "Same campaign ID in the page code "),
+    ("Same owner record ", "Same owner ID in the page code "),
+    ("Same template ", "Same page template "),
+    ("Same tag manager account ", "Same Google Tag Manager account "),
+    ("Same analytics account ", "Same Google Analytics account "),
+    ("Shared account or record", "Same tracking account or record"),
+    ("Shared template or code", "Same template or code"),
+    ("Similar persuasion pattern", "A similar persuasion pattern"),
+    ("Matching content", "Matching text or images"),
+)
+
+
+def plain_finding(summary: str) -> str:
+    """A suspicion reason in words a newcomer can read; unknown reasons pass through."""
+    signal, _, value = summary.partition(": ")
+    for prefix, words in _FINDINGS:
+        if signal == prefix and value:
+            return words(value.strip())
+    if match := re.match(r"domain registered (\d+) days before capture", summary):
+        return f"Its web address was registered only {match.group(1)} days before it was captured"
+    return summary[:1].upper() + summary[1:]
+
+
+def plain_clue(clue: str) -> str:
+    """What two linked items share, said for a reader who does not know the namespaces."""
+    for old, new in _CLUES:
+        if clue.startswith(old):
+            return new + clue[len(old) :]
+    if "identical file" in clue:
+        return f"{clue} (images or scripts)"
+    return clue
+
+
+def short_clue(clue: str) -> str:
+    """The shared thing without its value, short enough to label a line on the map."""
+    for old, new in _CLUES:
+        if clue.startswith(old):
+            clue = new.strip().removesuffix(" in the page code")
+            break
+    else:
+        if "identical file" in clue:
+            return "identical files"
+    return clue[:1].lower() + clue[1:]  # keeps names such as Facebook and ID as they are
+
+
+def visitor_reason(proof: str) -> str:
+    """Why a visitor goes from one page to the next, for the journey drawn as pictures."""
+    if proof.startswith("Stored navigation names the earlier page"):
+        return "The saved page records that the visitor came from the page before"
+    return proof
 
 
 # -- journeys ----------------------------------------------------------------------------
@@ -331,6 +469,12 @@ _VERDICTS = {
     RelationType.SAME_FAMILY: "Shared kit",
 }
 _VERDICT_ORDER = {name: n for n, name in enumerate([*_VERDICTS.values(), "Clue only"])}
+_MATCH_KINDS = {
+    "Duplicate": "duplicate",
+    "Same campaign": "campaign",
+    "Shared kit": "kit",
+    "Clue only": "possible",
+}
 _STRENGTH_ORDER = {"high": 0, "medium": 1, "low": 2, "": 3}
 LAYER_NAMES = {
     "ids.domain": "Page addresses",
@@ -592,14 +736,10 @@ def build_library(
             if not labels:
                 enough = vid in with_fingerprints
                 labels.append(Label("none", "No link yet" if enough else "Not enough evidence"))
-            picture = None
-            if view.kind is ViewKind.IMAGE:
-                picture = view.primary
-            elif view.kind is ViewKind.PAGE:
-                picture = next((a for a in view.attachments if a.endswith("screenshot.png")), None)
-            # The incident folder can be gone (a store copied from elsewhere): no picture then.
-            path = Path(incident.root) / picture if picture else None
-            thumbnail = str(path) if path and path.is_file() else None
+            # The image itself, a capture's screenshot or a rendered saved page. The incident
+            # folder can be gone (a store copied from elsewhere): no picture then.
+            path = picture(view, Path(incident.root), data_dir)
+            thumbnail = str(path) if path else None
             note = None
             if previous is not None and previous.get(vid) is not None:
                 gained = links[vid] - previous.links.get(vid, set())

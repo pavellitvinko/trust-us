@@ -1,4 +1,4 @@
-# Keep the build context small: only pyproject.toml, uv.lock, src, app and .streamlit are copied.
+# Keep the build context small: only pyproject.toml, uv.lock, src, app, frontend and .streamlit are copied.
 .git
 .venv
 .idea
@@ -13,3 +13,6 @@ tests
 .pytest_cache
 .ruff_cache
 .DS_Store
+frontend/node_modules
+frontend/dist
+frontend/*.tsbuildinfo
