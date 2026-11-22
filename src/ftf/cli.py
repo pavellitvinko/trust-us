@@ -459,6 +459,9 @@ def cmd_ablate(args) -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
+    from .method_settings import apply_saved
+
+    apply_saved()
     parser = argparse.ArgumentParser(prog="ftf", description="Follow the Fake")
     sub = parser.add_subparsers(dest="command", required=True)
 

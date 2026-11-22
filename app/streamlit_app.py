@@ -1,4 +1,4 @@
-"""Follow the Fake interface: match, material and add-material screens."""
+"""Follow the Fake interface: match, material, add material, campaign map and method."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import os
 
 import streamlit as st
 
+from ftf.campaign_map import TOGGLES, map_data, to_dot
 from ftf.config import get_settings
 from ftf.enrich.warning_lists import (
     related_listed_views,
@@ -14,6 +15,7 @@ from ftf.enrich.warning_lists import (
     warning_observations,
     warning_risk_reasons,
 )
+from ftf.fusion import run_method
 from ftf.grouping import assign, build_groups
 from ftf.intake import (
     ANALYSIS_LOCK,
@@ -24,7 +26,16 @@ from ftf.intake import (
     discard_upload,
     run_stages,
 )
-from ftf.material import material_summary
+from ftf.material import expectation_profiles, material_summary
+from ftf.method_settings import apply_saved, current_values, reset, save
+from ftf.patterns.analyst import (
+    LibraryEditError,
+    merge_patterns,
+    rename_pattern,
+    retire_pattern,
+)
+from ftf.patterns.library import PatternLibraryStore
+from ftf.registry import layers, load_plugins
 from ftf.reporting import build_pair_report, render_pair_report
 from ftf.store import Store
 
@@ -38,6 +49,8 @@ st.title("Follow the Fake")
 
 settings = get_settings()
 store = Store(settings.db_path)
+load_plugins()
+apply_saved()
 
 
 def add_material() -> None:
@@ -95,7 +108,154 @@ def show_status_table(title: str, section: dict) -> None:
         st.dataframe(section["rows"], width="stretch")
 
 
-tab_match, tab_material, tab_add = st.tabs(["Match", "Material", "Add material"])
+def number_rows(values: dict) -> list[dict]:
+    return [{"setting": k, "value": float(v)} for k, v in values.items()]
+
+
+def recompute() -> None:
+    with ANALYSIS_LOCK:
+        run_method(store)
+    for key in ("assignments", "comparison_report"):
+        st.session_state.pop(key, None)
+
+
+def show_map() -> None:
+    st.subheader("Campaign map")
+    columns = st.columns(len(TOGGLES))
+    enabled = [
+        name
+        for column, name in zip(columns, TOGGLES, strict=True)
+        if column.checkbox(name.capitalize(), value=name != "playbook", key=f"map_{name}")
+    ]
+    with ANALYSIS_LOCK:
+        data = map_data(store, enabled)
+    st.caption("Boxes are families and campaigns. A line is a stored relation in a chosen tier.")
+    st.graphviz_chart(to_dot(data), width="stretch")
+    st.subheader("Clusters")
+    for cluster in data["clusters"]:
+        with st.expander(f"Family {cluster['family']}: {len(cluster['campaigns'])} campaign(s)"):
+            for campaign, members in cluster["campaigns"].items():
+                st.write(f"**{campaign}**: " + ", ".join(members))
+    st.subheader("Links and shared identifiers")
+    if data["edges"]:
+        st.dataframe(
+            [
+                {
+                    "a": e["a"],
+                    "b": e["b"],
+                    "relation": e["relation"],
+                    "confidence": e["confidence"],
+                    "tiers": ", ".join(e["tiers"]),
+                    "shared": "; ".join(e["shared"][:6]),
+                }
+                for e in data["edges"]
+            ],
+            width="stretch",
+        )
+    else:
+        st.caption("No links in the chosen tiers.")
+
+
+def show_pattern_library() -> None:
+    st.subheader("Pattern library")
+    library = PatternLibraryStore(settings.data_dir / "patterns" / "library")
+    version = library.latest_version()
+    if version is None:
+        st.info("Not run yet. Use `ftf patterns discover`.")
+        return
+    st.caption(f"Version {version.version_id}")
+    st.dataframe(
+        [
+            {
+                "id": p.pattern_id,
+                "name": p.name,
+                "description": p.description,
+                "examples": len(p.positive_examples),
+                "retired": bool(p.metadata and p.metadata.analyst_retired_at),
+            }
+            for p in version.patterns
+        ],
+        width="stretch",
+    )
+    ids = [p.pattern_id for p in version.patterns]
+    chosen = st.selectbox("Pattern", ids, key="library_pattern")
+    name = st.text_input("New name", key="library_name")
+    target = st.selectbox("Merge it into", [i for i in ids if i != chosen] or [None])
+    rename, retire, merge = st.columns(3)
+    try:
+        if rename.button("Rename"):
+            rename_pattern(library, chosen, name)
+            st.rerun()
+        if retire.button("Retire"):
+            retire_pattern(library, chosen)
+            st.rerun()
+        if merge.button("Merge", disabled=target is None):
+            merge_patterns(library, target, chosen)
+            st.rerun()
+    except LibraryEditError as exc:
+        st.error(str(exc))
+    st.caption("Run `ftf patterns match` and `ftf run` so stored scores follow these edits.")
+
+
+def show_method() -> None:
+    st.subheader("Layers")
+    st.dataframe(
+        [
+            {
+                "layer": x.name,
+                "version": x.version,
+                "tier": x.tier.value,
+                "group": x.group,
+                "comparator": x.comparator,
+            }
+            for x in layers.all()
+        ],
+        width="stretch",
+    )
+    st.subheader("Weights and thresholds")
+    values = current_values()
+    edited = {}
+    for section, title in (
+        ("tier_weights", "Tier weights"),
+        ("group_weights", "Group weights"),
+        ("thresholds", "Thresholds"),
+    ):
+        st.markdown(f"**{title}**")
+        rows = st.data_editor(
+            number_rows(values[section]),
+            disabled=["setting"],
+            hide_index=True,
+            key=f"method_{section}",
+        )
+        edited[section] = {row["setting"]: row["value"] for row in rows}
+    minimum = st.number_input(
+        "Minimum artifact groups", min_value=1, value=int(values["artifact_min_groups"]), step=1
+    )
+    apply, restore = st.columns(2)
+    if apply.button("Save and recompute"):
+        errors = save({**edited, "artifact_min_groups": int(minimum)})
+        if errors:
+            st.error("; ".join(errors))
+        else:
+            recompute()
+            st.rerun()
+    if restore.button("Restore shipped settings"):
+        reset()
+        recompute()
+        st.rerun()
+    show_pattern_library()
+    st.subheader("Expectation profiles")
+    profiles = expectation_profiles(store)
+    if not profiles:
+        st.info("Not run yet. Use `ftf perceive`.")
+    for kind, rows in profiles.items():
+        with st.expander(kind):
+            st.dataframe(rows, width="stretch")
+
+
+tab_match, tab_material, tab_add, tab_map, tab_method = st.tabs(
+    ["Match", "Material", "Add material", "Campaign map", "Method"]
+)
 with tab_add:
     add_material()
 
@@ -105,7 +265,16 @@ if not incidents:
         st.info("Nothing ingested yet. Use Add material.")
     with tab_material:
         st.info("Nothing ingested yet. Use Add material.")
+    with tab_map:
+        st.info("Nothing ingested yet. Use Add material.")
+    with tab_method:
+        st.info("Nothing ingested yet. Use Add material.")
     st.stop()
+
+with tab_map:
+    show_map()
+with tab_method:
+    show_method()
 
 labels = {v.view_id: v.label for v in store.views()}
 with st.sidebar:

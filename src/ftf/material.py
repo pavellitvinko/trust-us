@@ -45,3 +45,24 @@ def material_summary(store: Store, view_id: str) -> dict[str, Any]:
             "rows": _rows(patterns, lambda o: o.value.get("pattern")),
         },
     }
+
+
+def expectation_profiles(store: Store) -> dict[str, list[dict[str, Any]]]:
+    """Each page kind's checked elements, with how many views showed each state."""
+    counts: dict[str, dict[str, dict[str, int]]] = {}
+    for view in store.views():
+        observations = store.observations(view.view_id)
+        row = next(
+            (o.value for o in observations if o.namespace == "expect.kind" and o.value), None
+        )
+        if not isinstance(row, dict):
+            continue
+        kind = counts.setdefault(row["canonical"], {})
+        for o in observations:
+            if o.namespace == "expect.element" and o.value is not None:
+                states = kind.setdefault(str(o.value), {s.value: 0 for s in State})
+                states[o.state.value] += 1
+    return {
+        name: [{"element": element, **states} for element, states in sorted(elements.items())]
+        for name, elements in sorted(counts.items())
+    }
