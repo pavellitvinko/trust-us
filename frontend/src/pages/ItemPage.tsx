@@ -142,11 +142,6 @@ export default function ItemPage() {
             ) : (
               <div className="small">{item.checked ? "None found." : "Not checked."}</div>
             )}
-            {item.unchecked.length > 0 && item.checked && (
-              <div className="small" style={{ marginTop: 6 }}>
-                Not checked: {item.unchecked.join(", ")}. "None found" says nothing about these.
-              </div>
-            )}
           </div>
           {item.actions.length > 0 && (
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
