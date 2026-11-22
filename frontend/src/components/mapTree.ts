@@ -20,7 +20,7 @@ export interface TreeNode {
   reasons: string[];
   children: TreeNode[];
   rows: Row[];
-  /** Distinct items: a page found in several cases counts once. */
+  /** Items, with a page the backend marks as repeated counted once. */
   count: number;
   copies: number;
   /** On a case: what each item is linked to outside its own group. */
@@ -52,7 +52,7 @@ function reasons(rows: Row[], edges: MapEdge[], kind: MapEdge["kind"]) {
 
 function caseNodes(parent: string, rows: Row[]): TreeNode[] {
   const cases = new Map<string, Row[]>();
-  for (const r of rows) cases.set(r.caseId, [...(cases.get(r.caseId) ?? []), r]);
+  for (const r of rows) push(cases, r.caseId, r);
   return [...cases.entries()]
     .map(([id, members]): TreeNode => ({
       key: `${parent}/case:${id}`,
@@ -71,31 +71,23 @@ function caseNodes(parent: string, rows: Row[]): TreeNode[] {
 
 const biggestFirst = (a: TreeNode, b: TreeNode) => b.count - a.count || compare(a.title, b.title);
 
-/** Sets of items that are all directly linked to each other. */
-function fullyLinked(rows: Row[], edges: MapEdge[]): Row[][] {
-  const parent = new Map(rows.map((r) => [r.id, r.id]));
-  const find = (x: string): string => {
-    while (parent.get(x) !== x) x = parent.get(x)!;
-    return x;
-  };
-  const direct = new Set<string>();
-  for (const e of edges) {
-    if (!parent.has(e.a) || !parent.has(e.b)) continue;
-    parent.set(find(e.a), find(e.b));
-    direct.add(`${e.a}\n${e.b}`).add(`${e.b}\n${e.a}`);
-  }
-  const groups = new Map<string, Row[]>();
-  for (const r of rows) groups.set(find(r.id), [...(groups.get(find(r.id)) ?? []), r]);
-  return [...groups.values()].filter(
-    (g) => g.length > 1 && g.every((a) => g.every((b) => a.id === b.id || direct.has(`${a.id}\n${b.id}`))),
-  );
+function push<T>(groups: Map<string, T[]>, key: string, value: T) {
+  const list = groups.get(key);
+  if (list) list.push(value);
+  else groups.set(key, [value]);
 }
+
+const repeatIndex = (repeats: string[][]) =>
+  new Map(repeats.flatMap((ids) => ids.map((id) => [id, ids[0]] as const)));
+
+const distinctItems = (rows: Row[], repeatOf: Map<string, string>) =>
+  new Set(rows.map((r) => repeatOf.get(r.id) ?? r.id)).size;
 
 export function buildTree(rows: Row[], map: MapData): TreeNode[] {
   const edges = map.edges.filter((e) => e.kind !== "possible");
   const byId = new Map(rows.map((r) => [r.id, r]));
-  const repeatOf = new Map(map.repeats.flatMap((ids) => ids.map((id) => [id, ids[0]] as const)));
-  const distinctCount = (members: Row[]) => new Set(members.map((r) => repeatOf.get(r.id) ?? r.id)).size;
+  const repeatOf = repeatIndex(map.repeats);
+  const distinctCount = (members: Row[]) => distinctItems(members, repeatOf);
 
   const campaignNode = (id: string, members: Row[]): TreeNode => {
     const key = `campaign:${id}`;
@@ -109,14 +101,14 @@ export function buildTree(rows: Row[], map: MapData): TreeNode[] {
       reasons: map.campaignWhy[id] ? [map.campaignWhy[id]] : reasons(members, edges, "campaign"),
       children: caseNodes(key, members),
       rows: [],
-      count: members.length,
-      copies: 0,
+      count: distinctCount(members),
+      copies: members.length - distinctCount(members),
     };
   };
 
   const campaigns = new Map<string, Row[]>();
   for (const r of rows) {
-    if (r.campaignId) campaigns.set(r.campaignId, [...(campaigns.get(r.campaignId) ?? []), r]);
+    if (r.campaignId) push(campaigns, r.campaignId, r);
   }
 
   // A campaign sits under the template most of its items use, so it is never shown twice.
@@ -126,12 +118,12 @@ export function buildTree(rows: Row[], map: MapData): TreeNode[] {
     const votes = new Map<string, number>();
     for (const r of members) if (r.kitId) votes.set(r.kitId, (votes.get(r.kitId) ?? 0) + 1);
     const kit = [...votes.entries()].sort((a, b) => b[1] - a[1] || compare(a[0], b[0]))[0]?.[0];
-    if (kit) kitCampaigns.set(kit, [...(kitCampaigns.get(kit) ?? []), id]);
+    if (kit) push(kitCampaigns, kit, id);
     else standalone.push(id);
   }
 
   const kitRows = new Map<string, Row[]>();
-  for (const r of rows) if (r.kitId) kitRows.set(r.kitId, [...(kitRows.get(r.kitId) ?? []), r]);
+  for (const r of rows) if (r.kitId) push(kitRows, r.kitId, r);
   for (const id of kitCampaigns.keys()) if (!kitRows.has(id)) kitRows.set(id, []);
 
   const kits = [...kitRows.entries()].map(([id, members]): TreeNode => {
@@ -177,37 +169,25 @@ export function buildTree(rows: Row[], map: MapData): TreeNode[] {
   const repeats = map.repeats
     .filter((ids) => ids.length > 1 && ids.every((id) => restIds.has(id)))
     .map((ids) => ids.map((id) => byId.get(id)!));
-  const inRepeat = new Set(repeats.flat().map((r) => r.id));
-  const linked = fullyLinked(
-    rest.filter((r) => !inRepeat.has(r.id)),
-    edges,
-  );
-  const grouped = new Set([...inRepeat, ...linked.flat().map((r) => r.id)]);
+  const grouped = new Set(repeats.flat().map((r) => r.id));
 
-  const groupNode = (members: Row[], copiesOnly: boolean): TreeNode => {
+  // Only the backend's repeats read as copies. Any other link between ungrouped items is one it
+  // declined to merge, so those stay one to one below.
+  const links = repeats.map((members): TreeNode => {
     const key = `links:${members.map((r) => r.id).sort()[0]}`;
-    const ids = new Set(members.map((r) => r.id));
-    const between = edges.filter((e) => ids.has(e.a) && ids.has(e.b));
     return {
       key,
       kind: "links",
-      title: copiesOnly ? `Same page added ${members.length} times ${place(members)}` : `Linked items ${place(members)}`,
+      title: `Same page added ${members.length} times ${place(members)}`,
       name: "",
-      note: copiesOnly ? "Copies of one page, not separate findings." : "",
-      reasons: copiesOnly ? [] : [...new Set(between.map(linkLabel))].sort(compare),
+      note: "Copies of one page, not separate findings.",
+      reasons: [],
       children: caseNodes(key, members),
       rows: [],
-      count: copiesOnly ? 1 : members.length,
-      copies: copiesOnly ? members.length - 1 : 0,
+      count: 1,
+      copies: members.length - 1,
     };
-  };
-  const links = [
-    ...repeats.map((g) => groupNode(g, true)),
-    ...linked.map((g) => {
-      const ids = new Set(g.map((r) => r.id));
-      return groupNode(g, edges.filter((e) => ids.has(e.a) && ids.has(e.b)).every((e) => e.kind === "duplicate"));
-    }),
-  ];
+  });
 
   const tree = [
     // A template whose only items sit in a campaign shown under another template has nothing left.
@@ -216,7 +196,8 @@ export function buildTree(rows: Row[], map: MapData): TreeNode[] {
     ...links.sort(biggestFirst),
   ];
 
-  const hasLink = (r: Row) => edges.some((e) => e.a === r.id || e.b === r.id) || !!map.journeys[r.id]?.length;
+  const withLinks = new Set(edges.flatMap((e) => [e.a, e.b]));
+  const hasLink = (r: Row) => withLinks.has(r.id) || !!map.journeys[r.id]?.length;
   const oneToOne = rest.filter((r) => !grouped.has(r.id) && hasLink(r));
   if (oneToOne.length) {
     tree.push({
@@ -297,14 +278,18 @@ const plain = (text: string) =>
 const rowText = (r: Row) => plain([r.title, r.host, r.case, shortCase(r.case), r.type, r.campaign, r.kit].join(" "));
 
 /** Only the branches holding a matching item. Group names are part of each item's text. */
-export function filterTree(nodes: TreeNode[], query: string): TreeNode[] {
+export function filterTree(nodes: TreeNode[], query: string, repeats: string[][]): TreeNode[] {
   const q = plain(query.trim());
   if (!q) return nodes;
+  const repeatOf = repeatIndex(repeats);
+  const allRows = (node: TreeNode): Row[] => [...node.rows, ...node.children.flatMap(allRows)];
   const prune = (node: TreeNode): TreeNode | null => {
     const rows = node.rows.filter((r) => rowText(r).includes(q));
     const children = node.children.map(prune).filter((c): c is TreeNode => c !== null);
     if (!rows.length && !children.length) return null;
-    return { ...node, rows, children, count: rows.length + children.reduce((sum, c) => sum + c.count, 0), copies: 0 };
+    const kept = allRows({ ...node, rows, children });
+    const count = distinctItems(kept, repeatOf);
+    return { ...node, rows, children, count, copies: kept.length - count };
   };
   return nodes.map(prune).filter((n): n is TreeNode => n !== null);
 }

@@ -96,7 +96,7 @@ export default function MapView({ rows, map }: { rows: Row[]; map: LibraryData["
   // Stored as a difference from the default, so groups that arrive later open normally.
   const [flipped, setFlipped] = useState<Set<string>>(new Set());
   const tree = useMemo(() => buildTree(rows, map), [rows, map]);
-  const shown = useMemo(() => filterTree(tree, query), [tree, query]);
+  const shown = useMemo(() => filterTree(tree, query, map.repeats), [tree, query, map.repeats]);
   const searching = query.trim().length > 0;
   const keys = useMemo(() => groupKeys(tree), [tree]);
   const closedByDefault = (key: string) => key === "unlinked";
@@ -134,7 +134,7 @@ export default function MapView({ rows, map }: { rows: Row[]; map: LibraryData["
       <p className="small tree-help">
         Read it from the top: a <b>template</b> can be used by several <b>campaigns</b>, a campaign is likely run by the
         same people, and a <b>case</b> is what was added together.
-        {searching && <span aria-live="polite"> {plural(found, "item")} found.</span>}
+        <span aria-live="polite">{searching ? ` ${plural(found, "item")} found.` : ""}</span>
       </p>
       {shown.length ? (
         <ul className="tree">
