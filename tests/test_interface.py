@@ -131,4 +131,4 @@ def test_interface_opens_on_an_empty_store(tmp_path, monkeypatch):
     (tmp_path / "data").mkdir()
     app = AppTest.from_file(str(ROOT / "app/streamlit_app.py")).run()
     assert not app.exception
-    assert any(b.label == "Analyse material" for b in app.button)
+    assert any(b.label == "Analyse" for b in app.button)

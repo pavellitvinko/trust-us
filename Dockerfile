@@ -21,6 +21,7 @@ RUN uv sync --locked --no-dev --no-install-project --no-cache
 COPY src ./src
 COPY app ./app
 COPY corpus ./corpus
+COPY .streamlit ./.streamlit
 RUN uv sync --locked --no-dev --no-editable --no-cache
 
 ENV FTF_DATA_DIR=/data \

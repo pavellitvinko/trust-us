@@ -1,4 +1,4 @@
-# Keep the build context small: only pyproject.toml, uv.lock, src and app are copied.
+# Keep the build context small: only pyproject.toml, uv.lock, src, app and .streamlit are copied.
 .git
 .venv
 .idea
