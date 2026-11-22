@@ -1,0 +1,72 @@
+[
+ {
+  "id": 18437635762,
+  "issuer_ca_id": 286236,
+  "issuer_name": "C=US, O=Google Trust Services, CN=WE1",
+  "common_name": "glowpixel.org",
+  "name_value": "*.glowpixel.org\nglowpixel.org",
+  "not_before": "2025-05-16T06:07:48",
+  "not_after": "2025-08-14T07:06:41",
+  "serial_number": "00c51d30bc3953455f0d21ac6c9277e526"
+ },
+ {
+  "id": 18437710874,
+  "issuer_ca_id": 286236,
+  "issuer_name": "C=US, O=Google Trust Services, CN=WE1",
+  "common_name": "glowpixel.org",
+  "name_value": "*.glowpixel.org\nglowpixel.org",
+  "not_before": "2025-05-16T06:07:48",
+  "not_after": "2025-08-14T07:06:41",
+  "serial_number": "00c51d30bc3953455f0d21ac6c9277e526"
+ },
+ {
+  "id": 18437719215,
+  "issuer_ca_id": 286242,
+  "issuer_name": "C=US, O=Google Trust Services, CN=WR1",
+  "common_name": "glowpixel.org",
+  "name_value": "glowpixel.org",
+  "not_before": "2025-05-16T06:15:12",
+  "not_after": "2025-08-14T07:14:55",
+  "serial_number": "00a623c68c8208b0c00ece43b875722e91"
+ },
+ {
+  "id": 27151919190,
+  "issuer_ca_id": 64135,
+  "issuer_name": "C=US, O=DigiCert Inc, OU=www.digicert.com, CN=Encryption Everywhere DV TLS CA - G2",
+  "common_name": "a.glowpixel.org",
+  "name_value": "a.glowpixel.org",
+  "not_before": "2026-06-13T00:00:00",
+  "not_after": "2026-09-10T23:59:59",
+  "serial_number": "06846ed36d55cea571e14b1b0656c70c"
+ },
+ {
+  "id": 27151984776,
+  "issuer_ca_id": 64135,
+  "issuer_name": "C=US, O=DigiCert Inc, OU=www.digicert.com, CN=Encryption Everywhere DV TLS CA - G2",
+  "common_name": "a.glowpixel.org",
+  "name_value": "a.glowpixel.org",
+  "not_before": "2026-06-13T00:00:00",
+  "not_after": "2026-09-10T23:59:59",
+  "serial_number": "06846ed36d55cea571e14b1b0656c70c"
+ },
+ {
+  "id": 29478583333,
+  "issuer_ca_id": 431054,
+  "issuer_name": "C=US, O=Let's Encrypt, CN=YE2",
+  "common_name": "glowpixel.org",
+  "name_value": "*.glowpixel.org\nglowpixel.org",
+  "not_before": "2026-09-11T10:34:13",
+  "not_after": "2026-12-10T10:34:12",
+  "serial_number": "060d9ec92bf5ac17dc43465dd1a57ebc6886"
+ },
+ {
+  "id": 29678002287,
+  "issuer_ca_id": 431054,
+  "issuer_name": "C=US, O=Let's Encrypt, CN=YE2",
+  "common_name": "glowpixel.org",
+  "name_value": "*.glowpixel.org\nglowpixel.org",
+  "not_before": "2026-09-11T10:34:13",
+  "not_after": "2026-12-10T10:34:12",
+  "serial_number": "060d9ec92bf5ac17dc43465dd1a57ebc6886"
+ }
+]

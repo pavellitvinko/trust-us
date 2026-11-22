@@ -22,6 +22,7 @@ HOST_NAMESPACES = frozenset(
         "tracker.host",
         "form_endpoint_host",
         "cdn.host",
+        "video.hls_host",
         "http.server",
         "third_party.host",
         "url.host",

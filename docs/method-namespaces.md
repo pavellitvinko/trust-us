@@ -35,9 +35,14 @@ page to the downstream capture, independent of view-ID ordering. Its own landing
 does not establish a transition. The stored state supports navigation, not an independently
 verified HTTP redirect or exact visit sequence.
 
-Still missing on the sample and read from fixtures only: `asset.sha256`, `image.phash`,
-`creative.phash`, `video.frame_phash`, `dom.class`, `firstparty.sha256`, `code.evasion_filter`,
-`expect.element`. `pattern.score` is written by `ftf patterns discover`.
+Flowing on the sample model off (2026-11-22): every identity, kit and infra namespace above
+that has an extractor, `asset.sha256`, `image.phash`, `creative.phash`, `dom.class_set`,
+`firstparty.sha256`, `dom.evasion_filter`, the body text and, since HAC-19, `video.frame_phash`
+(all three sample videos), `video.hls_host` and `cdn.zone_id`. Still read from fixtures only:
+the model-fed namespaces `expect.element`,
+`pattern.score` (written by `ftf patterns discover`), `entity.cast`, `screenshot.embedding` and
+the OCR namespaces, which need `ftf perceive` with a key. The measured list of layers that built
+a fingerprint is in `docs/method-results-real-sample.md`, "Unavailable in this mode".
 
 ## Identity tier (T1): supports *same campaign*
 
@@ -47,6 +52,7 @@ Still missing on the sample and read from fixtures only: `asset.sha256`, `image.
 | | `url.host_path` | host + landing path without query, trailing slash removed | A14 | `healthlinkq.pro/L41156846fl-923e569-fkf418Z` |
 | | `outbound.domain` | registrable domain of CTA links, form targets, click beacons | A15 | `crimsonbase.pro` |
 | | `redirect.domain` | registrable domain of each redirect hop (live capture) | I5 | |
+| | `ct.shared_cert` | sorted registrable domains on a certificate issued under the current registration, `\|`-joined (own domain included); renewals give the same value | C8 | `fake-one.xyz\|fake-two.top` |
 | `ids.campaign` | `aio.campaign_uuid` **exclusive** | UUID as found | A1 | `0b9611d9-…` |
 | | `aio.owner_uuid` **exclusive** | UUID | A1 | |
 | | `aio.landing_uuid`, `aio.flow_uuid` | UUID | A1 | |
@@ -55,7 +61,7 @@ Still missing on the sample and read from fixtures only: `asset.sha256`, `image.
 | `ids.tracking` | `fb_pixel` | digits | A3 | `2012165449475163` |
 | | `gads_id`, `gtm_id`, `ga_id` | `AW-…`, `GTM-…`, `G-…` as found | A4 | `AW-18463917747` |
 | | `taboola_id`, `uet_id`, `tiktok_pixel`, `ym_id` | ID as found | A5 | |
-| | `cdn.zone_id` | CDN pull-zone or video-library ID | C12 | `vz-6110f311-389` |
+| | `cdn.zone_id` | CDN pull-zone or video-library ID; from the host of an HLS playlist (`video.stream`) | C12 | `vz-6110f311-389` |
 | `ids.conversion` | `aff.network`, `aff.user_id`, `aff.offer_id`, `aff.landing_id` | as found | A6 | `aff.user_id=13` |
 | | `form_endpoint_host` | registrable domain the form posts to | A7, I3 | `shadowtracecore.com` |
 | | `form_endpoint_path` | path only | A7 | `/v1/landing/form-event` |
@@ -76,7 +82,7 @@ the pair at *same family*. Everything else may rotate between deployments.
 | `text.shingle` | `page.body_text` (else `text.body`, else `page.clean_text`) | article body as one string: comments, navigation, widgets removed | F1 |
 | `asset.perceptual` | `image.phash` | 64-bit grayscale pHash, 16 hex chars, one row per image | E2 |
 | `ad.creative` | `creative.phash`, `creative.ocr_text` | pHash of the ad image; OCR text | L2, L3, E11 |
-| `media.video` | `video.frame_phash` | pHash per sampled key frame | M1 |
+| `media.video` | `video.frame_phash` | pHash per sampled key frame (scene change plus an absolute time grid); time in `raw` | M1 |
 | `text.semantic` | `page.body_text` | (same input as text.shingle; embedded by the layer) | F2 |
 
 ## Kit tier (T3): supports *same family*
@@ -99,6 +105,7 @@ the pair at *same family*. Everything else may rotate between deployments.
 | | `code.evasion_filter` | `hue-rotate` when `<html>` carries the filter (the angle is not the value) | E13 | `hue-rotate` |
 | `infra.host` | `dns.ns_pair` | both name servers, sorted, `|`-joined | C3 | |
 | | `rdap.registrar`, `http.server`, `origin.asn` | as found | C2, C10, C11 | `Caddy` |
+| | `video.hls_host` | host of an HLS playlist and its segments; not written for a CDN video library's host, which is `cdn.zone_id` instead (the CDN's own domain is every customer's); seed-stoplisted like other host namespaces | M7 | `eu-vi-stream.org` |
 
 ## Playbook tier (T4): supports *same playbook* only, never merges campaigns
 
@@ -127,6 +134,66 @@ domain age `captured_at` and `basis`. A failed lookup is a `not_observable` row 
 | `domain.tld_risk` | `high` (`.live .pro .xyz .top .icu .life`), `low` (`.pl`), `other` | risk | C4 |
 | `domain.name_shape` | `hyphen_digits`, `generated_pronounceable`, `generated`, `plain`; metrics in `raw` | risk | C5 |
 
+## Certificate transparency (C8, C9)
+
+Written by the `ct` enricher from crt.sh (`https://crt.sh/?q=<domain>&output=json`), one query
+per registrable domain, cached like RDAP. A pre-certificate and its final certificate share a
+serial and count once. Locators cite the certificate (`crtsh:https://crt.sh/?id=<id>`) or the
+query. Every crt.sh error (HTTP, timeout, an answer that is not a list) says nothing about the
+domain: it is never written to the cache and gives `not_observable`. An empty answer (`[]`) is
+not trusted either, because crt.sh under load gave `[]` for `healthlinkq.pro`, which has three
+certificates: it is `not_observable`, cached one hour, and an earlier non-empty answer is used
+instead when there is one. HTTP errors are retried once, timeouts not. After 3 failures in a row crt.sh
+is left alone for 10 minutes. E-mail addresses and IP addresses listed among a certificate's
+names are dropped.
+
+| Namespace | Value shape | Purpose | Catalogue |
+| --- | --- | --- | --- |
+| `ct.cert_count` | distinct certificates naming the domain or a host under it; issuer counts in `raw` | risk | C8 |
+| `ct.first_seen` | ISO date of the earliest `not_before` | risk | C8 |
+| `ct.issuer` | issuing organisation of the newest certificate valid for the page's host, lower-case (`let's encrypt`; Cloudflare's CA shows as `ssl corporation`, its operator); full DN in `raw` | risk | C8 |
+| `ct.wildcard` | `true` when a certificate valid for the page's host is a wildcard | risk | C8 |
+| `ct.sibling_host` | one row per other host name under the domain (`a.glowpixel.org`), at most 25 | risk | C8 |
+| `ct.prior_life_days` | days the first certificate predates the RDAP registration; `0` when the gap is 30 days or less (fresh domains get a certificate minutes before the registry stamps registration). `not_observable` without RDAP | risk | C9 |
+| `ct.san_domain` | another registrable domain named on a shared certificate, of any owner; `note` in `raw` when issued before the current registration. A pivot, not a link | risk | C8 |
+| `ct.shared_cert` | sorted registrable domains on a certificate issued no earlier than 30 days before the current registration, `\|`-joined, one row per set however many renewals; ids and serials in `raw`. Never written without RDAP | linkage (`ids.domain`, weight 0.6) | C8 |
+
+A certificate links nothing, and gives no `ct.san_domain`, when it names more than 5 registrable
+domains (its own included), a CDN or platform domain (`cloudflaressl.com`, `myshopify.com`, …), or a hosting
+server of another domain (`server12.hostco.com`, `vps3.…`, `plesk.…`): those bundle unrelated
+customers. When no certificate names the page's host, `ct.issuer` falls back to the domain's
+newest one (`confidence` 0.5) and `ct.wildcard` is `not_observable`.
+
+`ct.prior_life_days > 0` is a domain reason in the suspicion summary; of the `ct.*` rows only
+`ct.prior_life_days` makes the domain kind count as checked.
+
+## Video (M1, M5, M7)
+
+Written by `video.media` (`extract/video_media.py`) for a video view and by `video.stream`
+(`extract/video_stream.py`) for a page. `video.media` needs ffmpeg and ffprobe; without them
+the view gets `not_observable` rows for `video.frame_phash` and `video.encoder` saying so.
+Locators cite `video:frame@<seconds>s`, `ffprobe:<field>`, `har:entries[i]`, the HTML element
+or the saved playlist file.
+
+| Namespace | Value shape | Purpose | Catalogue |
+| --- | --- | --- | --- |
+| `video.frame_phash` | 64-bit grayscale pHash of a key frame, 16 hex chars; equal hashes merged | linkage (`media.video`) | M1 |
+| `video.encoder`, `video.handler` | encoder and handler strings as tagged (`AVC Coding`, `Core Media Video`) | risk | M5 |
+| `video.codec`, `video.container` | codec name (`h264`), major brand (`mp42`) | risk | M5 |
+| `video.duration`, `video.fps`, `video.resolution` | seconds (1 decimal), frames per second (2 decimals), `<w>x<h>` | risk | M5 |
+| `video.created_at` | container creation time as tagged | risk | M5 |
+| `video.hls_url` | playlist URL | risk | M7 |
+| `video.hls_shape` | `master;v<version>;variants=<resolutions>` or `media;v<version>;target=<s>;segments=<name shape>` (`output_999.ts`) | risk | M7 |
+| `video.hls_host` | see `infra.host` above | linkage (`infra.host`, weight 0.3) | M7 |
+| `cdn.zone_id` | see `ids.tracking` above | linkage | C12 |
+
+The M5 rows are written with purpose `risk`, so no layer, weight fit or shared-value report
+treats them as linkage: an encoder, a codec or a resolution is shared by unrelated videos,
+and a screen recording's creation time and device are the analyst's, not the operator's.
+They are evidence for the report. When the frames cannot be read (timeout, damaged file)
+while the container could, the view still gets a `not_observable` `video.frame_phash` row;
+frames ffmpeg wrote before it failed are kept.
+
 ## Live capture (I5, C11, C13, C14)
 
 Written by `capture.trace` from a capture bundle's `manifest.json` (`ftf capture`), or from
@@ -143,6 +210,29 @@ a hop says how the page was reached, history only that another page was visited 
 | `tls.issuer` | certificate issuer as the browser reports it | risk | C14 |
 | `tls.validity_days` | days between `valid_from` and `valid_to`; both dates in `raw` | risk | C14 |
 | `capture.status` | `dns_failed`, `connection_failed`, `tls_failed`, `timeout`, `http_error`, `not_in_archive`, `failed`; browser error in `raw`. Absent when the capture succeeded | risk | C13 |
+
+## Cloaking differential (J1, J2, J5)
+
+Written by `cloak.differential` (`grouping/cloaking.py`) after fingerprinting, for a URL
+captured under several visitor profiles (`ftf capture URL --cloaking [--crawler]`): `ad_click`
+(mobile, `Referer: https://l.facebook.com/`, original query, a synthetic `fbclid` when the URL
+has no click id), `bare` (desktop, no referrer, no query), `crawler` (Googlebot, no query).
+Each profile is its own view. Variants are paired by run (`View.meta.capture_run`, from the
+manifest's `differential_run`), so a second run or a bundle left behind in the same folder
+is never compared with this one; bundles without a run id pair by URL and folder. Every
+profile sends client hints and `navigator.platform` matching its user agent, and
+`navigator.webdriver` is false. The ad-click variant is the reference. A variant counts as
+loaded when it saved a page, a timeout included. Difference = 1 − mean of text similarity
+(`text.shingle` MinHash, or exact shingle/word overlap for short text) and structure
+similarity (`dom.tag_paths` Jaccard, `kit.dom` MinHash); at least 0.9 when the variants land
+on different registrable domains. Threshold 0.5. Locators cite `differential.json` and
+`profile:<other>`.
+
+| Namespace | Value shape | Purpose | Catalogue |
+| --- | --- | --- | --- |
+| `cloak.differential` | on the ad-click view, one row per other profile: `{reference, against, against_view, difference, text_similarity, structure_similarity, final_hosts, threshold}`. `present` at or above the threshold, `absent` below, `not_observable` when a variant loaded no page | risk | J1 |
+| `cloak.gating` | on the ad-click view, when ad click and bare differ: `{against, difference, factors}`, the factors only the ad-click capture carried, read from the manifests (referrer, query string, synthetic click id, mobile device). Not written when bare got an HTTP error: the `cloak.differential` row then carries a `caveat` instead | risk | J5 |
+| `cloak.white_page` | on a variant that differs from the ad click: `{traits, hash_like_class_share, trackers_here, trackers_on_reference}`; traits are *no trackers while the ad click loads them* and *obfuscated hash-like class names* (≥ 30 % and at least 20 points above the ad click; `kit.dom` framework classes, Emotion/MUI `css-…`, react-native-web `r-…`, StyleX `x…` and dimensions such as `300x250` are not counted) | risk | J2 |
 
 ## Funnel evidence inside an incident (ad or screenshot view → page view)
 

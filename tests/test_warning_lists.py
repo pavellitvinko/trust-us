@@ -162,6 +162,17 @@ def test_name_normalisation_and_ambiguous_candidates(sources):
     assert len(result.value["matches"]) == 2
 
 
+def test_missing_source_is_fetched_once_without_refreshing_valid_snapshots(tmp_path):
+    calls = []
+    def fetch(url):
+        calls.append(url)
+        return b"phishing.example\n"
+    first = load_sources(tmp_path, fetch_missing=True, fetch=fetch)
+    assert "cert" in first.snapshots and not first.errors
+    second = load_sources(tmp_path, fetch_missing=True, fetch=fetch)
+    assert len(calls) == 1 and "cert" in second.snapshots
+
+
 def test_refresh_once_fallback_archive_and_integrity(tmp_path):
     calls = []
 
@@ -488,12 +499,7 @@ def test_live_cli_refreshes_once_before_matching(warning_store, monkeypatch, tmp
     assert results(warning_store, "a", "cert")[0]["value"]["result"] == "listed"
 
 
-def test_domain_and_offer_cli_acceptance_with_network_and_models_blocked(tmp_path):
-    import os
-    import subprocess
-    import sys
-
-    root = Path(__file__).resolve().parents[1]
+def test_domain_and_offer_cli_acceptance_with_network_and_models_blocked(tmp_path, model_off_cli):
     incident = tmp_path / "sample" / "1"
     incident.mkdir(parents=True)
     (incident / "page.html").write_text(
@@ -504,30 +510,8 @@ def test_domain_and_offer_cli_acceptance_with_network_and_models_blocked(tmp_pat
         make_snapshot("cert", "phishing.example\n", STAMP),
         tmp_path / "data/warning_lists/cert.json",
     )
-    audit = tmp_path / "audit.json"
-    env = {
-        **os.environ,
-        "FTF_DATA_DIR": str(tmp_path / "data"),
-        "TLDEXTRACT_CACHE": str(tmp_path / "tld"),
-        "FTF_EMBEDDER": "fake",
-        "FTF_MODEL_OFF_AUDIT": str(audit),
-        "FTF_ENRICH": "off",
-        "OPENAI_API_KEY": "",
-        "GEMINI_API_KEY": "",
-        "PYTHONPATH": os.pathsep.join((str(root / "src"), str(root))),
-    }
-    for args in (("ingest", str(tmp_path / "sample")), ("enrich", "--offline")):
-        result = subprocess.run(
-            [sys.executable, "-m", "tests._model_off_cli", *args],
-            cwd=root,
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=60,
-            check=False,
-        )
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert json.loads(audit.read_text()) == {"model": [], "network": []}
+    model_off_cli("ingest", str(tmp_path / "sample"))
+    model_off_cli("enrich", "--offline")
     store = Store(tmp_path / "data/ftf.sqlite")
     try:
         view = store.views()[0]

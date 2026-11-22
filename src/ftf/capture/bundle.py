@@ -112,7 +112,11 @@ class Manifest(BaseModel):
     status: Status = Status.OK
     error: str | None = None
     egress: str = "direct"  # proxy server, or direct
-    profile: str = "desktop"
+    profile: str = "desktop"  # see capture/profiles.py
+    referer: str | None = None  # the Referer the first navigation was sent with
+    click_id_added: bool | None = None  # a synthetic fbclid was appended to page_url
+    differential: str | None = None  # the URL a cloaking differential tested (HAC-15)
+    differential_run: str | None = None  # one run of that test: its variants share this id
     user_agent: str | None = None
     viewport: dict[str, int] | None = None
     redirects: list[Hop] = Field(default_factory=list)

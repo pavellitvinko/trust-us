@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING
 
 from ..compare.minhash import bands
 from ..compare.weights import weights
-from ..contracts import FingerprintKind, Relation, RelationType, Tier
+from ..contracts import FingerprintKind, Relation, Tier
 from ..fusion.config import DEFAULT, FusionConfig
 from ..registry import layers, load_plugins
 
@@ -28,6 +28,9 @@ if TYPE_CHECKING:
     from ..store import Store
 
 Pair = tuple[str, str]
+
+# appended to the reasons of a pair that candidate generation did not compare in full
+NOT_COMPARED = "not compared in full: the two views share no index key"
 
 
 def _pair(a: str, b: str) -> Pair:
@@ -73,10 +76,13 @@ def candidate_pairs(store: Store, band_size: int = 4) -> set[Pair]:
 
 
 def cheap_relation(store: Store, a: str, b: str, config: FusionConfig = DEFAULT) -> Relation:
-    """The relation of a non-candidate pair, from layer presence alone. A layer counts as
-    comparable only if its comparator would accept the pair (`compatible`, where defined):
-    a three-state vector of another page kind, or a vector from another model, does not."""
-    from ..fusion.fuse import active_groups
+    """The relation of a non-candidate pair, from layer comparability alone. A layer counts
+    as comparable exactly when its comparator says so for this pair (`Evidence.comparable`,
+    the same input fusion reads): a three-state vector of another page kind, or a vector
+    from another model, does not. The layers a non-candidate pair shares hold no common
+    index key, so asking each comparator is a set intersection, not a scoring pass; the
+    scores it returns are discarded, nothing is written as compared."""
+    from ..fusion.fuse import active_groups, separation
     from ..registry import comparators
 
     fps_a = {f.layer_id: f for f in store.fingerprints(view_id=a)}
@@ -85,26 +91,32 @@ def cheap_relation(store: Store, a: str, b: str, config: FusionConfig = DEFAULT)
     tiers_seen: set[Tier] = set()
     for layer_id in fps_a.keys() & fps_b.keys():
         layer = layers.get(layer_id)
-        check = getattr(comparators.get(layer.comparator), "compatible", None)
-        if check is None or check(fps_a[layer_id], fps_b[layer_id]):
+        evidence = comparators.get(layer.comparator).compare(fps_a[layer_id], fps_b[layer_id])
+        if evidence.comparable:
             comparable_groups.add(layer.group)
             tiers_seen.add(layer.tier)
     total = {layer.group for layer in layers.all()}
     if active_groups() is not None:
         total &= active_groups()
-    coverage = len(comparable_groups & total) / len(total) if total else 0.0
-    # the same rule as fusion: unrelated needs the identity tier comparable, high also artifact
-    separable = coverage >= config.min_coverage and Tier.IDENTITY in tiers_seen
-    rtype = RelationType.UNRELATED if separable else RelationType.INSUFFICIENT
-    high = coverage >= config.unrelated_high_coverage and Tier.ARTIFACT in tiers_seen
+    seen = comparable_groups & total
+    coverage = len(seen) / len(total) if total else 0.0
+    # decided and worded by the same rule as fusion; nothing was compared, so no tier scored
+    rtype, confidence, reasons = separation(
+        coverage,
+        len(seen),
+        len(total),
+        identity_seen=Tier.IDENTITY in tiers_seen,
+        artifact_seen=Tier.ARTIFACT in tiers_seen,
+        config=config,
+    )
     return Relation(
         view_a=a,
         view_b=b,
         type=rtype,
-        confidence=("high" if high else "low") if separable else "",
+        confidence=confidence,
         coverage=round(coverage, 4),
         tier_scores={t.value: 0.0 for t in (Tier.IDENTITY, Tier.ARTIFACT, Tier.KIT, Tier.PLAYBOOK)},
-        reasons=["not a candidate: the two views share no indexed value, band or dense layer"],
+        reasons=[*reasons, NOT_COMPARED],
     )
 
 

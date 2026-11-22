@@ -2,20 +2,120 @@ services:
   app:
     build: .
     ports:
-      - "8501:8501"
+      - "8000:8000"
     env_file:
       - path: .env
         required: false
     environment:
       FTF_DATA_DIR: /data
+      FTF_COMPREFACE_URL: http://compreface
     volumes:
       - ./data:/data
       # Material to ingest, read-only. Point FTF_SAMPLE_DIR at your copy of the sample.
       # If the folder is missing, Docker mounts an empty one and `ftf ingest` reports no views.
       - ${FTF_SAMPLE_DIR:-./testing_sample}:/sample:ro
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health', timeout=3)"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/meta', timeout=3)"]
       interval: 10s
       timeout: 5s
       start_period: 20s
       retries: 3
+
+  # Private face service: no published port, so only the containers here can reach it.
+  compreface:
+    image: exadel/compreface:1.2.0-facenet@sha256:c575ebd73b471c54695aea9c4a974a3cbc618e0091bf0e98a3347e455d29b68e
+    restart: unless-stopped
+    mem_limit: 5g
+    environment:
+      SAVE_IMAGES_TO_DB: "false"  # keep face templates only, not the photos
+      ENABLE_EMAIL_SERVER: "false"
+      API_JAVA_OPTS: "-Xmx1g"
+      ADMIN_JAVA_OPTS: "-Xmx512m"
+    volumes:
+      - compreface-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost/ >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      start_period: 120s
+      retries: 8
+
+  # Loads the closed reference list once the service is up. Safe to run again.
+  faces-setup:
+    build: .
+    command: ["ftf", "faces", "setup"]
+    restart: on-failure:5
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      FTF_DATA_DIR: /data
+      FTF_COMPREFACE_URL: http://compreface
+    volumes:
+      - ./data:/data
+    depends_on:
+      compreface:
+        condition: service_healthy
+        required: false  # the app must start even when the face service cannot
+
+  # Firewall for the probe: public internet only. Started only with `--profile probe`.
+  probe-guard:
+    profiles: [probe]
+    build: ./docker/probe-guard
+    cap_drop: [ALL]
+    cap_add: [NET_ADMIN, NET_RAW, CHOWN]
+    sysctls:
+      net.ipv6.conf.all.disable_ipv6: "1"
+    environment:
+      FTF_UID: ${FTF_UID:-1000}
+    volumes:
+      - ${FTF_PROBE_DIR:-./data/probe-sandbox}:/sandbox
+    networks: [probe-net]
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/ready"]
+      interval: 1s
+      timeout: 2s
+      retries: 20
+
+  # Walks hostile sites. No keys, no app data, no internal services (docs/probe-agent.md).
+  probe: &probe-sandbox
+    profiles: [probe]
+    build: .
+    entrypoint: ["ftf", "probe"]
+    command: ["--help"]
+    network_mode: service:probe-guard
+    depends_on:
+      probe-guard:
+        condition: service_healthy
+    user: "${FTF_UID:-1000}:${FTF_UID:-1000}"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 512
+    mem_limit: 3g
+    shm_size: 1g
+    tmpfs: [/tmp, /data]
+    environment:
+      FTF_DATA_DIR: /data/probe-sandbox
+      FTF_PROBE_SANDBOX: "1"
+      FTF_PROBE_MAIL_DOMAIN: ${FTF_PROBE_MAIL_DOMAIN:-}
+      FTF_SEED_CORPUS: ""
+      FTF_ENRICH: "off"
+      HOME: /tmp
+    volumes:
+      - ${FTF_PROBE_DIR:-./data/probe-sandbox}:/data/probe-sandbox
+
+  # Runs the jobs queued from the app's Add material page, with the same restrictions.
+  probe-worker:
+    <<: *probe-sandbox
+    entrypoint: ["ftf", "probe-worker"]
+    command: []
+    restart: unless-stopped
+
+networks:
+  probe-net:
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "false"
+
+volumes:
+  compreface-db:

@@ -26,7 +26,7 @@ class Settings:
     openai_model: str
     embedding_model: str
     video_model: str
-    enrich_mode: str = "on"  # on | cache | off — outside lookups (DNS, RDAP)
+    enrich_mode: str = "on"  # on | cache | off — outside lookups (DNS, RDAP, crt.sh)
     victim_contacts: Path | None = None  # victim contacts file; default src/ftf/victim/contacts.json
     victim_out_dir: Path | None = None  # where victim runs are written; default data_dir/victim
 

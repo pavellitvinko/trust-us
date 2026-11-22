@@ -38,6 +38,8 @@ from .image import (
 from .image import NAME as IMAGE_READER
 from .page import NAME as PAGE_READER
 
+VIDEO_READER = "perception.video"
+
 log = logging.getLogger(__name__)
 
 NAME = "perception.technique"
@@ -77,7 +79,7 @@ appearance; use only names written in the material. Regions use x, y, width and 
 fraction of the image from 0 to 1 with the origin at the top left."""
 
 # Model output is not a fact extracted by a script.
-_NOT_SCRIPT_FACTS = frozenset({NAME, PAGE_READER})
+_NOT_SCRIPT_FACTS = frozenset({NAME, PAGE_READER, VIDEO_READER})
 _SKIPPED_TAGS = frozenset({"script", "style", "noscript", "template", "svg"})
 _STRUCK_TAGS = frozenset({"s", "strike", "del"})
 _VOID_TAGS = frozenset(
@@ -667,6 +669,15 @@ def build_input(view: View, ctx: Context) -> _Input | None:
             images = [image] if image is not None else []
     else:
         blocks, metadata_failed = _video_metadata(view, ctx)
+        # What the video reader heard and saw comes first, so a long sidecar cannot crowd it out.
+        blocks = [
+            (view.primary, o.value)
+            for o in observations
+            if o.extractor == VIDEO_READER
+            and o.namespace in ("video.transcript", "video.on_screen_text")
+            and o.state is State.PRESENT
+            and isinstance(o.value, str)
+        ] + blocks
         text_file = view.attachments[0] if view.attachments else view.primary
         images = _video_images(view, ctx)
         failed = failed or metadata_failed or (bool(view.primary) and not images)
@@ -835,6 +846,8 @@ def run_techniques(
     """Observe stored views. A passing failure never replaces earlier good cards."""
     summary = {"views": 0, "with_cards": 0, "not_observable": 0, "kept": 0, "cards": 0}
     for view in ctx.store.views():
+        if view.meta.get("shipped"):  # processed results only: there is no material to re-read
+            continue
         if view_ids is not None and view.view_id not in view_ids:
             continue
         try:

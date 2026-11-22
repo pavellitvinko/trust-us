@@ -21,8 +21,13 @@ def fused_store():
 
 
 def relation(store, a, b):
-    a, b = sorted((a, b))
-    return next(r for r in store.relations() if (r.view_a, r.view_b) == (a, b))
+    return store.get_relation(a, b)
+
+
+def test_get_relation_is_order_free_and_none_when_absent(fused_store):
+    forward = fused_store.get_relation("1:page", "2:page")
+    assert forward is not None and forward == fused_store.get_relation("2:page", "1:page")
+    assert fused_store.get_relation("1:page", "no:such") is None
 
 
 def test_same_campaign_across_different_domains(fused_store):
@@ -290,3 +295,101 @@ def test_host_equal_to_its_registrable_domain_is_one_fact():
     assert www.payload == [{"ns": "domain.registrable", "value": "x.org"}]
     sub = build(view, [obs("domain.registrable", "x.org"), obs("url.host", "shop.x.org")])
     assert {"ns": "url.host", "value": "shop.x.org"} in sub.payload  # a subdomain is its own fact
+
+
+# -- HAC-47: the report's confidence basis is the decision table's own account ---------------
+
+PATHS_BY_RELATION = {
+    RelationType.DUPLICATE: {"duplicate"},
+    RelationType.SAME_CAMPAIGN: {"identity", "artifact"},
+    RelationType.SAME_FAMILY: {"kit", "identity_solo", "contradiction_cap"},
+    RelationType.SAME_PLAYBOOK: {"playbook"},
+    RelationType.UNRELATED: {"unrelated"},
+    RelationType.INSUFFICIENT: {"insufficient"},
+}
+
+
+def _explain(evidence, config=DEFAULT):
+    from ftf.fusion import explain, summarise
+
+    return explain(summarise(evidence, config, demoted=set()), config)
+
+
+def test_explain_and_decide_are_one_table(fused_store):
+    from ftf.fusion import decide, explain
+
+    for r in fused_store.relations():
+        f = pipeline_summary(fused_store, r)
+        rtype, confidence, reasons, basis = explain(f)
+        assert (rtype, confidence, reasons) == decide(f)
+        assert (rtype, confidence) == (r.type, r.confidence)
+        assert basis["path"] in PATHS_BY_RELATION[rtype], (r.view_a, r.view_b, basis)
+        assert basis["rule"] and "label_rule" in basis
+
+
+def pipeline_summary(store, r):
+    from ftf.fusion import summarise
+
+    return summarise(pipeline.compare_views(store, r.view_a, r.view_b))
+
+
+def test_basis_names_the_path_taken_not_the_strongest_tier():
+    pixel = ev("ids.tracking", 0.9, [{"ns": "fb_pixel", "value": "P", "weight": 0.9}])
+    # a shared domain alone: family by the solo rule, and the basis says so
+    rtype, conf, _, basis = _explain([ev("ids.domain", 0.9, DOMAIN), ev("text.shingle", 0.0)])
+    assert (rtype, conf, basis["path"]) == (RelationType.SAME_FAMILY, "low", "identity_solo")
+    assert basis["tier"] == "T1" and basis["agreeing_groups"] == ["domain"]
+    assert basis["kit_score"] < basis["kit_threshold"] and basis["label_rule"] == "fixed low"
+    # the same domain with a second group: a campaign through the identity path
+    rtype, _, _, basis = _explain([ev("ids.domain", 0.9, DOMAIN), pixel])
+    assert (rtype, basis["path"]) == (RelationType.SAME_CAMPAIGN, "identity")
+    assert set(basis["agreeing_groups"]) == {"domain", "tracking"}
+    assert basis["label_rule"]["high"].startswith("score >= 0.9")
+    # identity contradicted while tracking is strong: capped, and the basis names the cap
+    contradiction = ev(
+        "ids.campaign", 0.0, differing=[{"ns": "aio.campaign_uuid", "a": ["X"], "b": ["Y"]}]
+    )
+    rtype, conf, _, basis = _explain([contradiction, pixel])
+    assert (rtype, conf, basis["path"]) == (RelationType.SAME_FAMILY, "medium", "contradiction_cap")
+    assert basis["contradictions"] == ["aio.campaign_uuid"] and basis["tier"] == "T1"
+    # kit evidence: the kit path, with the graded label rule at the kit threshold
+    kit = [
+        ev("kit.url", 1.0, [{"ns": "url.param_name", "value": "clickid", "weight": 0.5}]),
+        ev("kit.form", 1.0, [{"ns": "form.field", "value": "fbtoken", "weight": 0.3}]),
+        ev("kit.dom", 0.9),
+    ]
+    rtype, _, _, basis = _explain(kit)
+    assert (rtype, basis["path"]) == (RelationType.SAME_FAMILY, "kit")
+    assert (
+        basis["threshold"] == DEFAULT.kit
+        and f"score >= {DEFAULT.kit}" in basis["label_rule"]["medium"]
+    )
+
+
+def test_basis_separates_the_two_insufficient_causes_and_the_unrelated_label():
+    from ftf.fusion.fuse import set_active_groups
+
+    try:
+        set_active_groups({"asset", "creative"})
+        rtype, _, _, basis = _explain([ev("asset.exact", 0.0), ev("ad.creative", 0.0)])
+        assert (rtype, basis["path"], basis["cause"]) == (
+            RelationType.INSUFFICIENT,
+            "insufficient",
+            "identity_not_comparable",
+        )
+        assert basis["identity_seen"] is False and basis["coverage"] == 1.0
+
+        set_active_groups({"domain", "text", "kit_url", "kit_form", "kit_dom", "asset"})
+        rtype, _, _, basis = _explain([ev("ids.domain", 0.0)])
+        assert (rtype, basis["cause"]) == (RelationType.INSUFFICIENT, "low_coverage")
+        assert basis["coverage"] < basis["min_coverage"]
+
+        set_active_groups({"domain", "kit_url", "kit_form", "kit_dom"})
+        rtype, conf, _, basis = _explain(
+            [ev("ids.domain", 0.0), ev("kit.url", 0.0), ev("kit.form", 0.0)]
+        )
+        assert (rtype, conf, basis["path"]) == (RelationType.UNRELATED, "low", "unrelated")
+        assert basis["artifact_seen"] is False
+        assert str(DEFAULT.unrelated_high_coverage) in basis["label_rule"]["high"]
+    finally:
+        set_active_groups(None)

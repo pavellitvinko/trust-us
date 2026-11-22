@@ -547,6 +547,40 @@ def _links(view: View, ctx: Context) -> list[str] | None:
     return visible_links(material.html.text) if material.html is not None else None
 
 
+def _mark_weak(o: Observation, weak: dict[str, str]) -> Observation:
+    """An absence that genuine pages also show is reported as weak evidence."""
+    if o.namespace != ELEMENT_NAMESPACE or o.state is not State.ABSENT or o.value not in weak:
+        return o
+    if o.confidence < 1.0:  # already marked by an earlier run
+        return o
+    return o.model_copy(update={"raw": f"{o.raw} [{weak[o.value]}]", "confidence": 0.5})
+
+
+def regrade_stored(ctx: Context, grounding: dict[str, Any]) -> int:
+    """Apply grounding to kept and unselected checks, so all views of a kind agree."""
+    from .grounding import stored_decisions
+
+    changed = 0
+    for view in ctx.store.views():
+        rows = ctx.store.observations(view.view_id)
+        row = _kind_row(rows)
+        if not row:
+            continue
+        dropped, weak = stored_decisions(row.get("canonical"), row.get("profile"), grounding)
+        if not dropped and not weak:
+            continue
+        own = [o for o in rows if o.extractor == NAME]
+        updated = [
+            _mark_weak(o, weak)
+            for o in own
+            if not (o.namespace == ELEMENT_NAMESPACE and o.value in dropped)
+        ]
+        if updated != own:
+            ctx.store.put_observations(view.view_id, NAME, updated)
+            changed += 1
+    return changed
+
+
 def run_expectations(
     ctx: Context,
     view_ids: list[str] | None = None,
@@ -561,7 +595,11 @@ def run_expectations(
     named = {v.view_id: _named_kind(stored[v.view_id]) for v in pages}
     earlier = {v.view_id: _kind_row(stored[v.view_id]) for v in pages}
     known = {r["named"]: r["canonical"] for r in earlier.values() if r}
-    selected = [v for v in pages if view_ids is None or v.view_id in view_ids]
+    selected = [
+        v
+        for v in pages
+        if (view_ids is None or v.view_id in view_ids) and not v.meta.get("shipped")
+    ]
     # Only selected names are mapped; stored mappings keep other pages comparable.
     mapping, kind_failures = _canonical_kinds(
         sorted({named[v.view_id] for v in selected if named[v.view_id]}),
@@ -570,6 +608,9 @@ def run_expectations(
         client=client,
     )
     profiles: dict[str, tuple[dict[str, ProfileElement], str, str | None]] = {}
+    from .grounding import apply_grounding, load_grounding
+
+    grounding = load_grounding(settings)
 
     def write(view: View, observations: list[Observation], reason: str | None) -> None:
         prior = earlier[view.view_id]
@@ -599,6 +640,7 @@ def run_expectations(
         if failure:
             write(view, _unavailable(view, failure), failure)
             continue
+        elements, weak = apply_grounding(kind, elements, profile_hash, grounding)
         observations, reason = check_view(
             view,
             kind,
@@ -608,8 +650,10 @@ def run_expectations(
             settings=settings,
             client=client,
         )
+        observations = [_mark_weak(o, weak) for o in observations]
         prior = earlier[view.view_id]
         if not reason or not prior or prior.get("named") != name:
             _assign_kind(ctx, view, name, kind, profile_hash)
         write(view, observations, reason)
+    regrade_stored(ctx, grounding)
     return summary

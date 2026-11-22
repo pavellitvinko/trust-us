@@ -1,9 +1,6 @@
 """Completeness and provenance of the analyst-facing comparison report."""
 
 import json
-import os
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -24,7 +21,7 @@ from ftf.eval.reference import resolve_view
 from ftf.fusion import run_method
 from ftf.layers._embedder import FakeEmbedder, set_embedder
 from ftf.registry import layers, load_plugins
-from ftf.reporting import build_pair_report, render_pair_report
+from ftf.reporting import _basis_lines, build_pair_report, render_pair_report
 from ftf.store import Store
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -87,6 +84,16 @@ def report_store(tmp_path):
     s.close()
 
 
+PATHS_BY_RELATION = {
+    "duplicate": {"duplicate"},
+    "same_campaign": {"identity", "artifact"},
+    "same_family": {"kit", "identity_solo", "contradiction_cap"},
+    "same_playbook": {"playbook"},
+    "unrelated": {"unrelated"},
+    "insufficient_evidence": {"insufficient"},
+}
+
+
 def assert_complete(report):
     assert report["objects"]["a"]["view_id"] and report["objects"]["b"]["view_id"]
     assert (
@@ -99,7 +106,11 @@ def assert_complete(report):
         coverage["comparable_groups"] / coverage["total_groups"], abs=0.0001
     )
     assert report["reasons"] and report["tiers"] and report["rules"]
-    assert report["confidence"]["basis"]["rule"]
+    basis = report["confidence"]["basis"]
+    assert basis["rule"] and basis["label_rule"]
+    assert basis["path"] in PATHS_BY_RELATION[report["relation"]], basis
+    # the recomputed decision is the stored one, or the report says that it is not
+    assert report["stored_relation"]["agrees"] in (True, None), report["stored_relation"]
     assert {row["layer_id"] for row in report["layers"]} == set(layers.names())
     for row in report["layers"]:
         assert row["tier"] and row["group"] and row["comparator"] and row["layer_version"]
@@ -207,35 +218,10 @@ def test_interface_uses_the_complete_report(report_store, monkeypatch):
     assert_complete(app.session_state["comparison_report"])
 
 
+@pytest.mark.sample
 @pytest.mark.skipif(not (ROOT / "testing_sample").is_dir(), reason="testing_sample/ not present")
-def test_real_sample_report_completeness_without_models(tmp_path):
-    env = {
-        **os.environ,
-        "FTF_DATA_DIR": str(tmp_path / "data"),
-        "TLDEXTRACT_CACHE": str(tmp_path / "tld-cache"),
-        "FTF_EMBEDDER": "fake",
-        "FTF_ENRICH": "off",
-        "OPENAI_API_KEY": "",
-        "GEMINI_API_KEY": "",
-        "PYTHONPATH": os.pathsep.join((str(ROOT / "src"), str(ROOT))),
-    }
-
-    def cli(*args):
-        audit = tmp_path / "audit.json"
-        result = subprocess.run(
-            [sys.executable, "-m", "tests._model_off_cli", *args],
-            env={**env, "FTF_MODEL_OFF_AUDIT": str(audit)},
-            cwd=ROOT,
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert json.loads(audit.read_text()) == {"model": [], "network": []}
-        return result.stdout
-
-    cli("ingest", str(ROOT / "testing_sample"))
+def test_real_sample_report_completeness_without_models(tmp_path, model_off_sample):
+    cli = model_off_sample
     load_plugins()
     s = Store(tmp_path / "data/ftf.sqlite")
     try:
@@ -267,3 +253,8 @@ def test_report_does_not_write_funnel_rows(report_store):
     before = report_store.db.execute(count).fetchone()
     build_pair_report(report_store, *views)
     assert report_store.db.execute(count).fetchone() == before
+
+
+def test_basis_lines_degrade_without_a_rule():
+    lines = _basis_lines({"path": "identity_solo", "score": 0.9})
+    assert lines[0].startswith("Decision path: **identity_solo** — unknown")

@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import pytest
-from datetime import datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from src.ftf.expectations.library import (
+import pytest
+
+from ftf.expectations.library import (
     ElementBasis,
     ElementChecked,
     ElementProfile,
@@ -18,101 +18,17 @@ from src.ftf.expectations.library import (
     PageKind,
     TypicalWording,
 )
-from src.ftf.expectations.verification import (
-    ElementCheckRecord,
+from ftf.expectations.matching import ViewElementVector
+from ftf.expectations.verification import (
     ProfileCheckResult,
-    VerificationResult,
-    verify_element,
-    verify_profile_checks,
-    verify_quote_in_text,
     search_for_element_in_text,
+    verify_element,
+    verify_quote_in_text,
 )
-from src.ftf.expectations.matching import (
-    ViewElementVector,
-    judge_patterns_for_view,
-    ElementJudgement,
-)
-
-
-class TestElementDataModels:
-    """Test creation and serialization of element data structures."""
-
-    def test_typical_wording_creation(self):
-        """Test creating a typical wording."""
-        w = TypicalWording(text="Oświadczenie o ryzyku", location_hint="at the top of the page")
-        assert w.text == "Oświadczenie o ryzyku"
-        assert w.location_hint == "at the top of the page"
-
-    def test_expected_element_creation(self):
-        """Test creating an expected element."""
-        elem = ExpectedElement(
-            name="risk_warning",
-            description="Prominent warning about investment risks",
-            basis=ElementBasis.LEGAL_REQUIREMENT,
-            typical_wordings=[
-                TypicalWording(text="Oświadczenie o ryzyku", location_hint="header"),
-            ],
-            typical_location="header",
-        )
-        assert elem.name == "risk_warning"
-        assert elem.basis == ElementBasis.LEGAL_REQUIREMENT
-        assert len(elem.typical_wordings) == 1
-
-    def test_page_kind_creation(self):
-        """Test creating a page kind."""
-        kind = PageKind(
-            kind_id="kind.1_investment_offer",
-            name="investment offer",
-            description="Solicits investment in a scheme",
-            vertical="Investment / trading",
-        )
-        assert kind.kind_id == "kind.1_investment_offer"
-        assert kind.vertical == "Investment / trading"
-
-    def test_element_profile_with_grounding(self):
-        """Test element profile with grounding metadata."""
-        elem = ExpectedElement(name="privacy_policy", description="Privacy policy link")
-        ep = ElementProfile(
-            element=elem,
-            seen_in_genuine=5,
-            total_genuine_checked=5,
-            false_alarm_rate=0.0,
-            promoted=True,
-        )
-        assert ep.seen_in_genuine == 5
-        assert ep.false_alarm_rate == 0.0
-
-    def test_kind_profile_creation(self):
-        """Test creating a kind profile."""
-        kind = PageKind(kind_id="kind.1_test", name="test page")
-        elem = ExpectedElement(name="element1", description="Test element")
-        ep = ElementProfile(element=elem, promoted=True)
-
-        profile = KindProfile(kind=kind, elements=[ep])
-        assert profile.kind.name == "test page"
-        assert len(profile.elements) == 1
-
-    def test_kind_profile_serialization(self):
-        """Test serialization of a kind profile to dict."""
-        kind = PageKind(kind_id="kind.1_test", name="test")
-        elem = ExpectedElement(name="e1", description="Element 1")
-        ep = ElementProfile(element=elem)
-        profile = KindProfile(kind=kind, elements=[ep])
-
-        # Should be serializable (Pydantic handles this)
-        data = profile.model_dump()
-        assert data["kind"]["kind_id"] == "kind.1_test"
-        assert len(data["elements"]) == 1
 
 
 class TestKindLibraryStore:
     """Test versioned library storage."""
-
-    def test_store_initialization(self):
-        """Test creating a library store."""
-        with TemporaryDirectory() as tmpdir:
-            store = KindLibraryStore(Path(tmpdir))
-            assert store.store_dir.exists()
 
     def test_save_and_load_version(self):
         """Test saving and loading a library version."""
@@ -127,12 +43,11 @@ class TestKindLibraryStore:
 
             lib = KindLibraryVersion(version_id="1.0.0", profiles=[profile])
             path = store.save_version(lib)
+            assert path.exists()
 
             # Load it back
             loaded = store.load_version("1.0.0")
-            assert loaded.version_id == "1.0.0"
-            assert len(loaded.profiles) == 1
-            assert loaded.profiles[0].kind.kind_id == "kind.1_test"
+            assert loaded == lib
 
     def test_save_duplicate_version_fails(self):
         """Test that saving the same version twice fails."""
@@ -325,14 +240,6 @@ class TestProfileCheckResult:
 class TestElementVector:
     """Test element presence vectors for views."""
 
-    def test_view_element_vector_creation(self):
-        """Test creating a view element vector."""
-        kind = PageKind(kind_id="kind.1_test", name="test")
-        profile = KindProfile(kind=kind)
-        vector = ViewElementVector("view.1", "test", profile)
-        assert vector.view_id == "view.1"
-        assert len(vector.judgements) == 0
-
     def test_view_element_vector_counts(self):
         """Test counting judgements by state."""
         kind = PageKind(kind_id="kind.1_test", name="test")
@@ -363,7 +270,3 @@ class TestElementVector:
         states = {item["state"] for item in payload}
         assert "present" in states
         assert "absent" in states
-
-
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])

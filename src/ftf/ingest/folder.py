@@ -99,14 +99,22 @@ def ingest_folder(
                 ("final_url", "final_url"),
                 ("status", "capture_status"),
                 ("mode", "capture_mode"),
+                ("profile", "capture_profile"),
+                ("differential", "capture_differential"),
+                ("differential_run", "capture_run"),
+                ("referer", "capture_referer"),
+                ("user_agent", "capture_user_agent"),
+                ("click_id_added", "capture_click_id_added"),
             ]
         for key, field in keys:
             value = manifest.get(key)
-            if isinstance(value, str) and value:
+            if (isinstance(value, str) and value) or isinstance(value, bool):
                 meta[field] = value
         host = urlsplit(meta.get("final_url") or meta.get("manifest_url") or "").hostname
         status = meta.get("capture_status")
         suffix = f" ({status})" if status and status != "ok" else ""
+        if meta.get("capture_differential"):  # the variants of one URL share a host
+            suffix = f" [{meta.get('capture_profile', '?')}]{suffix}"
         views.append(
             View(
                 view_id=_view_id(incident_id, rel(dom)),

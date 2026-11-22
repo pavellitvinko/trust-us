@@ -12,6 +12,7 @@ import hashlib
 import mimetypes
 import shutil
 import tempfile
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
@@ -30,8 +31,9 @@ from .bundle import (
     classify_error,
     now_iso,
 )
+from .gate import EgressGate
+from .profiles import DESKTOP, Profile
 
-VIEWPORT = {"width": 1366, "height": 900}
 MAX_RESOURCE = 20 << 20  # bytes per saved resource
 MAX_RESOURCES = 400
 SCROLL_STEPS = 25
@@ -97,6 +99,10 @@ def _extension(url: str, mime: str) -> str:
     return mimetypes.guess_extension((mime or "").split(";")[0].strip()) or ""
 
 
+class NoDocumentError(ValueError):
+    """An archived HAR holds no HTML document to start a replay from."""
+
+
 def archived_capture(har: Path) -> tuple[str, str | None]:
     """(start URL, capture time) of an archived HAR.
 
@@ -106,20 +112,13 @@ def archived_capture(har: Path) -> tuple[str, str | None]:
     entries = load_har(har)
     doc = main_document(entries)
     if doc is None:
-        raise ValueError(f"{har}: no HTML document in the archive; pass the URL to replay")
+        raise NoDocumentError(
+            f"{har.name}: no HTML document in the archive; pass the URL to replay"
+        )
     hops = document_redirects(entries)
     first = hops[0][0] if hops else doc[0]
     start = hops[0][1] if hops else doc[1]
     return start, entries[first].get("startedDateTime") or entries[doc[0]].get("startedDateTime")
-
-
-def _user_agent(browser_version: str) -> str:
-    # Headless Chromium announces itself as HeadlessChrome, which cloakers filter on.
-    major = browser_version.split(".")[0] or "130"
-    return (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        f"(KHTML, like Gecko) Chrome/{major}.0.0.0 Safari/537.36"
-    )
 
 
 def capture_url(
@@ -130,17 +129,36 @@ def capture_url(
     proxy: str | None = None,
     timeout: float = 30.0,
     settle: float = 5.0,
+    profile: Profile = DESKTOP,
+    differential: str | None = None,
+    differential_run: str | None = None,
+    public_only: bool = False,
 ) -> CaptureResult:
-    """Capture `url` (or, in replay mode, the archive's own page) into `out_dir`."""
+    """Capture `url` (or, in replay mode, the archive's own page) into `out_dir`.
+
+    `profile` decides device, user agent, referrer and which form of the URL is opened.
+    `differential` names the URL a cloaking differential is testing and `differential_run`
+    the run; the variants of one run share both, which is how they are paired after ingestion.
+    `public_only` sends the browser through an `EgressGate`, so no request (redirects,
+    resources and WebSockets included) reaches a loopback, private, link-local or reserved
+    address, as the web interface needs. A replay never leaves the archive anyway.
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
     archived_at = None
     if replay_har is not None:
-        archived_url, archived_at = archived_capture(replay_har)
-        url = url or archived_url
+        try:
+            archived_url, archived_at = archived_capture(replay_har)
+        except NoDocumentError:
+            if not url:
+                raise
+            archived_at = None  # the given URL picks the page; the archive has no document
+        else:
+            url = url or archived_url
     if not url:
         raise ValueError("a URL is required for a live capture")
     if not urlsplit(url).scheme:
         url = "https://" + url
+    url, click_id_added = profile.url_for(url)
 
     started = now_iso()
     manifest = Manifest(
@@ -152,7 +170,12 @@ def capture_url(
             {"file": replay_har.name, "sha256": _sha256_file(replay_har)} if replay_har else None
         ),
         egress=proxy or "direct",
-        viewport=VIEWPORT,
+        profile=profile.name,
+        referer=profile.referer,
+        click_id_added=click_id_added or None,
+        differential=differential,
+        differential_run=differential_run,
+        viewport=profile.viewport,
     )
     har_path = out_dir / "page.har"
     # The browser's own recording. In replay mode it only feeds resources and the DOM
@@ -161,8 +184,16 @@ def capture_url(
     work = Path(tempfile.mkdtemp(prefix="ftf-capture-"))
     try:
         record_path = work / "replay.har" if replay_har else har_path
-        run = _Run(manifest, out_dir, record_path, replay_har, proxy, timeout, settle)
-        run.browse(url)
+        gate = EgressGate(timeout) if public_only and replay_har is None else None
+        if gate is not None and proxy:
+            raise ValueError("a public-only capture cannot go through another proxy")
+        with gate or nullcontext():
+            egress = gate.url if gate else proxy
+            run = _Run(manifest, out_dir, record_path, replay_har, egress, timeout, settle, profile)
+            run.gate = gate
+            run.browse(url)
+        if gate is not None:
+            _gate_findings(gate, manifest, run)
         recorded = load_har(record_path)
         if run.dom_from_har:
             _dom_from_har(recorded, manifest, out_dir, run.notes)
@@ -191,8 +222,9 @@ _FORM_BODY = ("application/x-www-form-urlencoded", "multipart/form-data")
 class _Run:
     """One browser session: navigate, settle, scroll, snapshot. Collects what it saw."""
 
-    def __init__(self, manifest, out_dir, record_path, replay_har, proxy, timeout, settle):
+    def __init__(self, manifest, out_dir, record_path, replay_har, proxy, timeout, settle, profile):
         self.manifest, self.out_dir, self.record_path = manifest, out_dir, record_path
+        self.profile: Profile = profile
         self.replay_har, self.proxy = replay_har, proxy
         self.timeout, self.settle = timeout, settle
         self.notes: list[str] = []
@@ -202,6 +234,7 @@ class _Run:
         self.failed: list[FailedRequest] = []
         self.blocked: list[FailedRequest] = []
         self.dom_from_har = False
+        self.gate: EgressGate | None = None
 
     def guard(self, route, request) -> None:
         """No form is ever submitted: a non-GET navigation, or a request carrying a form
@@ -240,15 +273,28 @@ class _Run:
         man = self.manifest
         with sync_playwright() as pw:
             browser = pw.chromium.launch(
-                headless=True, proxy={"server": self.proxy} if self.proxy else None
+                headless=True,
+                proxy=self.proxy_settings(),
+                # Otherwise navigator.webdriver is true, the first thing a cloaker checks.
+                args=[
+                    "--disable-blink-features=AutomationControlled",
+                    # WebRTC would otherwise send UDP around the gate.
+                    *(
+                        ["--force-webrtc-ip-handling-policy=disable_non_proxied_udp"]
+                        if self.gate
+                        else []
+                    ),
+                ],
             )
             try:
-                man.user_agent = _user_agent(browser.version)
+                man.user_agent = self.profile.user_agent_for(browser.version)
                 context = browser.new_context(
                     accept_downloads=False,
                     service_workers="block",
                     user_agent=man.user_agent,
-                    viewport=VIEWPORT,
+                    viewport=self.profile.viewport,
+                    is_mobile=self.profile.is_mobile,
+                    has_touch=self.profile.is_mobile,
                     locale="pl-PL",
                     timezone_id="Europe/Warsaw",
                     record_har_path=str(self.record_path),
@@ -257,9 +303,12 @@ class _Run:
                 try:
                     if self.replay_har is not None:
                         context.route_from_har(str(self.replay_har), not_found="abort")
+                        # route_from_har leaves WebSockets alone: a replay stays offline.
+                        context.route_web_socket("**/*", lambda ws: ws.close())
                     context.route("**/*", self.guard)
                     context.add_init_script(_NO_SUBMIT_JS)
                     self.page = page = context.new_page()
+                    self.mask_headless(context, page, browser.version)
                     page.set_default_timeout(self.timeout * 1000)
                     page.on("request", self.on_request)
                     page.on("response", self.on_response)
@@ -277,7 +326,12 @@ class _Run:
                     )
                     loaded = False
                     try:
-                        page.goto(url, wait_until="domcontentloaded", timeout=self.timeout * 1000)
+                        page.goto(
+                            url,
+                            wait_until="domcontentloaded",
+                            timeout=self.timeout * 1000,
+                            referer=self.profile.referer,
+                        )
                         loaded = True
                     except PlaywrightTimeout as exc:
                         man.status, man.error = Status.TIMEOUT, str(exc).splitlines()[0]
@@ -294,6 +348,22 @@ class _Run:
                     context.close()  # writes the HAR, also after an error
             finally:
                 browser.close()
+
+    def proxy_settings(self) -> dict[str, str] | None:
+        if not self.proxy:
+            return None
+        if self.gate is not None:
+            # Chromium sends loopback around a proxy unless told not to.
+            return {"server": self.proxy, "bypass": "<-loopback>"}
+        return {"server": self.proxy}
+
+    def mask_headless(self, context, page, browser_version: str) -> None:
+        """Client hints and navigator.platform matching the profile (see Profile.ua_override)."""
+        try:
+            cdp = context.new_cdp_session(page)
+            cdp.send("Emulation.setUserAgentOverride", self.profile.ua_override(browser_version))
+        except Exception as exc:  # noqa: BLE001 — the capture still runs, the note says how
+            self.notes.append(f"client hints not overridden: {exc}")
 
     def snapshot(self, page, PlaywrightError) -> None:
         man = self.manifest
@@ -347,7 +417,12 @@ class _Run:
         server = Server(url=final.url, status=final.status)
         try:
             addr = final.server_addr()
-            if addr:
+            if self.gate is not None:  # the browser only saw the gate; the gate saw the server
+                parts = urlsplit(final.url)
+                port = parts.port or (443 if parts.scheme == "https" else 80)
+                pinned = self.gate.pins.get(((parts.hostname or "").lower(), port))
+                server.ip, server.port = (pinned, port) if pinned else (None, None)
+            elif addr:
                 server.ip, server.port = addr.get("ipAddress"), addr.get("port")
         except Exception as exc:  # noqa: BLE001
             self.notes.append(f"server address: {exc}")
@@ -370,6 +445,23 @@ class _Run:
         man.server = server
         if final.status >= 400 and man.status is Status.OK:
             man.status, man.error = Status.HTTP_ERROR, f"HTTP {final.status}"
+
+
+def _gate_findings(gate: EgressGate, manifest: Manifest, run: _Run) -> None:
+    """What the gate refused, in the manifest; a failed page says why it failed."""
+    for host, address in sorted(gate.blocked.items()):
+        run.blocked.append(FailedRequest(url=host, error=f"private address {address}"))
+    manifest.blocked = run.blocked
+    if manifest.status is Status.OK:
+        return
+    tried = [manifest.page_url, *(run.chains[-1] if run.chains else [])]
+    hosts = [(urlsplit(u).hostname or "").lower() for u in tried]
+    last = hosts[-1]
+    if last in gate.blocked:
+        manifest.status = Status.FAILED
+        manifest.error = f"refused: {last} is a private address ({gate.blocked[last]})"
+    elif last in gate.unresolved:
+        manifest.status = Status.DNS_FAILED
 
 
 def _same_doc(a: str, b: str) -> bool:

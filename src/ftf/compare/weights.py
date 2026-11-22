@@ -87,11 +87,19 @@ BASE_WEIGHTS: dict[str, float] = {
     "contact.email": 0.9,
     "contact.handle": 0.9,
     "contact.wallet": 0.95,
+    "contact.iban": 0.95,
+    "payment.public_key": 0.9,
+    "payment.merchant_id": 0.85,
+    "mail.sender_domain": 0.85,
+    # Below the identity threshold alone: scam pages copy real companies' numbers.
+    "company.nip": 0.6,
+    "company.krs": 0.6,
     # identity: where the page lives
     "domain.registrable": 0.9,
     "url.host_path": 0.95,
     "outbound.domain": 0.7,
     "redirect.domain": 0.8,
+    "ct.shared_cert": 0.6,  # a certificate the owner chose to share; hosters can do it too
     "brand.offer": 0.8,
     "offer.name": 0.8,
     "url.host": 0.9,
@@ -134,6 +142,7 @@ BASE_WEIGHTS: dict[str, float] = {
     "dns.ns_pair": 0.4,
     "rdap.registrar": 0.2,
     "http.server": 0.2,
+    "video.hls_host": 0.3,  # a page's own streaming host is specific, a public CDN is not
 }
 
 
@@ -164,17 +173,21 @@ class WeightTable:
         base: Mapping[str, float] | None = None,
         curve: RarityCurve | None = None,
         bootstrap_namespaces: tuple[str, ...] = BOOTSTRAP_NAMESPACES,
+        *,
+        update_coverage: bool = True,
     ):
         self.base: dict[str, float] = dict(BASE_WEIGHTS if base is None else base)
         self.curve = curve or RarityCurve()
         self.bootstrap_namespaces = bootstrap_namespaces
+        self.update_coverage = update_coverage
         self.reset()
 
     def reset(self) -> None:
         try:  # coverage denominators follow the corpus the weights were fitted on
             from ..fusion.fuse import set_active_groups
 
-            set_active_groups(None)
+            if self.update_coverage:
+                set_active_groups(None)
         except ImportError:  # pragma: no cover - import order during package init
             pass
         self.holders: dict[Key, int] = {}

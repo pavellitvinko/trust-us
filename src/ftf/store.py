@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections.abc import Iterable
+from contextlib import contextmanager
 from pathlib import Path
 
 from .contracts import Artifact, Evidence, Fingerprint, Incident, Observation, Relation, View
@@ -28,6 +29,7 @@ CREATE TABLE IF NOT EXISTS observations (
     value_key TEXT NOT NULL, body TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS observations_view ON observations (view_id, extractor);
 CREATE INDEX IF NOT EXISTS observations_value ON observations (namespace, value_key);
+CREATE INDEX IF NOT EXISTS observations_value_any ON observations (value_key);
 CREATE TABLE IF NOT EXISTS fingerprints (
     view_id TEXT NOT NULL, layer_id TEXT NOT NULL, body TEXT NOT NULL,
     PRIMARY KEY (view_id, layer_id));
@@ -48,6 +50,10 @@ def value_key(value) -> str:
     )
 
 
+def _casefold(text):
+    return text.casefold() if isinstance(text, str) else text
+
+
 def ordered(a: str, b: str) -> tuple[str, str]:
     """Pairs are stored once, smaller id first."""
     return (a, b) if a <= b else (b, a)
@@ -58,10 +64,36 @@ class Store:
         if str(path) != ":memory:":
             Path(path).parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(str(path))
+        self._batch_depth = 0
         self.db.executescript(_SCHEMA)
+        # SQLite's lower() folds ASCII only; offer names are Polish.
+        self.db.create_function("casefold", 1, _casefold, deterministic=True)
 
     def close(self) -> None:
         self.db.close()
+
+    @contextmanager
+    def batch(self):
+        """Commit a coherent publication once, instead of fsyncing each pair row."""
+        self._batch_depth += 1
+        try:
+            yield
+        except BaseException:
+            self.db.rollback()
+            raise
+        else:
+            if self._batch_depth == 1:
+                self.db.commit()
+        finally:
+            self._batch_depth -= 1
+
+    @contextmanager
+    def transaction(self):
+        if self._batch_depth:
+            yield
+        else:
+            with self.db:
+                yield
 
     # -- incidents, artifacts, views -------------------------------------------------
 
@@ -70,7 +102,7 @@ class Store:
     ) -> None:
         """Replace an incident and everything derived from it."""
         iid = incident.incident_id
-        with self.db:
+        with self.transaction():
             old = [
                 r[0]
                 for r in self.db.execute("SELECT view_id FROM views WHERE incident_id=?", (iid,))
@@ -133,7 +165,7 @@ class Store:
         self, view_id: str, extractor: str, observations: Iterable[Observation]
     ) -> None:
         """Replace one extractor's output for one view."""
-        with self.db:
+        with self.transaction():
             self.db.execute(
                 "DELETE FROM observations WHERE view_id=? AND extractor=?", (view_id, extractor)
             )
@@ -159,10 +191,28 @@ class Store:
         )
         return [r[0] for r in rows]
 
+    def observations_with_value(
+        self, value, namespaces: Iterable[str] | None = None, fold_case: bool = False
+    ) -> list[Observation]:
+        """Every stored observation carrying this value, in any namespace unless `namespaces`
+        narrows it. `fold_case` ignores letter case (product names, `gtm-…` typed by hand)."""
+        key = value_key(value)
+        sql, args = "SELECT body FROM observations WHERE ", []
+        if fold_case:
+            sql, args = sql + "casefold(value_key)=?", [key.casefold()]
+        else:
+            sql, args = sql + "value_key=?", [key]
+        names = list(namespaces or ())
+        if names:
+            sql += f" AND namespace IN ({','.join('?' * len(names))})"
+            args += names
+        rows = self.db.execute(sql + " ORDER BY view_id, namespace, id", args)
+        return [Observation.model_validate_json(r[0]) for r in rows]
+
     # -- fingerprints, evidence, relations -------------------------------------------
 
     def put_fingerprint(self, fp: Fingerprint) -> None:
-        with self.db:
+        with self.transaction():
             self.db.execute(
                 "INSERT OR REPLACE INTO fingerprints VALUES (?,?,?)",
                 (fp.view_id, fp.layer_id, fp.model_dump_json()),
@@ -182,7 +232,7 @@ class Store:
     def put_evidence(self, ev: Evidence) -> None:
         a, b = ordered(ev.view_a, ev.view_b)
         ev = ev.model_copy(update={"view_a": a, "view_b": b})
-        with self.db:
+        with self.transaction():
             self.db.execute(
                 "INSERT OR REPLACE INTO evidence VALUES (?,?,?,?,?)",
                 (a, b, ev.layer_id, ev.score, ev.model_dump_json()),
@@ -203,7 +253,7 @@ class Store:
     def put_relation(self, rel: Relation) -> None:
         a, b = ordered(rel.view_a, rel.view_b)
         rel = rel.model_copy(update={"view_a": a, "view_b": b})
-        with self.db:
+        with self.transaction():
             self.db.execute(
                 "INSERT OR REPLACE INTO relations VALUES (?,?,?,?)",
                 (a, b, rel.type.value, rel.model_dump_json()),
@@ -212,3 +262,11 @@ class Store:
     def relations(self) -> list[Relation]:
         rows = self.db.execute("SELECT body FROM relations ORDER BY view_a, view_b")
         return [Relation.model_validate_json(r[0]) for r in rows]
+
+    def get_relation(self, view_a: str, view_b: str) -> Relation | None:
+        """The stored relation for one pair, in either order; None when the pair was never fused."""
+        a, b = ordered(view_a, view_b)
+        row = self.db.execute(
+            "SELECT body FROM relations WHERE view_a = ? AND view_b = ?", (a, b)
+        ).fetchone()
+        return Relation.model_validate_json(row[0]) if row else None

@@ -20,13 +20,33 @@ from ._text import TEXT_NAMESPACES, body_text
 MIN_WORDS = 20
 
 # Seed lists: enough for the sample; the Perception track's entity observations extend them.
+# Bare first names ("Rafał", "Tomasz") are listed on purpose: the sample refers to its cast by
+# first name alone, and masking an unrelated namesake costs the skeleton nothing.
 CELEBRITIES = (
     "Rafał Brzoska",
+    "Rafała Brzoskę",
+    "Rafała Brzoski",
+    "Rafał",
+    "Rafała",
+    "Rafałowi",
+    "Rafałem",
     "Brzoska",
     "Brzoskę",
+    "Brzoski",
+    "Brzosce",
+    "Brzoską",
     "Monika Olejnik",
+    "Moniki Olejnik",
+    "Monikę Olejnik",
     "Olejnik",
     "Tomasz Lis",
+    "Tomasza Lisa",
+    "Tomaszowi Lisowi",
+    "Tomaszem Lisem",
+    "Tomasz",
+    "Tomasza",
+    "Tomaszowi",
+    "Tomaszem",
     "Lis",
     "Donald Tusk",
     "Tusk",
@@ -83,6 +103,18 @@ _CAP_NAME = re.compile(
 )
 _AMOUNT = re.compile(r"\b\d[\d\s.,]*\s?(zł|złotych|PLN|%|kg|tys\.?|mln|miejsc|opakowań|osób)\b")
 _NUMBER = re.compile(r"\b\d+([.,]\d+)?\b")
+# Editorial bylines name the (invented) author, which is cast, not story: "oprac. Jan Nowak".
+# The keyword may open a line ("Fot. ...", "Autor: ..."), so it matches in either case; name
+# tokens are Capitalised-then-lowercase, so an all-caps agency credit ("fot. PAP") and the
+# sentence after it are left alone (a capitalised agency, "fot. Reuters", is masked like a
+# name, which costs the skeleton nothing). A full stop or a line break after the first token
+# ends the byline: the second token must sit on the same line. The name must also sit on the
+# keyword's line, so a bare "Fot." ending a line does not mask the next line's first word.
+_NAME_TOKEN = r"[A-ZĄĆĘŁŃÓŚŹŻ][a-ząćęłńóśźż-]+"
+_BYLINE = re.compile(
+    rf"\b([Oo]prac\.|[Aa]utor(?:ka)?:|[Tt]ekst:|[Ff]ot\.)[ \t]+{_NAME_TOKEN}"
+    rf"(?:[ \t]+{_NAME_TOKEN})?(?![\w-])"
+)
 _DATE = re.compile(
     r"\b(w\s+)?(poniedziałek|wtorek|środ[ęa]|czwartek|piątek|sobot[ęa]|niedziel[ęa])\b|"
     r"\b\d{1,2}\s+(stycznia|lutego|marca|kwietnia|maja|czerwca|lipca|sierpnia|września|"
@@ -114,6 +146,7 @@ def mask(text: str, observations: list[Observation] = ()) -> str:
     text = _replace_all(text, list(CELEBRITIES) + people + cast, "[CELEBRITY]")
     text = _replace_all(text, BANKS, "[BANK]")
     text = _replace_all(text, INSTITUTIONS, "[INSTITUTION]")
+    text = _BYLINE.sub(lambda m: f"{m.group(1)} [PERSON]", text)
     text = _DATE.sub("[DATE]", text)
     text = _AMOUNT.sub("[AMOUNT]", text)
     text = _NUMBER.sub("[NUMBER]", text)
