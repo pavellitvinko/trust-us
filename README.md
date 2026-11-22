@@ -110,7 +110,23 @@ side and open http://localhost:5173: Vite reloads on every change and forwards `
 - **Library**: every item with a picture, as a table or as a map of linked items. Saved pages get
   their picture by being rendered offline in Chromium (JavaScript off, only files from the page's
   own folder), kept in `$FTF_DATA_DIR/previews`. Case, campaign, kit and duplicate are explained on
-  screen.
+  screen. **Library processing → Run selected checks** reads source images, pages and videos, checks expected
+  elements and persuasion techniques, discovers and matches patterns, then rebuilds links.
+  It requires both model keys, sends material to OpenAI and Gemini, and may incur API costs.
+  Choose checks before starting, skip pending checks, or skip the remaining items in an active
+  reading step after the current item finishes. Pattern discovery runs as a batch and can be
+  skipped before it starts. Campaign refresh and the final library update always run.
+  The panel shows resolved steps, item counts, elapsed time and coverage notes. Skipped checks
+  retain earlier results; they are never presented as freshly checked. It runs in the background;
+  the latest progress, results and unavailable
+  checks survive a server restart in `$FTF_DATA_DIR/llm-run.json`. Existing content-hash model
+  caches are reused. Processed corpus views without source material are skipped. Face matching,
+  live grounding of genuine reference pages and on-demand narratives are separate workflows.
+  Each table row has a compact progress ring. Open its dropdown to see the individual checks
+  and completion count. The item page uses the same ring and dropdown. Item states update during a run,
+  persist in `$FTF_DATA_DIR/item-checks.json`, and distinguish skipped or failed attempts from
+  available earlier results. Existing observations supply coverage for material checked through
+  the CLI; missing observations alone do not imply a clean result.
 - **Item page**: warning signs in plain words, where the link leads (as pictures), linked items as
   picture pairs with what they share, and the full pair report.
 - **How it works**: what the groups and links mean, and the report downloads.

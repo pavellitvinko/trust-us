@@ -2,6 +2,16 @@
 
 export type LinkKind = "campaign" | "kit" | "duplicate" | "possible";
 
+export type CheckState = "not_run" | "queued" | "running" | "complete" | "partial" | "unavailable" | "retained" | "skipped" | "failed";
+export interface ItemCheck {
+  id: string; label: string; state: CheckState; status: string; message: string;
+  hasResult: boolean; updatedAt: string | null; runId: string | null; observations: number;
+}
+export interface ItemProcessing {
+  state: CheckState; status: string; complete: number; total: number; current: string | null;
+  checks: ItemCheck[];
+}
+
 export interface Row {
   id: string;
   title: string;
@@ -22,6 +32,7 @@ export interface Row {
   possible: number;
   picture: boolean;
   note: string;
+  processing: ItemProcessing;
 }
 
 export interface MapNode {
@@ -43,11 +54,24 @@ export interface MapEdge {
 }
 
 export interface Job {
+  kind?: "llm" | "material";
   id: string;
   names: string[];
   status: "queued" | "running" | "done" | "failed";
   stage: string;
   error: string | null;
+}
+
+export interface ProcessingStep {
+  id: string; label: string; description: string; skippable: boolean; itemwise: boolean;
+  status: "pending" | "running" | "done" | "skipped" | "failed";
+  done: number; total: number | null; current: string | null; skipRequested: boolean;
+}
+
+export interface LlmRun {
+  id: string; status: Job["status"]; stage: string; error: string | null;
+  results: Record<string, unknown>; issues: string[]; createdAt: string; finishedAt: string | null;
+  steps: ProcessingStep[];
 }
 
 export interface LibraryData {
@@ -58,6 +82,8 @@ export interface LibraryData {
   generation: number;
   busy: boolean;
   jobs: Job[];
+  llmRun: LlmRun | null;
+  checkSteps: ProcessingStep[];
 }
 
 export interface Brief {
@@ -77,6 +103,7 @@ export interface MatchInfo extends Brief {
 }
 
 export interface ItemData extends Row {
+  busy: boolean;
   groups: { kind: "campaign" | "kit"; id: string; name: string; reason: string; title: string }[];
   warningSigns: string[];
   unchecked: string[];
@@ -241,6 +268,11 @@ async function get<T>(url: string, init?: RequestInit): Promise<T> {
 export const api = {
   meta: () => get<Meta>("/api/meta"),
   library: () => get<LibraryData>("/api/library"),
+  runLlmChecks: (skipped: string[]) => get<Job>("/api/library/llm-checks", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(skipped),
+  }),
+  skipLlmStep: (job: string, step: string) => get<LlmRun>(
+    `/api/library/llm-checks/${encodeURIComponent(job)}/skip/${encodeURIComponent(step)}`, { method: "POST" }),
   campaigns: () => get<CampaignsData>("/api/campaigns"),
   campaign: (id: string) => get<GroupDetail>(`/api/campaigns/${encodeURIComponent(id)}`),
   kit: (id: string) => get<GroupDetail>(`/api/kits/${encodeURIComponent(id)}`),
