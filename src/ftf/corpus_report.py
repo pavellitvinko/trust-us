@@ -14,13 +14,14 @@ import re
 import subprocess
 import zipfile
 from collections import Counter, defaultdict
-from itertools import combinations
+from itertools import combinations, pairwise
 from pathlib import Path
 from typing import Any
 
+from .compare.weights import weights
 from .config import get_settings
-from .contracts import Relation, RelationType, State
-from .fusion import DEFAULT, FusionConfig
+from .contracts import Purpose, Relation, RelationType, State
+from .fusion import DEFAULT, FusionConfig, prepare
 from .grouping import build_groups, rollup
 from .registry import layers, load_plugins
 from .reporting import build_pair_report, render_pair_report
@@ -34,7 +35,7 @@ LINKED = (
     RelationType.SAME_PLAYBOOK,
 )
 TEXT_NAMESPACES = frozenset(
-    {"page.clean_text", "page.body_text", "page.read_text", "expect.read_text"}
+    {"page.clean_text", "page.body_text", "text.body", "page.read_text", "expect.read_text"}
 )
 MODEL_SECTIONS = {
     "page_reading": "page.read_text",
@@ -42,14 +43,34 @@ MODEL_SECTIONS = {
     "expected_elements": "expect.element",
     "patterns": "pattern.score",
 }
-_SECRET_NAME = re.compile(
-    r"(?:^|[._-])(?:access_?token|token|secret|password|passwd|api_?key|session|sid|auth|"
-    r"cookie|csrf|xsrf|jwt)(?:$|[._-])",
-    re.IGNORECASE,
+_SECRET_PARTS = frozenset(
+    {
+        "token",
+        "secret",
+        "password",
+        "passwd",
+        "pwd",
+        "apikey",
+        "accesskey",
+        "session",
+        "sessionid",
+        "sessid",
+        "phpsessid",
+        "jsessionid",
+        "sid",
+        "auth",
+        "authorization",
+        "cookie",
+        "csrf",
+        "xsrf",
+        "jwt",
+    }
 )
-_SECRET_PARAM = re.compile(
-    r"(?i)\b(access_?token|token|secret|password|api_?key|session|sid|auth|jwt)=([^&\s\"'<>#]+)"
-)
+_SECRET_PAIRS = frozenset({("api", "key"), ("access", "key"), ("private", "key")})
+_PARAM = re.compile(r"([A-Za-z_$][\w.$-]{0,63})=([^&\s\"'<>#,;]+)")
+_ENCODED_PARAM = re.compile(r"(?i)(%3F|%26)([\w.-]{1,64})%3D((?:(?!%26)[^&\s\"'<>#]){1,4096})")
+_TRUNCATED = re.compile(r"(\S{6,})…")
+MIN_GLOBAL_SECRET_CHARS = 8  # shorter values could match ids and refs by accident
 _RANK = {t: i for i, t in enumerate(RelationType)}
 
 
@@ -57,6 +78,15 @@ def _hash(value: str) -> str:
     if value.startswith("[REDACTED:sha256:"):
         return value
     return f"[REDACTED:sha256:{hashlib.sha256(value.encode('utf-8')).hexdigest()[:12]}]"
+
+
+def _secret_name(name: str) -> bool:
+    """True when a whole part of the name is secret-like: `auth_token` yes, `author` no."""
+    spaced = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", name).lower()
+    parts = [p.rstrip("0123456789") for p in re.split(r"[^a-z0-9]+", spaced) if p]
+    return any(p in _SECRET_PARTS or p.endswith(("token", "password")) for p in parts) or any(
+        pair in _SECRET_PAIRS for pair in pairwise(parts)
+    )
 
 
 def _strings(value: Any):
@@ -88,26 +118,81 @@ def _cleaner(store: Store):
             roots[incident.root] = f"<incident:{incident.incident_id}>"
     for view in store.views():
         for o in store.observations(view.view_id):
-            if _SECRET_NAME.search(o.namespace):
-                secrets.update(s for s in _strings([o.value, o.raw]) if s)
+            if _secret_name(o.namespace.rsplit(".", 1)[-1]):
+                # `raw` can be a whole URL, which is cleaned by parameter instead.
+                secrets.update(v for v in _strings(o.value) if len(v) >= MIN_GLOBAL_SECRET_CHARS)
     ordered = sorted(secrets, key=len, reverse=True)
     ordered_roots = sorted(roots, key=len, reverse=True)
+
+    def param(match: re.Match[str]) -> str:
+        name, value = match.groups()
+        return f"{name}={_hash(value)}" if _secret_name(name) else match.group(0)
+
+    def encoded(match: re.Match[str]) -> str:
+        mark, name, value = match.groups()
+        return f"{mark}{name}%3D{_hash(value)}" if _secret_name(name) else match.group(0)
+
+    def truncated(match: re.Match[str]) -> str:
+        token = match.group(1).rsplit("=", 1)[-1]
+        full = next((x for x in ordered if x.startswith(token)), None)
+        return match.group(0) if full is None else match.group(0).replace(token, _hash(full))
 
     def clean(text: str) -> str:
         for secret in ordered:
             text = text.replace(secret, _hash(secret))
         for root in ordered_roots:
             text = text.replace(root, roots[root])
-        return _SECRET_PARAM.sub(lambda m: f"{m.group(1)}={_hash(m.group(2))}", text)
+        text = _ENCODED_PARAM.sub(encoded, _PARAM.sub(param, text))
+        return _TRUNCATED.sub(truncated, text)
 
     return clean
 
 
+def _strip_page_text(pair: dict[str, Any]) -> dict[str, Any]:
+    """Keep the evidence and its counts, without text a reader could rebuild the page from."""
+    pair["ignored_observations"] = [
+        item for item in pair["ignored_observations"] if item["ns"] not in TEXT_NAMESPACES
+    ]
+    for record in pair["sources"].values():
+        if record["namespace"] in TEXT_NAMESPACES:
+            record["value"] = "[omitted: page text]"
+            record["excerpted"] = False
+        elif _secret_name(record["namespace"].rsplit(".", 1)[-1]) and isinstance(
+            record["value"], str
+        ):
+            record["value"] = _hash(record["value"])
+    for row in pair["layers"]:
+        details = row["details"]
+        if "shared_values" in details:
+            for field in ("shared_values", "only_a", "only_b"):
+                details[field] = [
+                    "#" + hashlib.sha256(str(token).encode("utf-8")).hexdigest()[:10]
+                    for token in details[field]
+                ]
+            details["metric_note"] = (
+                f"{details.get('metric_note', '')} Text tokens are shown as hashes in exports."
+            ).strip()
+    return pair
+
+
 def _commit() -> str:
+    """The commit of this code, not of whatever repository the command was started in."""
+    here = Path(__file__).resolve()
     try:
-        return subprocess.run(
-            ["git", "rev-parse", "HEAD"], capture_output=True, text=True, timeout=5, check=True
-        ).stdout.strip()
+
+        def git(*args: str) -> str:
+            return subprocess.run(
+                ["git", *args],
+                cwd=here.parent,
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=True,
+            ).stdout.strip()
+
+        if (Path(git("rev-parse", "--show-toplevel")) / "src/ftf/corpus_report.py") != here:
+            return "unknown"
+        return git("rev-parse", "HEAD")
     except (OSError, subprocess.SubprocessError):
         return "unknown"
 
@@ -243,7 +328,8 @@ def build_corpus_report(store: Store, config: FusionConfig = DEFAULT) -> dict[st
         (r for r in relations if r.type in LINKED),
         key=lambda r: (_RANK[r.type], -_strongest(r), r.view_a, r.view_b),
     )
-    pairs = [build_pair_report(store, r.view_a, r.view_b, config) for r in linked]
+    pairs = [_strip_page_text(build_pair_report(store, r.view_a, r.view_b, config)) for r in linked]
+    prepare(store, config, campaigns=groups.campaign_of)
 
     campaigns = [
         {
@@ -302,14 +388,48 @@ def build_corpus_report(store: Store, config: FusionConfig = DEFAULT) -> dict[st
                 {"ns": item["ns"], "value": item["value"], "reason": item["reason"], "pairs": 0},
             )
             entry["pairs"] += 1
+        for row in pair["layers"]:
+            for item in row["ignored"]:
+                if item.get("ns") in TEXT_NAMESPACES:
+                    continue
+                key = (
+                    str(item.get("ns")),
+                    json.dumps(item.get("value"), sort_keys=True, ensure_ascii=False),
+                )
+                entry = ignored.setdefault(
+                    key,
+                    {
+                        "ns": item.get("ns"),
+                        "value": item.get("value"),
+                        "reason": item.get("reason") or "zero weight in this layer",
+                        "pairs": 0,
+                    },
+                )
+                entry["pairs"] += 1
         for reason in pair["reasons"]:
             if reason.startswith("contradiction"):
                 contradictions.append({"a": a, "b": b, "reason": reason})
             elif reason.startswith("demoted"):
                 demotions.append({"a": a, "b": b, "reason": reason})
         for row in pair["layers"]:
-            if not row.get("comparable", True):
-                not_comparable[row.get("layer_id") or row.get("layer")] += 1
+            if row["status"] == "not_comparable":
+                not_comparable[row["layer_id"]] += 1
+
+    # Stoplisted values shared by any views, including pairs that never became links.
+    holders: dict[tuple[str, str], set[str]] = defaultdict(set)
+    for view in views:
+        for o in store.observations(view.view_id):
+            usable = o.state is State.PRESENT and o.purpose is not Purpose.RISK
+            if usable and isinstance(o.value, str) and o.namespace not in TEXT_NAMESPACES:
+                holders[(o.namespace, o.value)].add(view.view_id)
+    for (ns, value), holding in holders.items():
+        if len(holding) > 1 and weights.is_stoplisted(ns, value):
+            key = (ns, json.dumps(value, sort_keys=True, ensure_ascii=False))
+            entry = ignored.setdefault(
+                key,
+                {"ns": ns, "value": value, "reason": "stoplisted common value", "pairs": 0},
+            )
+            entry["views"] = len(holding)
 
     sections = _section_status(store)
     layer_coverage = {
@@ -393,7 +513,8 @@ def build_corpus_report(store: Store, config: FusionConfig = DEFAULT) -> dict[st
 
 
 def _cell(value: Any) -> str:
-    text = " ".join(str(value).split()).replace("|", "\\|").replace("<", "&lt;")
+    text = " ".join(str(value).split()).replace("\\", "\\\\")
+    text = text.replace("|", "\\|").replace("<", "&lt;")
     return text.replace("[", "\\[").replace("`", "\\`")
 
 
@@ -573,6 +694,8 @@ def export_files(store: Store, config: FusionConfig = DEFAULT) -> dict[str, str]
                 omitted += 1
                 continue
             row = o.model_dump(mode="json")
+            if _secret_name(o.namespace.rsplit(".", 1)[-1]) and isinstance(row["value"], str):
+                row["value"] = _hash(row["value"])
             source = row.pop("source") or {}
             row["source_file"], row["source_locator"] = source.get("file"), source.get("locator")
             observations.append(_walk(row, clean))

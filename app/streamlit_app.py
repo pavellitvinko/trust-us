@@ -233,14 +233,17 @@ def show_pattern_library() -> None:
         if rename.button("Rename"):
             with ANALYSIS_LOCK:
                 rename_pattern(library, chosen, name)
+            st.session_state.pop("corpus_export", None)
             st.rerun()
         if retire.button("Retire"):
             with ANALYSIS_LOCK:
                 retire_pattern(library, chosen)
+            st.session_state.pop("corpus_export", None)
             st.rerun()
         if merge.button("Merge", disabled=target is None):
             with ANALYSIS_LOCK:
                 merge_patterns(library, target, chosen)
+            st.session_state.pop("corpus_export", None)
             st.rerun()
     except LibraryEditError as exc:
         st.error(str(exc))
@@ -457,6 +460,7 @@ with tab_material:
                 refresh=not offline,
             )
         st.session_state.pop("comparison_report", None)
+        st.session_state.pop("corpus_export", None)
         st.rerun()
     warnings = warning_observations(store, view.view_id)
     if warnings:

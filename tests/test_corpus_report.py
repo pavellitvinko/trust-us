@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from ftf import pipeline
 from ftf.contracts import (
     Incident,
     Observation,
@@ -20,7 +21,15 @@ from ftf.contracts import (
     View,
     ViewKind,
 )
-from ftf.corpus_report import _safe_csv, build_corpus_report, export_files, render_corpus_report
+from ftf.corpus_report import (
+    _cell,
+    _cleaner,
+    _commit,
+    _safe_csv,
+    build_corpus_report,
+    export_files,
+    render_corpus_report,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 SAMPLE = ROOT / "testing_sample"
@@ -105,6 +114,79 @@ def test_markdown_cells_cannot_break_the_table(filled):
     )
     text = render_corpus_report(build_corpus_report(filled))
     assert "x \\| &lt;script>" in text
+
+
+@pytest.fixture
+def linked_pair(store, tmp_path, monkeypatch):
+    monkeypatch.setenv("FTF_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("FTF_EMBEDDER", "fake")
+    views = [
+        View(view_id=v, incident_id="i", kind=ViewKind.PAGE, label=v, primary="p.html")
+        for v in ("a", "b")
+    ]
+    store.put_incident(Incident(incident_id="i", root="."), [], views)
+    page = "Zdanie jedyne w swoim rodzaju opisuje ofertę krok po kroku dla każdego czytelnika"
+    for view in ("a", "b"):
+        store.put_observations(
+            view,
+            "test",
+            [
+                obs(view, "page.clean_text", page),
+                obs(view, "page.body_text", page),
+                obs(view, "aff.sid", "1"),
+                obs(view, "domain.registrable", "shared.example"),
+            ],
+        )
+    pipeline.run_fingerprint(store)
+    pipeline.run_compare_all(store)
+    store.put_relation(
+        Relation(
+            view_a="a",
+            view_b="b",
+            type=RelationType.DUPLICATE,
+            confidence="high",
+            tier_scores={"T2": 1.0},
+        )
+    )
+    return store, page
+
+
+def test_pair_reports_hold_no_page_text_and_survive_short_secrets(linked_pair):
+    store, page = linked_pair
+    files = export_files(store)
+    blob = "\n".join(files.values())
+    assert page not in blob
+    assert "jedyne w swoim rodzaju" not in blob
+    assert json.loads(files["pairs.json"])[0]["layers"]
+
+
+def test_not_comparable_layers_are_counted(linked_pair):
+    store, _ = linked_pair
+    assert build_corpus_report(store)["not_comparable_layers_in_linked_pairs"]
+
+
+def test_cleaning_keeps_urls_and_hashes_every_secret_param(store):
+    view = View(view_id="v", incident_id="i", kind=ViewKind.PAGE, label="p")
+    store.put_incident(Incident(incident_id="i", root="."), [], [view])
+    secret = "api-key-value-1234567890-abcdefgh"
+    store.put_observations("v", "test", [obs("v", "kit.api_key_id", secret)])
+    clean = _cleaner(store)
+    url = clean("https://shop.example/l?refresh_token=abc&client_secret=def&id_token=ghi&q=ok")
+    assert url.startswith("https://shop.example/l?refresh_token=[REDACTED")
+    assert "abc" not in url and "def" not in url and "ghi" not in url and "q=ok" in url
+    assert "author=Jan" in clean("https://x.pl/?author=Jan")
+    assert secret[:23] not in clean(f"demoted to kit: api_key_id={secret[:23]}…")
+
+
+def test_markdown_backslash_cannot_undo_escaping():
+    assert _cell("\\[x](http://evil)") == "\\\\\\[x](http://evil)"
+    assert _cell("a\\|b") == "a\\\\\\|b"
+
+
+def test_commit_belongs_to_this_code(tmp_path, monkeypatch):
+    expected = _commit()
+    monkeypatch.chdir(tmp_path)
+    assert _commit() == expected
 
 
 @pytest.mark.skipif(not SAMPLE.is_dir(), reason="testing_sample/ not present")
