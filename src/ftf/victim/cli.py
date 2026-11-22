@@ -52,7 +52,8 @@ def cmd_personas(args: argparse.Namespace) -> None:
         print(f"{'':22} matches: {persona.matches}")
         for scope in ("local", "live"):
             c = contacts_for(book, persona, "run-id", local=scope == "local")
-            print(f"{'':22} {scope:5} e-mail {c.email or '-'}, phone {c.phone or '-'}")
+            email = c.email or ("a new mail.tm inbox per run" if c.provider == "mail.tm" else "-")
+            print(f"{'':22} {scope:5} e-mail {email}, phone {c.phone or '-'}")
     print(f"\nContacts from {book.path} (version {book.version}); see docs/victim-contacts.md.")
 
 
@@ -216,6 +217,26 @@ def cmd_perceive(args: argparse.Namespace) -> None:
         _ingest(root)
 
 
+def cmd_mail(args: argparse.Namespace) -> None:
+    """VV-33: read the run's mail.tm inbox; record new messages; re-ingest the run."""
+    from .mailbox import MailboxError, fetch_mail
+
+    root = Path(args.run)
+    if not (root / "run_files" / "mailbox.json").is_file():
+        raise SystemExit(f"{root} has no mail.tm inbox (only live runs with provider mail.tm do)")
+    try:
+        new = fetch_mail(root)
+    except MailboxError as exc:
+        raise SystemExit(str(exc)) from exc
+    print(f"{len(new)} new message(s)")
+    for m in new:
+        print(f"  {m['received_at']}  from {m['from']}  {m['subject'][:80]}")
+        if m["link_hosts"]:
+            print(f"      links to: {', '.join(m['link_hosts'])}")
+    if new and not args.no_ingest:
+        _ingest(root)
+
+
 def cmd_show(args: argparse.Namespace) -> None:
     _show(Path(args.run))
 
@@ -254,6 +275,11 @@ def add_parser(sub: Any) -> None:
     p.add_argument("run")
     p.add_argument("--no-ingest", action="store_true")
     p.set_defaults(func=cmd_perceive)
+
+    p = vsub.add_parser("mail", help="read a run's mail.tm inbox and record what arrived")
+    p.add_argument("run")
+    p.add_argument("--no-ingest", action="store_true")
+    p.set_defaults(func=cmd_mail)
 
     p = vsub.add_parser("show", help="summarise a finished run")
     p.add_argument("run")

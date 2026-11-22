@@ -662,7 +662,7 @@ def test_packaged_contacts_file_gives_local_contacts_and_nothing_live():
     assert local.phone == "+48 500 000 101" and local.scope == "local"
     live = contacts_for(book, PERSONA, "20261122-1000-ab12", local=False)
     assert live.email is None and live.phone is None
-    assert "not sent" in live.email_policy and "stops the form" in live.phone_policy
+    assert "mail.tm" in live.email_policy and "stops the form" in live.phone_policy
     assert set(book.local.phones) == set(load_personas())  # one number per persona
 
 

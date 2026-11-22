@@ -20,7 +20,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -110,8 +110,13 @@ class _M(BaseModel):
 
 
 class EmailRule(_M):
-    domain: str = ""
+    provider: Literal["static", "mail.tm"] = "static"  # mail.tm: one disposable inbox per run
+    api: str = "https://api.mail.tm"  # for mail.tm
+    domain: str = ""  # static: the catch-all domain; mail.tm: empty = any domain it offers
     pattern: str = "{persona}.{run_id}@{domain}"
+
+    def local_part(self, persona: str, run_id: str) -> str:
+        return self.pattern.split("@", 1)[0].format(persona=persona, run_id=run_id).lower()
 
     @field_validator("pattern")
     @classmethod
@@ -162,6 +167,8 @@ class RunContacts:
     phone_policy: str
     book_version: str
     book_path: str
+    provider: str = "static"
+    email_rule: EmailRule | None = None
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -172,6 +179,7 @@ class RunContacts:
             "phone_policy": self.phone_policy,
             "file": self.book_path,
             "version": self.book_version,
+            "provider": self.provider,
         }
 
 
@@ -181,7 +189,10 @@ def contacts_for(book: ContactBook, persona: Persona, run_id: str, local: bool) 
     scope: Scope = getattr(book, scope_name)
     domain = scope.email.domain.strip().lstrip("@").lower()
     email = None
-    if domain:
+    if scope.email.provider == "mail.tm":
+        # The inbox is created when the run starts (VictimRun.run), not here: no network yet.
+        email_policy = f"{scope_name}: a mail.tm inbox created when the run starts"
+    elif domain:
         email = scope.email.pattern.format(persona=persona.id, run_id=run_id, domain=domain).lower()
         if not _ADDRESS.match(email):
             raise ValueError(f"contacts {scope_name}.email gives an invalid address: {email!r}")
@@ -205,7 +216,15 @@ def contacts_for(book: ContactBook, persona: Persona, run_id: str, local: bool) 
             f"{scope_name}: {why}; optional phone left empty, required phone stops the form"
         )
     return RunContacts(
-        scope_name, email, phone, email_policy, phone_policy, book.version, book.path
+        scope_name,
+        email,
+        phone,
+        email_policy,
+        phone_policy,
+        book.version,
+        book.path,
+        scope.email.provider,
+        scope.email,
     )
 
 

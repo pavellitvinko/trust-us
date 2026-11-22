@@ -139,6 +139,7 @@ class VictimRun:
         notify: Any = print,
         replay: bool = False,
         contacts: ContactBook | None = None,
+        mail_client: Any = None,
     ):
         self.url = url
         self.persona = persona
@@ -159,6 +160,7 @@ class VictimRun:
         self.contacts = contacts_for(book, persona, self.run_id, local=rules.is_local(url))
         self.email = self.contacts.email
         self.phone = self.contacts.phone
+        self.mail_client = mail_client  # tests pass a fake mail.tm client
         self.history = History()
         self.stage: Stage | None = None
         self.step = 0
@@ -560,11 +562,35 @@ class VictimRun:
         self.say(f"stopped: {block.reason}: {block.asked[:120]}")
         return block.reason, block.asked
 
+    def provision_mailbox(self) -> None:
+        """mail.tm scope: create this run's inbox before anything is typed (VV-30)."""
+        c = self.contacts
+        if c.provider != "mail.tm" or c.email_rule is None:
+            return
+        from .mailbox import MailboxError, MailTm
+
+        try:
+            box = (self.mail_client or MailTm(c.email_rule.api)).create(
+                c.email_rule.local_part(self.persona.id, self.run_id), c.email_rule.domain
+            )
+        except MailboxError as exc:
+            policy = f"{c.scope}: mail.tm inbox could not be created ({exc}); no e-mail given"
+            self.contacts = replace(c, email_policy=policy)
+            self.say(policy)
+            return
+        box.save(self.rec.files)
+        self.email = box.address
+        self.contacts = replace(
+            c, email=box.address, email_policy=f"{c.scope}: mail.tm inbox {box.address}"
+        )
+        self.say(f"mail.tm inbox for this run: {box.address}")
+
     def run(self) -> RunResult:
         stop: tuple[str, str] = (rules.ERROR, "the run did not start")
         panel = PanelServer(self.control) if self.options.panel else None
         referer = referrer_for(self.persona)
         try:
+            self.provision_mailbox()
             self.vb = launch(
                 self.persona,
                 self.rec.files / "session.har",

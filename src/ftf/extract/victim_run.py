@@ -253,9 +253,43 @@ class VictimRun:
                         raw=url,
                     )
 
+        if index == self._mail_stage(root):
+            self._mail(root, emit)
         if index == 1:
             self._perception(root, emit)
         return out
+
+    @staticmethod
+    def _mail_stage(root: Path) -> int | None:
+        """The stage whose form was given the run's address: mail that arrives follows it."""
+        mailbox = _load_json(root / RUN_FILES / "mailbox.json") or {}
+        address = (mailbox.get("address") or "").lower()
+        if not address:
+            return None
+        for form in _jsonl(root / RUN_FILES / "forms.jsonl"):
+            if address in {str(v).lower() for v in (form.get("values_given") or {}).values()}:
+                return form.get("stage")
+        return None
+
+    @staticmethod
+    def _mail(root: Path, emit: Any) -> None:
+        """VV-33, VV-42: who wrote to the run's address, and where their mail points."""
+        for line, mail in enumerate(_jsonl(root / RUN_FILES / "mail.jsonl"), 1):
+            loc = f"{RUN_FILES}/mail.jsonl:line[{line}]"
+            file = mail.get("file") or f"{RUN_FILES}/mail.jsonl"
+            if mail.get("sender_domain"):
+                emit(
+                    "A15",
+                    "mail.sender_domain",
+                    registrable_domain(mail["sender_domain"]),
+                    file,
+                    loc,
+                    raw=mail.get("from"),
+                )
+            for host in mail.get("link_hosts", []):
+                emit("A15", "mail.link_domain", registrable_domain(host), file, loc, raw=host)
+            for phone in mail.get("phones", []):
+                emit("A12", "mail.phone", phone, file, loc, raw=phone)
 
     @staticmethod
     def _stage_view(ctx: Context, view: View, stage: int) -> str | None:

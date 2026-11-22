@@ -254,4 +254,41 @@ def test_contacts_file_numbers_send_the_required_phone_form(chromium, site, tmp_
     assert form["phone"] == ["500 000 101"]  # national part of +48 500 000 101
     contacts = result.manifest["contacts"]
     assert contacts["scope"] == "local" and contacts["phone"] == "+48 500 000 101"
-    assert contacts["version"] == "1" and contacts["file"].endswith("contacts.json")
+    assert contacts["version"] == load_contacts().version and contacts["file"].endswith(
+        "contacts.json"
+    )
+
+
+def test_a_mail_tm_inbox_is_what_the_form_gets(chromium, site, tmp_path):
+    from ftf.victim.contacts import ContactBook
+    from ftf.victim.mailbox import MailTm
+    from tests.test_victim_mailbox import FakeMailTm
+
+    origin, posts = site
+    posts.clear()
+    contacts = ContactBook.model_validate(
+        {
+            "version": "t",
+            "local": {
+                "email": {"provider": "mail.tm"},
+                "phones": {"retiree-income": "+48 500 000 101"},
+            },
+            "live": {},
+        }
+    )
+    run = VictimRun(
+        f"{origin}/phone.html",
+        PERSONA,
+        tmp_path / "runs",
+        settings=settings(tmp_path),
+        options=RunOptions(pace=0, panel=False, max_steps=10, human_wait_s=0),
+        launcher=_headless,
+        notify=None,
+        contacts=contacts,
+        mail_client=MailTm(transport=FakeMailTm()),
+    )
+    result = run.run()
+    assert result.stop_reason == rules.OFFSITE_HANDOFF, result.stop_detail
+    assert posts[0]["form"]["email"] == [f"retiree-income.{run.run_id}@mailbox.example"]
+    assert result.manifest["contacts"]["provider"] == "mail.tm"
+    assert (result.root / "run_files" / "mailbox.json").is_file()

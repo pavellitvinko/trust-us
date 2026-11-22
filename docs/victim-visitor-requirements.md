@@ -125,6 +125,8 @@ This reverses one rule in the current design for victim runs only: [architecture
 
 The addresses and numbers are defined in one file, `src/ftf/victim/contacts.json`, documented in [victim-contacts.md](victim-contacts.md).
 
+*Decided 2026-11-22:* live runs use a disposable [mail.tm](https://mail.tm) inbox per run instead of an address on a team catch-all domain. It is still one address per run, it is still recorded, and its mail is read with `ftf victim mail` (VV-33).
+
 **VV-30 E-mail.** Each run gets its own address on the team's catch-all mailbox, e.g. `<persona>.<run-id>@<team-domain>`. The address is recorded with the run, so any message that arrives later can be tied to the exact site and form that received it.
 
 **VV-31 Phone.** When a form asks for a phone number, the agent uses a number that cannot be assigned to any subscriber under the Polish numbering plan. *Open:* the exact range has to be checked against the regulator's (UKE) numbering plan before the first live run; until then the agent leaves optional phone fields empty and stops at forms that require one, recording "phone required".

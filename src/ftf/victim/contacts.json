@@ -1,5 +1,5 @@
 {
-  "version": "1",
+  "version": "2",
   "about": "Contact details victim runs give to the sites they visit. Documented in docs/victim-contacts.md. Change the version whenever a value changes; every run records the version it used.",
   "local": {
     "about": "Runs on this machine only: the case-61 replay and the fixture pages. Nothing typed here leaves the machine. The numbers are fictional and are never used on a live site.",
@@ -16,8 +16,10 @@
     "phones_confirmed_by": "not needed: local runs only"
   },
   "live": {
-    "about": "Live sites. Fill in once the team mailbox exists (requirements section 13, question 2) and a phone range that cannot be assigned is confirmed (question 1). Until then forms that need an e-mail are filled but not sent, and forms that require a phone stop the run.",
+    "about": "Live sites. E-mail: one disposable mail.tm inbox per run, created when the run starts; read it later with `ftf victim mail <run folder>`. Phones: fill in once a range that cannot be assigned is confirmed (requirements section 13, question 1); until then forms that require a phone stop the run.",
     "email": {
+      "provider": "mail.tm",
+      "api": "https://api.mail.tm",
       "domain": "",
       "pattern": "{persona}.{run_id}@{domain}"
     },
