@@ -113,6 +113,49 @@ function ItemsTable({ rows }: { rows: Row[] }) {
   );
 }
 
+/** Downloads the Library report; a failure is said on the page, not left to the browser. */
+function ReportButton({ busy }: { busy: boolean }) {
+  const [state, setState] = useState<"idle" | "working">("idle");
+  const [error, setError] = useState<string | null>(null);
+  const download = async () => {
+    setState("working");
+    setError(null);
+    try {
+      const res = await fetch("/api/library/report.pdf");
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.detail ?? res.statusText);
+      }
+      const name = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") ?? "")?.[1];
+      const url = URL.createObjectURL(await res.blob());
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = name ?? "library-report.pdf";
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setError(`Couldn't make the report: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setState("idle");
+    }
+  };
+  return (
+    <>
+      <button className="btn primary report-btn" onClick={download} disabled={busy || state === "working"}
+        title={busy ? "Available when the current analysis finishes" : "The state of the whole library, as it is now"}>
+        {state === "working" ? <span className="spinner" /> : (
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+            strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M8 2v8m0 0L4.5 6.5M8 10l3.5-3.5M2.5 13.5h11" />
+          </svg>
+        )}
+        {state === "working" ? "Preparing report…" : "Download report (PDF)"}
+      </button>
+      {error && <span className="error report-error" role="alert">{error}</span>}
+    </>
+  );
+}
+
 export default function Library() {
   const { data, error, refresh } = useLibrary();
   const [params, setParams] = useSearchParams();
@@ -128,6 +171,7 @@ export default function Library() {
         {data.items.length > 0 && <span className="sub">
           {plural(data.items.length, "item")} in {plural(data.cases, "case")} · {data.linked} linked to something
         </span>}
+        {data.items.length > 0 && <ReportButton busy={data.busy} />}
         {!empty && <div className="seg" role="tablist">
           {(["table", "map"] as const).map((v) => <button key={v} className={view === v ? "on" : ""}
             role="tab" aria-selected={view === v}
