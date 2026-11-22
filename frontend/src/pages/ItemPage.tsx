@@ -34,8 +34,8 @@ function AdDetails({ ad }: { ad: AdInfo }) {
                   : <Link to={itemUrl(ad.via.id)}>{ad.via.title}</Link>
                 </>
               )}
-              {ad.libraryEvidence.map((e) => (
-                <div key={`${e.file}${e.where}`} title={e.where}>
+              {ad.libraryEvidence.map((e, i) => (
+                <div key={i} title={e.where}>
                   “{e.text}”
                 </div>
               ))}
@@ -60,6 +60,11 @@ function AdDetails({ ad }: { ad: AdInfo }) {
           </div>
         </div>
       ))}
+      {ad.moreAdvertiserPeers > 0 && (
+        <div className="small">
+          …and {ad.moreAdvertiserPeers} more screenshots with the same advertiser name in this case.
+        </div>
+      )}
       {ad.links.length > 0 && (
         <div className="small" style={{ marginTop: 6 }}>
           One advertiser can run many ads and campaigns: these links do not put items in one campaign.

@@ -134,6 +134,7 @@ export interface AdInfo {
   via: Brief | null;
   advertiser: string | null;
   links: AdLinkInfo[];
+  moreAdvertiserPeers: number;
 }
 
 export interface PathData {

@@ -211,15 +211,21 @@ _AD_LINK_ORDER = list(_AD_LINK_NAMES)
 _LIBRARY_SOURCES = {
     "metadata": "From the saved material",
     "ocr": "Read on this screenshot",
-    "same_post": "Read on another screenshot of the same post",
+    ("same_post", "ocr"): "Read on another screenshot of the same post",
+    ("same_post", "metadata"): "From the saved material of another screenshot of the same post",
 }
+MAX_ADVERTISER_PEERS = 20
 
 
 def _ad(library: Library, item: Item) -> dict[str, Any] | None:
     """The ad's Library ID and advertiser, where each was read, and the screenshots it
     shares a post, account or advertiser name with. None of these names a campaign."""
+    peers, total = library.ads.possible_advertisers(item.view_id, MAX_ADVERTISER_PEERS)
     links = []
-    for link in sorted(item.ad_links, key=lambda x: (_AD_LINK_ORDER.index(x.kind), x.other)):
+    for link in [
+        *sorted(item.ad_links, key=lambda x: (_AD_LINK_ORDER.index(x.kind), x.other)),
+        *peers,
+    ]:
         other = library.get(link.other)
         if other is not None:
             links.append(
@@ -233,9 +239,12 @@ def _ad(library: Library, item: Item) -> dict[str, Any] | None:
     if not (item.library_id or item.advertiser or links):
         return None
     via = library.get(item.library_via) if item.library_via else None
+    source = item.library_source or ""
     return {
         "libraryId": item.library_id,
-        "librarySource": _LIBRARY_SOURCES.get(item.library_source or "", ""),
+        "librarySource": _LIBRARY_SOURCES.get(
+            (source, item.library_origin) if source == "same_post" else source, ""
+        ),
         "libraryEvidence": [
             {"text": e.raw, "where": e.locator or "", "file": e.file or ""}
             for e in item.library_evidence
@@ -243,6 +252,7 @@ def _ad(library: Library, item: Item) -> dict[str, Any] | None:
         "via": _brief(via) if via else None,
         "advertiser": item.advertiser,
         "links": links,
+        "moreAdvertiserPeers": total - len(peers),
     }
 
 
