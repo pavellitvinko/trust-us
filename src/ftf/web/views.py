@@ -145,6 +145,12 @@ def map_payload(library: Library) -> dict[str, Any]:
             {"a": a, "b": b, "kind": m.kind, "reason": m.reason, "label": m.label}
             for (a, b), m in edges.items()
         ],
+        # Why each campaign holds together; some are joined by a journey, not by a link.
+        "campaignWhy": {
+            cid: why.label
+            for cid, campaign in library.campaigns.items()
+            if (why := campaign_why(library, campaign)).label
+        },
     }
 
 

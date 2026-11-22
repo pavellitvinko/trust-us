@@ -140,6 +140,7 @@ table.items { width: 100%; border-collapse: separate; border-spacing: 0; backgro
 .tree-item-text { display: grid; min-width: 0; }
 .tree-item-text .t { font-weight: 550; font-size: 13px; overflow-wrap: anywhere; }
 .tree-copy { color: var(--dup); }
+.tree-link { color: var(--text); }
 
 /* item page */
 .back { display: inline-flex; gap: 6px; text-decoration: none; color: var(--text-2); font-size: 13px; margin-bottom: 14px; }

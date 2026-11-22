@@ -163,7 +163,7 @@ export default function Library() {
           {view === "table" ? (
             <ItemsTable rows={data.items} />
           ) : (
-            <MapView rows={data.items} edges={data.map.edges} />
+            <MapView rows={data.items} edges={data.map.edges} campaignWhy={data.map.campaignWhy} />
           )}
         </>
       )}

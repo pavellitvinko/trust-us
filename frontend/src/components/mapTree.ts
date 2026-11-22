@@ -19,6 +19,8 @@ export interface TreeNode {
   children: TreeNode[];
   rows: Row[];
   count: number;
+  /** For items linked one to one: what each is linked to. */
+  linkNotes?: Record<string, string>;
 }
 
 const compare = new Intl.Collator("pl", { numeric: true, sensitivity: "base" }).compare;
@@ -42,7 +44,7 @@ function reasons(rows: Row[], edges: MapEdge[], kind: MapEdge["kind"]) {
   return [...new Set(labels)].sort(compare);
 }
 
-function caseNodes(parent: string, rows: Row[]): TreeNode[] {
+function caseNodes(parent: string, rows: Row[], linkNotes?: Record<string, string>): TreeNode[] {
   const cases = new Map<string, Row[]>();
   for (const r of rows) cases.set(r.caseId, [...(cases.get(r.caseId) ?? []), r]);
   return [...cases.entries()]
@@ -56,11 +58,12 @@ function caseNodes(parent: string, rows: Row[]): TreeNode[] {
       children: [],
       rows: members,
       count: members.length,
+      linkNotes,
     }))
     .sort((a, b) => compare(a.title, b.title));
 }
 
-function campaignNode(id: string, rows: Row[], edges: MapEdge[]): TreeNode {
+function campaignNode(id: string, rows: Row[], edges: MapEdge[], why: Record<string, string>): TreeNode {
   const key = `campaign:${id}`;
   return {
     key,
@@ -69,7 +72,7 @@ function campaignNode(id: string, rows: Row[], edges: MapEdge[]): TreeNode {
     name: rows[0].campaign,
     note: "Likely run by the same people.",
     href: campaignUrl(id),
-    reasons: reasons(rows, edges, "campaign"),
+    reasons: why[id] ? [why[id]] : reasons(rows, edges, "campaign"),
     children: caseNodes(key, rows),
     rows: [],
     count: rows.length,
@@ -78,22 +81,27 @@ function campaignNode(id: string, rows: Row[], edges: MapEdge[]): TreeNode {
 
 const biggestFirst = (a: TreeNode, b: TreeNode) => b.count - a.count || compare(a.title, b.title);
 
-/** Items linked to each other without sharing a campaign or template. */
+/** Items that are all directly linked to each other, without a campaign or template. */
 function linkedGroups(rows: Row[], edges: MapEdge[]): Row[][] {
   const parent = new Map(rows.map((r) => [r.id, r.id]));
   const find = (x: string): string => {
     while (parent.get(x) !== x) x = parent.get(x)!;
     return x;
   };
+  const direct = new Set<string>();
   for (const e of edges) {
-    if (e.kind !== "possible" && parent.has(e.a) && parent.has(e.b)) parent.set(find(e.a), find(e.b));
+    if (e.kind === "possible" || !parent.has(e.a) || !parent.has(e.b)) continue;
+    parent.set(find(e.a), find(e.b));
+    direct.add(`${e.a}\n${e.b}`).add(`${e.b}\n${e.a}`);
   }
   const groups = new Map<string, Row[]>();
   for (const r of rows) groups.set(find(r.id), [...(groups.get(find(r.id)) ?? []), r]);
-  return [...groups.values()];
+  return [...groups.values()].filter((g) =>
+    g.every((a) => g.every((b) => a.id === b.id || direct.has(`${a.id}\n${b.id}`))),
+  );
 }
 
-export function buildTree(rows: Row[], edges: MapEdge[]): TreeNode[] {
+export function buildTree(rows: Row[], edges: MapEdge[], campaignWhy: Record<string, string> = {}): TreeNode[] {
   const campaigns = new Map<string, Row[]>();
   for (const r of rows) {
     if (r.campaignId) campaigns.set(r.campaignId, [...(campaigns.get(r.campaignId) ?? []), r]);
@@ -116,7 +124,7 @@ export function buildTree(rows: Row[], edges: MapEdge[]): TreeNode[] {
 
   const kits = [...kitRows.entries()].map(([id, members]): TreeNode => {
     const key = `kit:${id}`;
-    const own = (kitCampaigns.get(id) ?? []).map((c) => campaignNode(c, campaigns.get(c)!, edges)).sort(biggestFirst);
+    const own = (kitCampaigns.get(id) ?? []).map((c) => campaignNode(c, campaigns.get(c)!, edges, campaignWhy)).sort(biggestFirst);
     const loose = members.filter((r) => !r.campaignId);
     const children = [...own];
     if (loose.length) {
@@ -173,17 +181,42 @@ export function buildTree(rows: Row[], edges: MapEdge[]): TreeNode[] {
   const tree = [
     // A template whose only items sit in a campaign shown under another template has nothing left.
     ...kits.filter((k) => k.count > 0).sort(biggestFirst),
-    ...standalone.map((c) => campaignNode(c, campaigns.get(c)!, edges)).sort(biggestFirst),
+    ...standalone.map((c) => campaignNode(c, campaigns.get(c)!, edges, campaignWhy)).sort(biggestFirst),
     ...links.sort(biggestFirst),
   ];
-  const unlinked = rest.filter((r) => !inLinked.has(r.id));
+
+  // A link is not transitive: the backend can refuse to merge A-B-C, so these stay one to one.
+  const titles = new Map(rows.map((r) => [r.id, r.title]));
+  const linkNotes: Record<string, string> = {};
+  for (const r of rest) {
+    if (inLinked.has(r.id)) continue;
+    const links = edges
+      .filter((e) => e.kind !== "possible" && (e.a === r.id || e.b === r.id))
+      .map((e) => `${titles.get(e.a === r.id ? e.b : e.a) ?? "another item"} (${e.label})`);
+    if (links.length) linkNotes[r.id] = `linked to ${[...new Set(links)].join(", ")}`;
+  }
+  const oneToOne = rest.filter((r) => linkNotes[r.id]);
+  if (oneToOne.length) {
+    tree.push({
+      key: "one-to-one",
+      kind: "links",
+      title: "Linked one to one, not grouped",
+      name: "",
+      note: "Each item shares evidence with the item named, but that doesn't put them all in one group.",
+      reasons: [],
+      children: caseNodes("one-to-one", oneToOne, linkNotes),
+      rows: [],
+      count: oneToOne.length,
+    });
+  }
+  const unlinked = rest.filter((r) => !inLinked.has(r.id) && !linkNotes[r.id]);
   if (unlinked.length) {
     tree.push({
       key: "unlinked",
       kind: "unlinked",
-      title: "Not linked to anything yet",
+      title: "No firm link yet",
       name: "",
-      note: "No shared evidence so far. This doesn't prove they are unrelated.",
+      note: "Nothing proves a link so far. This doesn't mean they are unrelated.",
       reasons: [],
       children: caseNodes("unlinked", unlinked),
       rows: [],
@@ -199,12 +232,11 @@ const plain = (text: string) =>
 
 const rowText = (r: Row) => plain([r.title, r.host, r.case, shortCase(r.case), r.type, r.campaign, r.kit].join(" "));
 
-/** Only the branches holding a matching item; a matching group keeps all its items. */
+/** Only the branches holding a matching item. Group names are part of each item's text. */
 export function filterTree(nodes: TreeNode[], query: string): TreeNode[] {
   const q = plain(query.trim());
   if (!q) return nodes;
   const prune = (node: TreeNode): TreeNode | null => {
-    if (plain(`${node.title} ${node.name}`).includes(q)) return node;
     const rows = node.rows.filter((r) => rowText(r).includes(q));
     const children = node.children.map(prune).filter((c): c is TreeNode => c !== null);
     if (!rows.length && !children.length) return null;

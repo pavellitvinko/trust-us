@@ -83,7 +83,7 @@ export interface LibraryData {
   items: Row[];
   cases: number;
   linked: number;
-  map: { nodes: MapNode[]; edges: MapEdge[] };
+  map: { nodes: MapNode[]; edges: MapEdge[]; campaignWhy: Record<string, string> };
   generation: number;
   busy: boolean;
   jobs: Job[];

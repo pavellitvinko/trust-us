@@ -5,12 +5,12 @@ import { Picture, plural } from "./bits";
 import { buildTree, filterTree, groupKeys, shortCase, type TreeNode } from "./mapTree";
 import { VideoThumbnail } from "./video";
 
-function ItemRow({ row }: { row: Row }) {
+function ItemRow({ row, linkNote }: { row: Row; linkNote?: string }) {
   return (
     <li className="tree-item">
       <Link to={`/item/${encodeURIComponent(row.id)}`}>
         {row.type === "Video" ? (
-          <VideoThumbnail id={row.id} />
+          <VideoThumbnail id={row.id} width={72} height={46} />
         ) : (
           <Picture id={row.id} has={row.picture} type={row.type} width={72} height={46} />
         )}
@@ -21,6 +21,9 @@ function ItemRow({ row }: { row: Row }) {
             {row.host && ` · ${row.host}`}
             {row.signs > 0 && <span className="danger"> · {plural(row.signs, "warning sign")}</span>}
             {row.duplicateOf && <span className="tree-copy"> · same page also in {shortCase(row.duplicateOf)}</span>}
+            {row.links === 0 && row.possible > 0 && <span> · {plural(row.possible, "possible link")}</span>}
+            {row.links === 0 && !row.comparable && <span> · too little to compare</span>}
+            {linkNote && <span className="tree-link"> · {linkNote}</span>}
           </span>
         </span>
       </Link>
@@ -43,7 +46,7 @@ function Branch({
         <div className="tree-case-name">{node.title}</div>
         <ul>
           {node.rows.map((r) => (
-            <ItemRow key={r.id} row={r} />
+            <ItemRow key={r.id} row={r} linkNote={node.linkNotes?.[r.id]} />
           ))}
         </ul>
       </li>
@@ -85,11 +88,19 @@ function Branch({
 }
 
 /** The Library as a tree: template, campaign, case, item. */
-export default function MapView({ rows, edges }: { rows: Row[]; edges: MapEdge[] }) {
+export default function MapView({
+  rows,
+  edges,
+  campaignWhy,
+}: {
+  rows: Row[];
+  edges: MapEdge[];
+  campaignWhy: Record<string, string>;
+}) {
   const [query, setQuery] = useState("");
   // Stored as a difference from the default, so groups that arrive later open normally.
   const [flipped, setFlipped] = useState<Set<string>>(new Set());
-  const tree = useMemo(() => buildTree(rows, edges), [rows, edges]);
+  const tree = useMemo(() => buildTree(rows, edges, campaignWhy), [rows, edges, campaignWhy]);
   const shown = useMemo(() => filterTree(tree, query), [tree, query]);
   const searching = query.trim().length > 0;
   const keys = useMemo(() => groupKeys(tree), [tree]);
@@ -105,6 +116,7 @@ export default function MapView({ rows, edges }: { rows: Row[]; edges: MapEdge[]
   const setAll = (open: boolean) =>
     setFlipped(new Set(keys.filter((key) => closedByDefault(key) === open)));
   const found = shown.reduce((sum, n) => sum + n.count, 0);
+  if (!rows.length) return <div className="empty card">Items appear here once the analysis finishes.</div>;
 
   return (
     <div className="tree-page">

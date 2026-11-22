@@ -2,13 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api, itemApi, type MediaData } from "../api";
 
-export function VideoThumbnail({ id }: { id: string }) {
+export function VideoThumbnail({ id, width = 96, height = 60 }: { id: string; width?: number; height?: number }) {
   const [failed, setFailed] = useState(false);
   return failed ? (
-    <div className="pic none" style={{ width: 96, height: 60 }}>Video</div>
+    <div className="pic none" style={{ width, height }}>Video</div>
   ) : (
     <img className="pic" src={`${itemApi(id)}/media/thumbnail`} alt="Video thumbnail"
-      loading="lazy" width={96} height={60} onError={() => setFailed(true)} />
+      loading="lazy" width={width} height={height} onError={() => setFailed(true)} />
   );
 }
 
