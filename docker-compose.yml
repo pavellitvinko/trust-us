@@ -58,5 +58,64 @@ services:
         condition: service_healthy
         required: false  # the app must start even when the face service cannot
 
+  # Firewall for the probe: public internet only. Started only with `--profile probe`.
+  probe-guard:
+    profiles: [probe]
+    build: ./docker/probe-guard
+    cap_drop: [ALL]
+    cap_add: [NET_ADMIN, NET_RAW, CHOWN]
+    sysctls:
+      net.ipv6.conf.all.disable_ipv6: "1"
+    environment:
+      FTF_UID: ${FTF_UID:-1000}
+    volumes:
+      - ${FTF_PROBE_DIR:-./data/probe-sandbox}:/sandbox
+    networks: [probe-net]
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/ready"]
+      interval: 1s
+      timeout: 2s
+      retries: 20
+
+  # Walks hostile sites. No keys, no app data, no internal services (docs/probe-agent.md).
+  probe: &probe-sandbox
+    profiles: [probe]
+    build: .
+    entrypoint: ["ftf", "probe"]
+    command: ["--help"]
+    network_mode: service:probe-guard
+    depends_on:
+      probe-guard:
+        condition: service_healthy
+    user: "${FTF_UID:-1000}:${FTF_UID:-1000}"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 512
+    mem_limit: 3g
+    shm_size: 1g
+    tmpfs: [/tmp, /data]
+    environment:
+      FTF_DATA_DIR: /data/probe-sandbox
+      FTF_PROBE_SANDBOX: "1"
+      FTF_PROBE_MAIL_DOMAIN: ${FTF_PROBE_MAIL_DOMAIN:-}
+      FTF_SEED_CORPUS: ""
+      FTF_ENRICH: "off"
+      HOME: /tmp
+    volumes:
+      - ${FTF_PROBE_DIR:-./data/probe-sandbox}:/data/probe-sandbox
+
+  # Runs the jobs queued by the app's Probe agent tab, with the same restrictions.
+  probe-worker:
+    <<: *probe-sandbox
+    entrypoint: ["ftf", "probe-worker"]
+    command: []
+    restart: unless-stopped
+
+networks:
+  probe-net:
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "false"
+
 volumes:
   compreface-db:

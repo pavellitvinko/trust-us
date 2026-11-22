@@ -48,6 +48,8 @@ recognition model.
 | OpenAI API | `FTF_OPENAI_MODEL=gpt-6-luna` | reading, patterns, expectation profiles, narrative | <https://openai.com/policies/> |
 | Google Gemini API | `FTF_EMBEDDING_MODEL=gemini-embedding-2`, `FTF_VIDEO_MODEL=gemini-4-hydrogen` | embeddings, video | <https://ai.google.dev/gemini-api/terms> |
 | CompreFace with FaceNet | `exadel/compreface:1.2.0-facenet` | face matching against a closed reference list | see below |
+| Resend (optional) | `FTF_RESEND_API_KEY` | receiving mail on the probe agent's bait subdomain | <https://resend.com/legal/terms-of-service> |
+| Have I Been Pwned (optional) | `FTF_HIBP_API_KEY` | checking whether a bait address appears in a known breach | <https://haveibeenpwned.com/API/v3> |
 
 Both APIs are used with the operator's own keys. Rate limits and data-use terms depend on the account.
 

@@ -164,6 +164,130 @@ def cmd_start(args) -> None:
     cmd_capture(args)
 
 
+def cmd_probe(args) -> None:
+    """Capture a URL, walk it with the probe agent, and optionally ingest the result."""
+    import os
+
+    from .capture import capture_url
+    from .ingest import ingest_folder
+    from .probe import ProbeRefused, run_probe
+    from .probe.fake_site import FakeSite
+
+    settings = get_settings()  # also loads .env
+    site = FakeSite().start() if args.fake_site else None
+    url = site.url if site else args.url
+    if not url:
+        print("error: give a URL, or --fake-site", file=sys.stderr)
+        raise SystemExit(2)
+    incident_dir = Path(args.out) if args.out else _capture_dir(url, None)
+    bundle = incident_dir / "bundle"
+    try:
+        from .probe.policy import Level, check_target, require_sandbox
+
+        check_target(url, Level(args.level), live=args.live, local=bool(site))
+        if not site:
+            require_sandbox(settings.data_dir)
+        if args.ingest and os.environ.get("FTF_PROBE_SANDBOX") == "1":
+            raise ProbeRefused("the sandbox has no database: ingest its output from the app")
+        capture_url(url, bundle, timeout=args.timeout)
+        result = run_probe(
+            url,
+            bundle,
+            level=args.level,
+            email=os.environ.get("FTF_PROBE_EMAIL", "").strip(),
+            mail_domain=os.environ.get("FTF_PROBE_MAIL_DOMAIN", "").strip(),
+            ledger_path=settings.data_dir / "probe" / "ledger.json",
+            live=args.live,
+            local=bool(site),
+            timeout=args.timeout,
+        )
+    except ProbeRefused as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        raise SystemExit(2) from exc
+    finally:
+        if site:
+            site.shutdown()
+            site.server_close()
+    print(f"probe level {result.level}: {len(result.pages)} pages  {url}")
+    print(f"  registered: {result.registered}; logged in: {result.logged_in}; "
+          f"checkout seen, not filled: {result.checkout_seen}")  # fmt: skip
+    for item in result.findings:
+        print(f"  {item['ns']:22} {item['value']}")
+    for step in result.steps:
+        if step["action"].endswith(("_stopped", "_failed")):
+            print(f"  stopped: {step}")
+    print(f"  blocked requests: {len(result.blocked)}; outbound: {', '.join(result.outbound)}")
+    print(f"  bundle: {bundle}")
+    if args.ingest:
+        ingest_folder(incident_dir, _store(), args.incident)
+        cmd_run(args)
+
+
+def cmd_probe_worker(args) -> None:
+    """Run queued probe jobs. Only inside the sandbox container."""
+    from .probe import ProbeRefused
+    from .probe.jobs import run_job, sandbox_root, serve
+    from .probe.policy import require_sandbox
+
+    settings = get_settings()
+    try:
+        require_sandbox(settings.data_dir)
+    except ProbeRefused as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        raise SystemExit(2) from exc
+    root = sandbox_root(settings.data_dir)
+    if args.job:
+        run_job(root, args.job)
+    else:
+        print("probe worker ready", flush=True)
+        serve(root)
+
+
+def cmd_probe_mail(args) -> None:
+    """Read the bait mailbox (read-only), attribute messages, and optionally check for leaks."""
+    import os
+
+    from urllib.error import URLError
+
+    from .probe.mailbox import check_leaks, watch, watch_resend
+    from .probe.persona import Ledger, ledger_path
+
+    settings = get_settings()
+    ledger = ledger_path(settings.data_dir)
+    address = os.environ.get("FTF_PROBE_EMAIL", "").strip()
+    password = os.environ.get("FTF_PROBE_IMAP_PASSWORD", "")
+    resend_key = os.environ.get("FTF_RESEND_API_KEY", "").strip()
+    try:
+        if resend_key:
+            report = watch_resend(resend_key, ledger)
+        elif address and password:
+            host = os.environ.get("FTF_PROBE_IMAP_HOST", "poczta.interia.pl")
+            report = watch(address, password, host, ledger)
+        else:
+            print("error: set FTF_RESEND_API_KEY (or the IMAP settings)", file=sys.stderr)
+            raise SystemExit(2)
+    except (URLError, OSError) as exc:
+        print(f"error: could not read the bait mailbox: {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
+    print(
+        f"messages: {report['messages']}; attributed: {report['attributed']}; "
+        f"new: {report['new']}; proven resale: {len(report['resold'])}"
+    )
+    for item in report["resold"]:
+        print(f"  given to {item['site']}, mail from {item['sender_domain']}: {item['subject']}")
+    if args.leaks:
+        key = os.environ.get("FTF_HIBP_API_KEY", "")
+        if not key:
+            print("error: --leaks needs FTF_HIBP_API_KEY", file=sys.stderr)
+            raise SystemExit(2)
+        import time
+
+        for index, entry in enumerate(e for e in Ledger(ledger).entries() if e.get("email")):
+            if index:
+                time.sleep(7)  # within the smallest HIBP plan's rate limit
+            print(f"  {entry['site']}: {check_leaks(entry['email'], key) or 'no breach listed'}")
+
+
 def _capture_cloaking(args, incident_dir: Path) -> None:
     """One URL under several visitor profiles; with --ingest, the difference score per pair."""
     from .capture import capture_differential, differential_profiles
@@ -755,6 +879,27 @@ def main(argv: list[str] | None = None) -> None:
         "--crawler", action="store_true", help="cloaking differential with a Googlebot profile too"
     )
     p.set_defaults(func=cmd_capture)
+
+    p = sub.add_parser("probe", help="walk a site with the probe agent (docs/probe-agent.md)")
+    p.add_argument("url", nargs="?")
+    p.add_argument("--level", type=int, choices=(1, 2, 3, 4), default=1)
+    p.add_argument("--live", action="store_true", help="allow levels 3-4 on a real site")
+    p.add_argument("--fake-site", action="store_true", help="use the built-in local fake site")
+    p.add_argument("--out", help="incident folder")
+    p.add_argument("--incident", help="incident id when ingesting")
+    p.add_argument("--ingest", action="store_true", help="ingest and run the pipeline afterwards")
+    p.add_argument("--no-enrich", action="store_true")
+    p.add_argument("--candidates", action="store_true")
+    p.add_argument("--timeout", type=float, default=20.0)
+    p.set_defaults(func=cmd_probe)
+
+    p = sub.add_parser("probe-worker", help="run queued probe jobs inside the sandbox")
+    p.add_argument("--job", help=argparse.SUPPRESS)
+    p.set_defaults(func=cmd_probe_worker)
+
+    p = sub.add_parser("probe-mail", help="read the bait mailbox and attribute messages to sites")
+    p.add_argument("--leaks", action="store_true", help="also check the address with HIBP")
+    p.set_defaults(func=cmd_probe_mail)
 
     p = sub.add_parser("ingest", help="ingest an incident folder, or a folder of incident folders")
     p.add_argument("path")
