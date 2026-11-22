@@ -104,7 +104,7 @@ def add_material() -> None:
         if by_capture:
             if har:
                 replay = save_upload(har, har.name, settings.data_dir / "uploads")
-            with st.spinner("Capturing the page (up to a minute)…"):
+            with st.spinner("Capturing and analysing the page…"):
                 result = capture_and_run(store, url, on_stage, replay_har=replay, enrich=enrich)
         else:
             path = (
@@ -113,14 +113,18 @@ def add_material() -> None:
                 else allowed_folder(folder.strip(), root)
             )
             result = run_stages(store, path, on_stage, enrich=enrich)
-    except IntakeError as exc:
-        if upload and path is not None:
+    except (IntakeError, OSError) as exc:
+        # An IntakeError comes before anything is stored, so the unpacked zip can go; after
+        # ingestion a stored incident still points at its files.
+        if isinstance(exc, IntakeError) and upload and path is not None:
             discard_upload(path)
+        progress.empty()
+        st.error(str(exc) if isinstance(exc, IntakeError) else "the material could not be saved")
+        return
+    finally:
+        # The replayed archive is copied into the bundle, so the upload is never needed again.
         if replay is not None:
             discard_upload(replay)
-        progress.empty()
-        st.error(str(exc))
-        return
     progress.progress(1.0, text="Done")
     show_capture(result.get("capture"))
     st.session_state.pop("comparison_report", None)

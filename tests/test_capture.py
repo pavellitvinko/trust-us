@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import ClassVar
@@ -323,6 +324,15 @@ class _Handler(BaseHTTPRequestHandler):
         pass
 
     def do_GET(self):
+        if self.path == "/to-private":  # a public page sending the browser inward
+            self.send_response(302)
+            port = self.server.server_address[1]
+            self.send_header("Location", f"http://metadata.test:{port}/final")
+            self.end_headers()
+            return
+        if self.path == "/hang":
+            time.sleep(30)
+            return
         if self.path == "/r":
             self.send_response(302)
             self.send_header("Location", "/meta")
@@ -557,6 +567,95 @@ def test_interface_replay_runs_inside_an_event_loop(tmp_path, store, monkeypatch
 
 
 @browser
+def test_public_only_capture_never_reaches_a_local_address(tmp_path, site):
+    from ftf.capture import capture_url
+
+    result = capture_url(f"{site}/final", tmp_path / "b", timeout=10, settle=1, public_only=True)
+    assert not result.ok and "private address" in result.manifest.error
+    assert any(b.error == "private address 127.0.0.1" for b in result.manifest.blocked)
+    assert not (tmp_path / "b" / "dom.html").exists()
+
+
+@pytest.fixture
+def fake_dns(monkeypatch):
+    """public.test is the test site on loopback, counted as public; metadata.test is inside."""
+    from ftf.capture import gate
+
+    names = {"public.test": ["127.0.0.1"], "metadata.test": ["127.0.0.9"]}
+    monkeypatch.setattr(gate, "resolve", lambda host: names.get(host, []))
+    monkeypatch.setattr(gate, "is_public", lambda address: address == "127.0.0.1")
+
+
+@browser
+def test_public_only_capture_goes_through_the_gate(tmp_path, site, fake_dns):
+    from ftf.capture import capture_url
+
+    port = site.rsplit(":", 1)[1]
+    result = capture_url(
+        f"http://public.test:{port}/final", tmp_path / "b", timeout=10, settle=1, public_only=True
+    )
+    assert result.ok and "Final offer" in (tmp_path / "b" / "dom.html").read_text()
+    assert result.manifest.server.ip == "127.0.0.1"  # the address the gate pinned, not its own
+
+
+@browser
+def test_redirect_to_a_private_address_is_refused(tmp_path, site, fake_dns):
+    """route() never sees redirect hops; the gate does."""
+    from ftf.capture import capture_url
+
+    port = site.rsplit(":", 1)[1]
+    result = capture_url(
+        f"http://public.test:{port}/to-private",
+        tmp_path / "b",
+        timeout=10,
+        settle=1,
+        public_only=True,
+    )
+    man = result.manifest
+    assert man.status is Status.FAILED and "metadata.test" in man.error
+    assert [b.url for b in man.blocked] == ["metadata.test"]
+    assert not (tmp_path / "b" / "dom.html").exists()
+
+
+@browser
+def test_unresolved_host_through_the_gate_is_a_dns_failure(tmp_path, fake_dns):
+    from ftf.capture import capture_url
+
+    result = capture_url(
+        "https://gone.test/", tmp_path / "b", timeout=10, settle=1, public_only=True
+    )
+    assert result.manifest.status is Status.DNS_FAILED
+
+
+@browser
+def test_hung_capture_is_killed(tmp_path, store, site, monkeypatch):
+    import time as clock
+
+    from ftf import intake
+
+    monkeypatch.setenv("FTF_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("FTF_UI_ALLOW_PRIVATE", "1")
+    monkeypatch.setattr(intake, "_deadline", lambda timeout: 5)
+    started = clock.monotonic()
+    with pytest.raises(intake.IntakeError, match="did not finish"):
+        intake.capture_and_run(store, f"{site}/hang", enrich=False, timeout=60)
+    assert clock.monotonic() - started < 25
+    assert not list((tmp_path / "data" / "captures").iterdir())
+
+
+@browser
+def test_replay_with_a_url_needs_no_document_in_the_archive(tmp_path):
+    from ftf.capture import capture_url
+
+    har = tmp_path / "api.har"
+    _write_har(har, [_entry("https://gone-offer.live/api", body="{}", mime="application/json")])
+    result = capture_url(
+        "https://gone-offer.live/", tmp_path / "b", replay_har=har, timeout=10, settle=1
+    )
+    assert result.manifest.mode == "replay" and result.manifest.status is Status.NOT_IN_ARCHIVE
+
+
+@browser
 def test_interface_captures_a_live_url(tmp_path, monkeypatch, site):
     """Add material → URL in the Streamlit app: a live capture becomes a stored view."""
     from streamlit.testing.v1 import AppTest
@@ -565,6 +664,7 @@ def test_interface_captures_a_live_url(tmp_path, monkeypatch, site):
 
     monkeypatch.setenv("FTF_EMBEDDER", "fake")
     monkeypatch.setenv("FTF_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("FTF_UI_ALLOW_PRIVATE", "1")  # the test site is on 127.0.0.1
     root = Path(__file__).resolve().parents[1]
     app = AppTest.from_file(str(root / "app/streamlit_app.py"), default_timeout=120).run()
     assert not app.exception

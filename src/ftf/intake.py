@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import stat
@@ -15,6 +16,7 @@ from pathlib import Path, PurePosixPath
 from typing import IO, Any
 
 from . import pipeline
+from .capture.network import blocked_address
 from .config import get_settings
 from .enrich.warning_lists import run_warning_lists
 from .fusion import run_method
@@ -196,6 +198,17 @@ def run_stages(
 
 CAPTURE_STAGES = ("capture", *STAGES)
 _URL_SCHEMES = ("http", "https")
+_OTHER_SCHEMES = {
+    "about", "blob", "chrome", "data", "file", "ftp", "javascript", "mailto", "sms", "tel",
+    "vbscript", "view-source", "ws", "wss",
+}  # fmt: skip
+# Lets the interface open loopback and private addresses (a lab setup, tests). Off by default:
+# otherwise anyone at the interface could make the server's browser read its own networks.
+ALLOW_PRIVATE_ENV = "FTF_UI_ALLOW_PRIVATE"
+
+
+def private_allowed() -> bool:
+    return os.environ.get(ALLOW_PRIVATE_ENV, "").strip().lower() in ("1", "true", "yes")
 
 
 def capture_dir(url: str | None, replay: Path | None) -> Path:
@@ -219,9 +232,15 @@ def check_url(text: str) -> str:
         return ""
     if any(c.isspace() for c in url):
         raise IntakeError("a URL cannot contain spaces")
-    if "://" not in url and re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*:(?!\d)", url):
-        raise IntakeError("only http and https addresses can be captured")  # javascript:, data:
-    parts = urlsplit(url if "://" in url else f"https://{url}")
+    scheme = re.match(r"^([a-zA-Z][a-zA-Z0-9+.-]*):(?!\d)", url)
+    has_scheme = re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", url) is not None
+    if not has_scheme and scheme:
+        if scheme.group(1).lower() in _URL_SCHEMES:  # http:/host, a typo
+            raise IntakeError("malformed address: write it as https://host/path")
+        name = scheme.group(1).lower()
+        if name in _OTHER_SCHEMES or "@" not in url.split("/", 1)[0]:  # not user:pass@host
+            raise IntakeError("only http and https addresses can be captured")
+    parts = urlsplit(url if has_scheme else f"https://{url}")
     if parts.scheme.lower() not in _URL_SCHEMES or not parts.hostname:
         raise IntakeError("only http and https addresses can be captured")
     return parts.geturl()
@@ -232,21 +251,90 @@ def save_upload(data: IO[bytes], name: str, uploads: Path) -> Path:
     stem = "".join(c if c.isalnum() or c in "-_." else "_" for c in Path(name).name) or "upload"
     target = uploads / uuid.uuid4().hex / stem
     target.parent.mkdir(parents=True)
-    with target.open("wb") as sink:
-        shutil.copyfileobj(data, sink)
+    try:
+        with target.open("wb") as sink:
+            shutil.copyfileobj(data, sink)
+    except OSError:
+        shutil.rmtree(target.parent, ignore_errors=True)
+        raise
     return target
 
 
-def _capture(url: str | None, out_dir: Path, replay_har: Path | None, timeout: float):
-    """Run the browser in its own thread: Playwright's sync API refuses a thread that already
-    runs an event loop, and the caller's thread (Streamlit's) may."""
-    from concurrent.futures import ThreadPoolExecutor
+def check_public(url: str) -> None:
+    """Refuse an address on the server's own networks, unless the setup allows it."""
+    from urllib.parse import urlsplit
 
-    from .capture import capture_url
+    if private_allowed():
+        return
+    address = blocked_address(urlsplit(url).hostname)
+    if address is not None:
+        raise IntakeError(
+            f"this address is on a local or private network ({address}) and is not captured"
+        )
 
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        job = pool.submit(capture_url, url, out_dir, replay_har=replay_har, timeout=timeout)
-        return job.result()
+
+class CaptureTimeout(Exception):
+    """The browser did not finish within the overall limit."""
+
+
+def _deadline(timeout: float) -> float:
+    """Navigation, settling, scrolling and the snapshot each have their own timeouts."""
+    return timeout * 4 + 60
+
+
+def _capture(
+    url: str | None,
+    out_dir: Path,
+    replay_har: Path | None,
+    timeout: float,
+    public_only: bool = True,
+):
+    """Run the browser in a child process (see `capture.worker`). On the deadline the whole
+    process group is killed, Playwright's driver and Chromium included."""
+    import pickle
+    import signal
+    import subprocess
+    import sys
+
+    from .capture.worker import rebuild_error
+
+    kwargs = {
+        "url": url,
+        "out_dir": out_dir,
+        "replay_har": replay_har,
+        "timeout": timeout,
+        "public_only": public_only,
+    }
+    posix = os.name == "posix"
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "ftf.capture.worker"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        start_new_session=posix,
+    )
+    try:
+        reply, _ = proc.communicate(pickle.dumps(kwargs), timeout=_deadline(timeout))
+    except subprocess.TimeoutExpired as exc:
+        raise CaptureTimeout from exc
+    finally:
+        if proc.poll() is None or posix:
+            try:  # the group outlives a dead leader when Chromium is still running
+                os.killpg(proc.pid, signal.SIGKILL) if posix else proc.kill()
+            except (ProcessLookupError, PermissionError):
+                pass
+            proc.wait(10)
+    if not reply:
+        raise RuntimeError(f"capture process exited with code {proc.returncode}")
+    status, payload = pickle.loads(reply)  # our own child's reply
+    if status == "error":
+        raise rebuild_error(*payload)
+    return payload
+
+
+def _forget_capture(store: Store, incident_dir: Path) -> None:
+    """Remove a capture folder that no stored incident uses (the capture or ingest failed)."""
+    if incident_dir.name not in {i.incident_id for i in store.incidents()}:
+        shutil.rmtree(incident_dir, ignore_errors=True)
 
 
 def capture_and_run(
@@ -266,17 +354,33 @@ def capture_and_run(
     url = check_url(url or "")
     if not url and replay_har is None:
         raise IntakeError("give a URL, or an archived HAR to replay")
+    if url and replay_har is None:  # a replay never leaves the archive
+        check_public(url)
     total = len(CAPTURE_STAGES)
     if on_stage:
         on_stage("capture", 0, total)
     incident_dir = capture_dir(url or None, replay_har)
     try:
-        result = _capture(url or None, incident_dir / "bundle", replay_har, timeout)
+        result = _capture(
+            url or None, incident_dir / "bundle", replay_har, timeout, not private_allowed()
+        )
     except ImportError as exc:
+        _forget_capture(store, incident_dir)
         raise IntakeError("live capture needs Playwright: uv sync") from exc
-    except ValueError as exc:
-        raise IntakeError(str(exc)) from exc
+    except CaptureTimeout as exc:
+        _forget_capture(store, incident_dir)  # the capture process is gone
+        raise IntakeError("the browser did not finish in time; try again later") from exc
+    except ValueError as exc:  # an archive that cannot be replayed
+        _forget_capture(store, incident_dir)
+        message = str(exc)
+        if replay_har is not None:
+            message = message.replace(str(replay_har), replay_har.name)
+        raise IntakeError(message) from exc
+    except OSError as exc:  # disk full, permissions: not the browser's fault
+        _forget_capture(store, incident_dir)
+        raise IntakeError(f"the capture could not be saved: {exc.strerror or exc}") from exc
     except Exception as exc:  # browser missing or crashed: say so plainly
+        _forget_capture(store, incident_dir)
         first = (str(exc).strip().splitlines() or [type(exc).__name__])[0][:200]
         hint = " (run: uv run playwright install chromium)" if "Executable" in first else ""
         raise IntakeError(f"the browser could not run: {first}{hint}") from exc
@@ -285,7 +389,11 @@ def capture_and_run(
         if on_stage:
             on_stage(name, index + 1, total)
 
-    out = run_stages(store, incident_dir, shifted, enrich=enrich, single_incident=True)
+    try:
+        out = run_stages(store, incident_dir, shifted, enrich=enrich, single_incident=True)
+    except BaseException:
+        _forget_capture(store, incident_dir)
+        raise
     man = result.manifest
     out["capture"] = {
         "mode": man.mode,
