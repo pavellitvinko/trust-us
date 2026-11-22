@@ -47,6 +47,7 @@ Still missing on the sample and read from fixtures only: `asset.sha256`, `image.
 | | `url.host_path` | host + landing path without query, trailing slash removed | A14 | `healthlinkq.pro/L41156846fl-923e569-fkf418Z` |
 | | `outbound.domain` | registrable domain of CTA links, form targets, click beacons | A15 | `crimsonbase.pro` |
 | | `redirect.domain` | registrable domain of each redirect hop (live capture) | I5 | |
+| | `ct.shared_cert` | sorted registrable domains on a certificate issued under the current registration, `\|`-joined (own domain included); renewals give the same value | C8 | `fake-one.xyz\|fake-two.top` |
 | `ids.campaign` | `aio.campaign_uuid` **exclusive** | UUID as found | A1 | `0b9611d9-…` |
 | | `aio.owner_uuid` **exclusive** | UUID | A1 | |
 | | `aio.landing_uuid`, `aio.flow_uuid` | UUID | A1 | |
@@ -126,6 +127,39 @@ domain age `captured_at` and `basis`. A failed lookup is a `not_observable` row 
 | `dns.a`, `dns.mx` | one row per A or AAAA address of the page's host / per mail host of the domain | risk | C13 |
 | `domain.tld_risk` | `high` (`.live .pro .xyz .top .icu .life`), `low` (`.pl`), `other` | risk | C4 |
 | `domain.name_shape` | `hyphen_digits`, `generated_pronounceable`, `generated`, `plain`; metrics in `raw` | risk | C5 |
+
+## Certificate transparency (C8, C9)
+
+Written by the `ct` enricher from crt.sh (`https://crt.sh/?q=<domain>&output=json`), one query
+per registrable domain, cached like RDAP. A pre-certificate and its final certificate share a
+serial and count once. Locators cite the certificate (`crtsh:https://crt.sh/?id=<id>`) or the
+query. Every crt.sh error (HTTP, timeout, an answer that is not a list) says nothing about the
+domain: it is never written to the cache and gives `not_observable`. An empty answer (`[]`) is
+not trusted either, because crt.sh under load gave `[]` for `healthlinkq.pro`, which has three
+certificates: it is `not_observable`, cached one hour, and an earlier non-empty answer is used
+instead when there is one. HTTP errors are retried once, timeouts not. After 3 failures in a row crt.sh
+is left alone for 10 minutes. E-mail addresses and IP addresses listed among a certificate's
+names are dropped.
+
+| Namespace | Value shape | Purpose | Catalogue |
+| --- | --- | --- | --- |
+| `ct.cert_count` | distinct certificates naming the domain or a host under it; issuer counts in `raw` | risk | C8 |
+| `ct.first_seen` | ISO date of the earliest `not_before` | risk | C8 |
+| `ct.issuer` | issuing organisation of the newest certificate valid for the page's host, lower-case (`let's encrypt`; Cloudflare's CA shows as `ssl corporation`, its operator); full DN in `raw` | risk | C8 |
+| `ct.wildcard` | `true` when a certificate valid for the page's host is a wildcard | risk | C8 |
+| `ct.sibling_host` | one row per other host name under the domain (`a.glowpixel.org`), at most 25 | risk | C8 |
+| `ct.prior_life_days` | days the first certificate predates the RDAP registration; `0` when the gap is 30 days or less (fresh domains get a certificate minutes before the registry stamps registration). `not_observable` without RDAP | risk | C9 |
+| `ct.san_domain` | another registrable domain named on a shared certificate, of any owner; `note` in `raw` when issued before the current registration. A pivot, not a link | risk | C8 |
+| `ct.shared_cert` | sorted registrable domains on a certificate issued no earlier than 30 days before the current registration, `\|`-joined, one row per set however many renewals; ids and serials in `raw`. Never written without RDAP | linkage (`ids.domain`, weight 0.6) | C8 |
+
+A certificate links nothing, and gives no `ct.san_domain`, when it names more than 5 registrable
+domains (its own included), a CDN or platform domain (`cloudflaressl.com`, `myshopify.com`, …), or a hosting
+server of another domain (`server12.hostco.com`, `vps3.…`, `plesk.…`): those bundle unrelated
+customers. When no certificate names the page's host, `ct.issuer` falls back to the domain's
+newest one (`confidence` 0.5) and `ct.wildcard` is `not_observable`.
+
+`ct.prior_life_days > 0` is a domain reason in the suspicion summary; of the `ct.*` rows only
+`ct.prior_life_days` makes the domain kind count as checked.
 
 ## Live capture (I5, C11, C13, C14)
 

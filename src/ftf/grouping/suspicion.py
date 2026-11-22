@@ -7,6 +7,7 @@ unchecked, so a missing stage never reads as a clean result.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -18,8 +19,8 @@ YOUNG_DOMAIN_DAYS = 365
 
 # A kind counts as checked when one of these inputs was observed.
 _INPUTS = {
-    "domain": ("rdap.", "warning."),  # the host alone does not show age or listing
-    "impersonation": ("page.read_text", "image.text"),
+    "domain": ("rdap.", "warning.", "ct.prior_life_days"),  # host alone: no age or listing
+    "impersonation": ("page.read_text", "image.text", "video.transcript", "video.on_screen_text"),
     "absent_elements": ("expect.element",),
     "evasion": ("page.clean_text", "page.body_text", "cloak."),
     "persuasion": ("pattern.score", "markup."),
@@ -51,6 +52,9 @@ class SuspicionSummary(BaseModel):
     level: int
     reasons_by_kind: dict[str, list[SuspicionReason]] = Field(default_factory=dict)
     unchecked_kinds: list[str] = Field(default_factory=list)
+    # Shown as context and not counted in the level: a real news photo of a public figure is
+    # not suspicious by itself.
+    face_matches: list[SuspicionReason] = Field(default_factory=list)
 
 
 def _compact(text: str) -> str:
@@ -87,6 +91,8 @@ def _describe(o: Observation, hosts: list[str]) -> tuple[str, str, str] | None:
     is_age = ns == "rdap.domain_age_days" and isinstance(value, int | float)
     if is_age and 0 <= value < YOUNG_DOMAIN_DAYS:
         return "domain", "C1", f"domain registered {int(value)} days before capture"
+    if ns == "ct.prior_life_days" and isinstance(value, int | float) and value > 0:
+        return "domain", "C9", _prior_life(o, int(value))
     if ns.startswith("warning.") and isinstance(value, dict):
         result = value.get("result")
         source = ns.removeprefix("warning.")
@@ -125,6 +131,21 @@ def _describe(o: Observation, hosts: list[str]) -> tuple[str, str, str] | None:
     return None
 
 
+def _prior_life(o: Observation, days: int) -> str:
+    try:
+        raw = json.loads(o.raw or "{}")
+    except ValueError:
+        raw = {}
+    first = str(raw.get("first_cert_at") or "")[:10]
+    registered = str(raw.get("registered_at") or "")[:10]
+    if first and registered:
+        return (
+            f"certificates since {first}, {days} days before the current registration "
+            f"({registered}): the domain had an earlier life"
+        )
+    return f"certificates {days} days older than the current registration"
+
+
 def _checked(kind: str, observations: list[Observation]) -> bool:
     return any(
         o.namespace.startswith(_INPUTS[kind]) and o.state is not State.NOT_OBSERVABLE
@@ -155,9 +176,28 @@ def reason_summary_for_view(view_id: str, observations: list[Observation]) -> Su
             )
         )
     ordered = {kind: grouped[kind] for kind in KINDS if kind in grouped}
+    faces = [
+        SuspicionReason(
+            kind="face_context",
+            signal_id="G1",
+            namespace=o.namespace,
+            summary=(
+                f"possible face match to {o.value.get('person')} "
+                f"({float(o.value.get('similarity', 0)):.0%}), needs verification"
+            ),
+            value=o.value,
+            observation_ref=f"{o.extractor}/{o.namespace}#{position}",
+            source=o.source,
+        )
+        for position, o in enumerate(observations)
+        if o.namespace == "face.reference"
+        and o.state is State.PRESENT
+        and isinstance(o.value, dict)
+    ]
     return SuspicionSummary(
         view_id=view_id,
         level=len(ordered),
         reasons_by_kind=ordered,
+        face_matches=faces,
         unchecked_kinds=[k for k in KINDS if k not in ordered and not _checked(k, observations)],
     )

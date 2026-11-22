@@ -82,7 +82,7 @@ def add_material() -> None:
         type=["har"],
         help="Replays the recording offline; with a URL above, that page of the archive.",
     )
-    enrich = st.checkbox("Look up DNS and RDAP (network)", value=True)
+    enrich = st.checkbox("Look up DNS, RDAP and crt.sh (network)", value=True)
     if not st.button("Analyse material"):
         return
     by_folder = bool(upload or folder.strip())
@@ -474,6 +474,11 @@ with tab_material:
         for reason in reasons:
             source = reason["source"]
             st.write(f"- {reason['summary']} ({source['file'] or '-'}:{source['locator'] or '-'})")
+    if suspicion["face_matches"]:
+        st.markdown("**Possible face matches (context, not counted in the level)**")
+        for reason in suspicion["face_matches"]:
+            source = reason["source"]
+            st.text(f"{reason['summary']} ({source['file'] or '-'}:{source['locator'] or '-'})")
     if suspicion["unchecked_kinds"]:
         st.caption("Not checked: " + ", ".join(suspicion["unchecked_kinds"]))
     show_status_table("Expected elements", summary["expectations"])

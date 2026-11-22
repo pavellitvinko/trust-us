@@ -26,6 +26,7 @@ NAMESPACE = "pattern.score"
 NEAREST_PATTERNS = 12
 MAX_TEXT_CHARS = 40_000
 TEXT_NAMESPACES = ("page.read_text", "page.clean_text", "image.text")
+VIDEO_NAMESPACES = ("video.transcript", "video.on_screen_text")
 STABLE_FAILURES = frozenset({"refusal", "no_text"})
 
 MATCHING_PROMPT = """You judge whether one suspicious page or image shows library techniques.
@@ -66,6 +67,14 @@ def view_text(observations: list[Observation]) -> str | None:
                 and o.value.strip()
             ):
                 return redact_text(o.value)[:MAX_TEXT_CHARS]
+    video = [
+        str(o.value)
+        for namespace in VIDEO_NAMESPACES
+        for o in observations
+        if o.namespace == namespace and o.state is State.PRESENT and o.value
+    ]
+    if video:
+        return redact_text("\n".join(video))[:MAX_TEXT_CHARS]
     blocks = [
         str(o.value)
         for o in observations

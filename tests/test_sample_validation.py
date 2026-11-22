@@ -29,7 +29,7 @@ def base():
 
 @pytest.fixture(scope="module")
 def method(base):
-    with sample.model_off():
+    with sample.run_embedder():
         store, groups = sample.method_store(base)
         yield store, groups
         store.close()
@@ -179,7 +179,7 @@ def test_held_out_folder_does_not_shape_the_weights(base):
     from ftf.fusion import run_method
     from ftf.grouping.assign import assign_incident
 
-    with sample.model_off():
+    with sample.run_embedder():
         store = sample.clone(base, exclude_incidents=["3"])
         pipeline.run_fingerprint(store)
         groups = run_method(store)

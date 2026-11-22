@@ -244,7 +244,7 @@ A warning-list hit is strong risk evidence. The reverse does not hold: not being
 | --- | --- | --- |
 | DNS | A, NS, MX; name-server pair; dead or parked status | Yes (`enrich/dns_lookup.py`). Name-server pair falls back to the RDAP delegation when the zone gives no NS |
 | RDAP | Registration date, registrar → domain age at capture | Yes (`enrich/rdap.py`). Capture time from the HAR, else the bundle manifest, else lookup time (marked). Coverage confirmed 2026-11-21 for `.live .pro .xyz .top .icu .life .org .com` |
-| Certificate transparency | Issuer, first-seen, sibling host names, evidence of a prior life | Yes |
+| Certificate transparency | Issuer, first-seen, sibling host names, evidence of a prior life; a certificate shared with another domain as a link | Yes (`enrich/ct.py`, crt.sh). Prior life needs RDAP and ignores gaps of 30 days or less. A certificate shared with another domain and issued under the current registration feeds `ids.domain` (`ct.shared_cert`, weight 0.6, one value per domain set); CDN, hosting and more-than-5-domain bundles left out |
 | National phishing warning list (CERT Polska) | Domain listed / not listed | Yes. Public file, refreshed at start-up, matched locally. Confirmed reachable 2026-11-21 |
 | Financial regulator's public warning list (KNF) | Named entity or domain listed; a hit is also a link between views naming the same listed entity | Yes. The public page parses as tables (about 680 rows on 2026-11-21); scraped at start-up, snapshot kept in the image. Brand and offer names are matched with normalisation and fuzzy matching |
 | Register of prohibited gambling domains (Ministry of Finance) | Domain listed | Yes, from a snapshot. The site refused scripted requests on 2026-11-21 behind a bot check, which the tool will not try to get around. A team member downloads the register by hand and it ships as a dated file |
@@ -263,7 +263,7 @@ Each layer declares: which observations it consumes, the fingerprint kind, the c
 
 | Layer | Built from (catalogue) | Kind | Comparator | Tier | First version | Upgrade |
 | --- | --- | --- | --- | --- | --- | --- |
-| `ids.domain` | A14, A15 | set | rarity-weighted shared-value | T1 | registrable domain, host + path, outbound target domains | redirect-hop domains from live capture |
+| `ids.domain` | A14, A15, C8 | set | rarity-weighted shared-value | T1 | registrable domain, host + path, outbound target domains, certificate shared with another domain | redirect-hop domains from live capture |
 | `ids.campaign` | A1, A9, I4 | set | rarity-weighted shared-value | T1 | exact match per namespace | — |
 | `ids.tracking` | A3–A5, A10, C12 | set | rarity-weighted shared-value | T1 | exact match | cross-namespace aliasing |
 | `ids.conversion` | A6–A8, A12, I3, B7 | set | rarity-weighted shared-value | T1 | exact match | — |
@@ -301,7 +301,7 @@ Twenty-three layers are registered; each declares tier, correlation group and co
 
 | Layer | Tier | Group | Comparator | Built from |
 | --- | --- | --- | --- | --- |
-| `ids.domain` | T1 | domain | shared_value | `domain.registrable`, `url.host_path`, `outbound.domain`, `redirect.domain` |
+| `ids.domain` | T1 | domain | shared_value | `domain.registrable`, `url.host_path`, `outbound.domain`, `redirect.domain`, `ct.shared_cert` |
 | `ids.campaign` | T1 | campaign | shared_value | `aio.campaign_uuid`*, `aio.owner_uuid`*, `aio.landing_uuid`, `aio.flow_uuid`, `campaign.label`, `landing.label`, `nav.landing_uuid` |
 | `ids.tracking` | T1 | tracking | shared_value | `fb_pixel`, `gads_id`, `gtm_id`, `ga_id`, other pixel IDs, `cdn.zone_id` |
 | `ids.conversion` | T1 | conversion | shared_value | `aff.*`, `form_endpoint_host/path`, `api_key_id`, `tracker.host`, `contact.*` |
@@ -516,7 +516,7 @@ The organiser sample was not on the build machine, so every number below is on `
 
 **Runs on the organiser sample (2026-11-21).** With the reference extractor only: 30 observations, all domains; one duplicate found, everything else insufficient evidence. After the Evidence track's identifier, conversion and kit extractors landed (HAC-8, 9, 10): 502 observations, 65 fingerprints, and `ftf eval` reports 75 % agreement (56 % exact), **0 false merges**: duplicate 2/2, same campaign 4/4 at precision 1.0 (1 ↔ 2 across domains, both case-14 landings, 61 article ↔ chat), same family 2/3 (48 ↔ 61 article and chat through the template UUID, bundle and demoted form host; the 1/2 ↔ 61 `main.css` link waits on the asset-hash extractor), unrelated precision 0.78 and recall 0.64. The misses are all pairs that need an extractor that does not exist yet: the cleaned body text (`page.clean_text`) for text and narrative, image and video hashes, DOM classes, and the model readings (`ftf perceive` needs a key). Coverage is measured over the correlation groups observed anywhere in the corpus, so layers nobody can build yet do not push every pair to insufficient; pairs involving the case-3 screenshot, which carries no observation at all, still are.
 
-**Real-file validation (HAC-54).** Reference agreement, the checkpoint outcomes, the negative pairs, the confidence audit, degradation on damaged copies of the files, layer ablation and leave-one-incident-out, all model off and on fresh stores, are generated into [method-results-real-sample.md](method-results-real-sample.md) by `ftf validate`. Those are real-sample measurements; everything above this paragraph that is not labelled as a sample run is fixture evidence.
+**Real-file validation (HAC-54).** Reference agreement, the checkpoint outcomes, the negative pairs, the confidence audit, degradation on damaged copies of the files, layer ablation and leave-one-incident-out, all model off and on fresh stores, are generated into [method-results-real-sample.md](method-results-real-sample.md) by `ftf validate`. `ftf validate --model gateway` runs the same report with real Gemini embeddings in the two text vector layers (HAC-32); its run record names the model, prompt version, cache state and fitted calibration, and it refuses to run without a key rather than fall back to the local embedder. Those are real-sample measurements; everything above this paragraph that is not labelled as a sample run is fixture evidence.
 
 **What was cut or left unverified:** the Gemini embedder path has no live-key run; `narrative.skeleton` closeness of the Brzoska, Olejnik and Lis stories is verified only as an ordering with the fake embedder (above the unrelated pairs, above the name-keeping semantic layer), not as an absolute score; `visual.layout` is a named-block stand-in, not an embedding; threshold tuning stayed at the hand-set values because they reproduce the reference without a false merge; groups are not persisted.
 

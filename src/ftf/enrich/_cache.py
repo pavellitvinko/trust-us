@@ -29,6 +29,10 @@ from ..config import get_settings
 
 OK_TTL = timedelta(days=7)
 ERROR_TTL = timedelta(hours=1)
+# A transient failure (network, timeout, 5xx) is not written to disk; within one process it is
+# remembered this long, so one run does not retry it for every view of a domain, while a
+# long-lived app (Streamlit) still retries later instead of keeping it until restart.
+TRANSIENT_MEMO_TTL = timedelta(minutes=10)
 HTTP_TIMEOUT = 10.0
 MIN_INTERVAL = 1.0  # seconds between two requests to one host
 USER_AGENT = "ftf-enricher/1 (research tool)"
@@ -49,6 +53,7 @@ class Lookup:
     fetched_at: datetime | None = None
     from_cache: bool = False
     stale: bool = False
+    transient: bool = False  # failed, not cached on disk, remembered in memory only briefly
 
     def provenance(self) -> dict[str, Any]:
         out: dict[str, Any] = {"endpoint": self.endpoint}
@@ -146,8 +151,13 @@ class Cache:
         `fetch` returns (data, endpoint) or raises FetchError / any exception.
         """
         memo_key = (source, key)
-        if memo_key in self._memo:
-            return self._memo[memo_key]
+        memo = self._memo.get(memo_key)
+        if memo is not None and not (
+            memo.transient
+            and memo.fetched_at is not None
+            and now() - memo.fetched_at >= TRANSIENT_MEMO_TTL
+        ):
+            return memo
         result = self._get(source, key, fetch, endpoint)
         self._memo[memo_key] = result
         return result
@@ -171,7 +181,8 @@ class Cache:
                 cached.stale = True  # the old file is kept, so the next run retries
                 return cached
             if not getattr(exc, "cacheable", False):
-                return result  # transient: remembered for this run only
+                result.transient = True  # remembered in memory for TRANSIENT_MEMO_TTL only
+                return result
         self._write(source, key, result)
         return result
 
@@ -185,12 +196,14 @@ class Cache:
                 time.sleep(delay)
             self._last_hit[host] = time.monotonic()
 
-    def http_json(self, url: str, accept: str = "application/json") -> Any:
+    def http_json(
+        self, url: str, accept: str = "application/json", timeout: float = HTTP_TIMEOUT
+    ) -> Any:
         """GET a JSON document. 404 and other HTTP errors raise FetchError."""
         self._wait_for(urlsplit(url).hostname or "")
         req = urllib.request.Request(url, headers={"Accept": accept, "User-Agent": USER_AGENT})
         try:
-            with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
                 return json.loads(resp.read().decode("utf-8", errors="replace"))
         except urllib.error.HTTPError as exc:
             # 404 is an answer about the domain; 429 and 5xx are the server's trouble.

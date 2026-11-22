@@ -83,7 +83,7 @@ def run_fingerprint(store: Store, view_ids: list[str] | None = None) -> int:
 
 
 def _uses_enrichment(layer) -> bool:
-    return any(ns.startswith(("dns.", "rdap.")) for ns in getattr(layer, "namespaces", ()))
+    return any(ns.startswith(("dns.", "rdap.", "ct.")) for ns in getattr(layer, "namespaces", ()))
 
 
 def _use_corpus_embedder() -> None:
