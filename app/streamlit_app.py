@@ -7,6 +7,7 @@ import importlib.util
 import json
 import re
 import threading
+from datetime import datetime
 from urllib.parse import quote, urlsplit
 
 import streamlit as st
@@ -31,7 +32,9 @@ from ftf.library import (
     Item,
     Library,
     build_library,
+    campaign_tree,
     case_title,
+    cases_text,
     filter_matches,
     match_help,
 )
@@ -77,7 +80,7 @@ if ANALYSIS_LOCK.acquire(blocking=False):
 VICTIM = importlib.util.find_spec("ftf.victim") is not None
 DISCOVERY = importlib.util.find_spec("ftf.discovery") is not None
 ICONS = {"Page": ":material/language:", "Image": ":material/image:", "Video": ":material/movie:"}
-BADGES = {"campaign": "red", "kit": "orange", "duplicate": "blue", "none": "gray"}
+BADGES = {"campaign": "violet", "duplicate": "blue", "none": "gray"}
 BUSY = "Available when the current analysis finishes."
 TIER_HINTS = {
     "identity": (
@@ -348,16 +351,45 @@ def _row_key(prefix: str, view_id: str, selected: bool) -> str:
     return f"{prefix}-{re.sub(r'[^A-Za-z0-9]', '-', view_id)}{'-sel' if selected else ''}"
 
 
+def md(text: str) -> str:
+    """Page-controlled text as literal markdown: no links, shortcodes or badge breakouts."""
+    text = text.replace("[", "(").replace("]", ")")
+    return re.sub(r"([\\`*_{}()#+\-.!|<>~:$])", r"\\\1", text)
+
+
 def risk_badge(item: Item) -> str:
     if item.risk.level == "error":
-        return f":red[:material/report: {item.risk.count}]"
+        return f":red-badge[:material/report: {item.risk.text}]"
     if item.risk.level == "warning":
-        return f":orange[:material/warning: {item.risk.count}]"
+        return f":orange-badge[:material/warning: {item.risk.text}]"
     return ""
 
 
 def label_badges(item: Item) -> str:
-    return " ".join(f":{BADGES[label.kind]}-badge[{label.text}]" for label in item.labels)
+    """One link line: the campaign chip and how many items it joins, or the duplicate."""
+    parts = []
+    for label in item.labels:
+        parts.append(f":{BADGES[label.kind]}-badge[{md(label.text)}]")
+        if label.detail:
+            parts.append(f":gray[{md(label.detail)}]")
+    return " ".join(parts)
+
+
+def short_date(stamp: str) -> str:
+    try:
+        return datetime.fromisoformat(stamp).strftime("%-d %b %Y")
+    except ValueError:
+        return "unknown"
+
+
+def show_campaign(campaign_id: str) -> None:
+    st.session_state["library_filter"] = {"campaign": campaign_id}
+    st.session_state.pop("library_compare", None)
+
+
+def open_campaign(campaign_id: str) -> None:
+    show_campaign(campaign_id)
+    st.session_state["go_library"] = True
 
 
 def select(view_id: str) -> None:
@@ -406,8 +438,9 @@ def item_row(item: Item, show_case: bool, selected: bool) -> None:
             if show_case:
                 sub += f" · {case_title(item.case_id)}"
             note = f" · :blue[{item.note}]" if item.note else ""
-            st.caption(f"{label_badges(item)} {sub}{note}")
-        st.markdown(risk_badge(item) or "&nbsp;", width=44)
+            st.caption(label_badges(item))
+            st.caption(f"{sub}{note}")
+        st.markdown(risk_badge(item) or "&nbsp;", width=120)
         st.button(
             str(len(item.matches)) if item.matches else "",
             icon=":material/fingerprint:",
@@ -553,6 +586,7 @@ def panel(library: Library, item: Item) -> None:
         st.markdown(f"{label_badges(item)} {risk_badge(item)}")
         if item.note:
             st.caption(item.note)
+        campaign_section(library, item)
 
         if item.view_id in library.journeys:
             steps = len(library.journeys[item.view_id].steps)
@@ -597,6 +631,66 @@ def panel(library: Library, item: Item) -> None:
                 st.dataframe(rows, width="stretch", hide_index=True)
             else:
                 st.caption("No observations for this item yet.")
+
+
+def campaign_section(library: Library, item: Item) -> None:
+    """The item's campaign and, above it, the kit it belongs to."""
+    campaign = library.campaigns.get(item.campaign or "")
+    kit = library.kits.get(item.kit or "")
+    if not (campaign or kit):
+        return
+    st.markdown("**Campaign**")
+    if kit:
+        inner = [library.campaigns[c] for c in kit.campaigns]
+        named = sum(1 for c in inner if c.name)
+        items = sum(len(c.members) for c in inner)
+        st.markdown(
+            f":material/inventory_2: {md(kit.name)} :gray[· "
+            f"{named} campaign{'' if named == 1 else 's'} and {items} items share this kit]"
+        )
+        if kit.linked_by:
+            st.caption("Kit linked by " + md("; ".join(kit.linked_by)))
+    if campaign:
+        indent = "&emsp;↳ " if kit else ""
+        size = len(campaign.members)
+        st.markdown(
+            f"{indent}:material/campaign: {md(campaign.name or '')} :gray[· {size} items · "
+            f"{md(cases_text(campaign.cases))}]",
+            unsafe_allow_html=True,
+        )
+        st.caption("Linked by " + md("; ".join(campaign.linked_by)))
+        st.button(
+            "Show its items",
+            icon=":material/filter_list:",
+            key=f"camp-{item.view_id}",
+            on_click=show_campaign,
+            args=(campaign.campaign_id,),
+        )
+    else:
+        st.caption("This item is in no campaign of its own; it shares the kit above.")
+
+
+def campaign_list(library: Library, campaign_id: str, selected: str) -> None:
+    campaign = library.campaigns[campaign_id]
+    heading, close = st.columns([20, 1], vertical_alignment="top")
+    count = len(campaign.members)
+    heading.markdown(
+        f"#### {md(campaign.name or '')} :gray[· {count} items · {md(cases_text(campaign.cases))}]"
+    )
+    with close:
+        st.button(
+            "",
+            icon=":material/close:",
+            help="Show the whole Library",
+            key="close-campaign",
+            on_click=lambda: st.session_state.pop("library_filter", None),
+            type="tertiary",
+        )
+    st.caption("Linked by " + md("; ".join(campaign.linked_by)))
+    members = set(campaign.members)
+    for item in library.items():  # Library order: newest case first, journey steps in order
+        if item.view_id in members:
+            item_row(item, True, item.view_id == selected)
 
 
 def compare_section(library: Library, item: Item) -> None:
@@ -875,6 +969,10 @@ def library_body() -> None:
         st.session_state["selected"] = selected
     matches_of = st.session_state.get("library_filter", {}).get("matches_of")
     anchor = library.get(matches_of) if matches_of else None
+    campaign_id = st.session_state.get("library_filter", {}).get("campaign")
+    if campaign_id and campaign_id not in library.campaigns:  # gone after a rebuild
+        st.session_state.pop("library_filter", None)
+        campaign_id = None
     if anchor:
         st.html('<style>[data-testid="stMainBlockContainer"] {max-width: 1800px}</style>')
     left, right = st.columns([3, 2], gap="medium")
@@ -882,6 +980,8 @@ def library_body() -> None:
         pending_rows(library, True)
         if anchor:
             match_table(library, anchor, selected)
+        elif campaign_id:
+            campaign_list(library, campaign_id, selected)
         else:
             for case in library.cases:  # newest case first
                 case_block(case, selected)
@@ -954,11 +1054,67 @@ def page_report() -> None:
             st.markdown(built["report"])
 
 
+def campaign_tree_view(library: Library) -> None:
+    """Kit → its campaigns → cases. A campaign opens the Library filtered to it."""
+    tree = campaign_tree(library)
+    if not tree.rows:
+        st.caption("No campaigns yet: nothing links two items.")
+    st.html(
+        """<style>
+        [class*="st-key-tree-"] [data-testid="stMarkdownContainer"] p {margin-bottom: 0}
+        [class*="st-key-tree-d1-"] {padding-left: 2rem; border-left: 2px solid #e4e2db;
+          margin-left: .55rem}
+        [class*="st-key-tree-"] button {padding: 0; min-height: 0; font-weight: 600}
+        [class*="st-key-tree-"] button p {font-size: 1rem}
+        </style>"""
+    )
+    for n, row in enumerate(tree.rows):
+        icon = {"kit": ":material/inventory_2:", "campaign": ":material/campaign:"}.get(
+            row.kind, ":material/description:"
+        )
+        with st.container(key=f"tree-d{row.depth}-{n}", gap="xsmall"):
+            if row.campaign_id:
+                st.button(
+                    row.name,
+                    icon=icon,
+                    key=f"tree-open-{n}",
+                    type="tertiary",
+                    help="Show this campaign's items in the Library",
+                    on_click=open_campaign,
+                    args=(row.campaign_id,),
+                )
+            elif row.kind == "kit":
+                st.markdown(f"{icon} **{md(row.name)}**")
+            else:
+                st.markdown(f":gray[{icon} {md(row.name[:70])}]")
+            facts = [
+                "1 item" if row.items == 1 else f"{row.items} items",
+                cases_text(row.cases),
+                "first seen " + short_date(row.first_seen),
+            ]
+            if row.linked_by:
+                facts.append("linked by " + "; ".join(row.linked_by))
+            st.caption(md(" · ".join(facts)))
+    st.markdown(f":gray[{tree.unlinked}]")
+
+
 def page_campaigns() -> None:
     st.markdown("### Campaigns")
     if not db().incidents():
         st.info("Nothing to show yet.")
         return
+    library = current_library()
+    if library is None:
+        st.info(BUSY)
+    else:
+        campaign_tree_view(library)
+    if st.session_state.pop("go_library", False):
+        st.switch_page(PAGES["library"])
+    with st.expander("Relation map"):
+        relation_map()
+
+
+def relation_map() -> None:
     columns = st.columns(len(TOGGLES))
     enabled = [
         name
@@ -975,11 +1131,6 @@ def page_campaigns() -> None:
     data = cache[tuple(enabled)]
     st.caption("Boxes are families and campaigns. A line is a stored relation in a chosen tier.")
     st.graphviz_chart(to_dot(data), width="stretch")
-    st.markdown("#### Clusters")
-    for cluster in data["clusters"]:
-        with st.expander(f"Family {cluster['family']}: {len(cluster['campaigns'])} campaign(s)"):
-            for campaign, members in cluster["campaigns"].items():
-                st.write(f"**{campaign}**: " + ", ".join(members))
     st.markdown("#### Links and shared identifiers")
     if data["edges"]:
         st.dataframe(
