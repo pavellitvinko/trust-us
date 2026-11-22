@@ -18,6 +18,7 @@ from __future__ import annotations
 import contextlib
 import json
 import secrets
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -85,6 +86,7 @@ class BrowserEvents:
     dialogs: list[dict[str, str]] = field(default_factory=list)
     blocked_requests: list[str] = field(default_factory=list)
     popups: list[Any] = field(default_factory=list)
+    opened_at: dict[int, float] = field(default_factory=dict)  # id(page) -> monotonic time
 
     def drain_forbidden(self) -> list[dict[str, str]]:
         out = [*self.permissions, *self.downloads]
@@ -107,6 +109,7 @@ class VictimBrowser:
     panel_context: Any
     events: BrowserEvents
     har_path: Path
+    video_dir: Path | None = None
 
     def close(self) -> None:
         """Closing the context is what writes the HAR, so it always runs, in this order."""
@@ -145,8 +148,13 @@ def launch(
     fallback: Callable[[str], Any] | None = None,
     panel_url: str | None = None,
     launcher: Callable[[Any], Any] | None = None,
+    video_dir: Path | None = None,
 ) -> VictimBrowser:
-    """Open the visible window. `launcher` exists for tests only; it never runs in a real run."""
+    """Open the visible window. `launcher` exists for tests only; it never runs in a real run.
+
+    With `video_dir`, the run's own context is recorded, one `.webm` per page, at the
+    persona's viewport size; the files are complete only once the context is closed.
+    """
     from playwright.sync_api import sync_playwright
 
     pw = sync_playwright().start()
@@ -160,10 +168,19 @@ def launch(
         ) from exc
     events = BrowserEvents()
     har_path.parent.mkdir(parents=True, exist_ok=True)
+    recording: dict[str, Any] = {}
+    if video_dir is not None:
+        video_dir.mkdir(parents=True, exist_ok=True)
+        size = persona.digital.viewport
+        recording = {
+            "record_video_dir": str(video_dir),
+            "record_video_size": {"width": size.width, "height": size.height},
+        }
     context = browser.new_context(
         **context_options(persona, pw.devices),
         record_har_path=str(har_path),
         record_har_content="embed",
+        **recording,
     )
     context.set_default_navigation_timeout(NAV_TIMEOUT_MS)
     binding = "__ftf_" + secrets.token_hex(4)
@@ -207,6 +224,7 @@ def launch(
             dialog.dismiss()
 
     def on_page(new_page: Any) -> None:
+        events.opened_at[id(new_page)] = time.monotonic()
         new_page.on("download", on_download)
         new_page.on("dialog", on_dialog)
         events.popups.append(new_page)
@@ -221,7 +239,7 @@ def launch(
             panel.goto(panel_url)
         page.bring_to_front()
     events.popups.clear()  # the run's own first page is not a pop-up
-    return VictimBrowser(pw, browser, context, page, panel_context, events, har_path)
+    return VictimBrowser(pw, browser, context, page, panel_context, events, har_path, video_dir)
 
 
 def referrer_for(persona: Persona) -> str:

@@ -3,6 +3,7 @@
     ftf victim personas
     ftf victim run <url> [--persona ID] [--max-steps N] [--live]
     ftf victim run replay:61            # the local replay of sample case 61
+    ftf victim demo                     # replay:61 as retiree-income, paced and recorded for a video
     ftf victim perceive <run folder>    # (re)build the perception fingerprint
     ftf victim show <run folder>        # stages, proofs, forms, stop reason
 
@@ -100,6 +101,9 @@ def cmd_run(args: argparse.Namespace) -> None:
         pace=args.pace,
         human_wait_s=args.human_wait,
         max_seconds=args.max_minutes * 60,
+        record_video=not args.no_video,
+        overlay=not args.no_overlay,
+        demo=args.demo,
     )
     out_dir = Path(args.out) if args.out else settings.victim_dir
     try:
@@ -120,6 +124,8 @@ def cmd_run(args: argparse.Namespace) -> None:
     print(f"\nRun {result.run_id}: {len(result.stages)} stages, {result.steps} steps.")
     print(f"Stopped: {result.stop_reason} — {result.stop_detail}")
     print(f"Written to {result.root}")
+    for clip in (result.manifest.get("recording") or {}).get("clips", []):
+        print(f"Video: {result.root / clip['video']}  (captions {clip['captions']})")
     if not args.no_perceive:
         _perceive(result.root, persona)
     if not args.no_ingest:
@@ -209,6 +215,30 @@ def _show(root: Path) -> None:
     print(f"  stop: {run['stop_reason']} — {run['stop_detail']}")
 
 
+def cmd_demo(args: argparse.Namespace) -> None:
+    """The demo run: the local replay of case 61, one persona, paced and recorded."""
+    defaults = {
+        "url": "replay:61",
+        "persona": args.persona or "retiree-income",
+        "ad_text": None,
+        "max_steps": 30,
+        "max_minutes": 6.0,
+        "human_wait": 60.0,
+        "pace": 1.0,
+        "decider": args.decider,
+        "case": args.case,
+        "out": args.out,
+        "live": False,
+        "contacts": None,
+        "no_perceive": args.no_perceive,
+        "no_ingest": args.no_ingest,
+        "no_video": False,
+        "no_overlay": False,
+        "demo": True,
+    }
+    cmd_run(argparse.Namespace(**defaults))
+
+
 def cmd_perceive(args: argparse.Namespace) -> None:
     root = Path(args.run)
     run = json.loads((root / "run_files" / "run.json").read_text(encoding="utf-8"))
@@ -269,7 +299,25 @@ def add_parser(sub: Any) -> None:
     )
     p.add_argument("--no-perceive", action="store_true")
     p.add_argument("--no-ingest", action="store_true")
+    p.add_argument(
+        "--demo", action="store_true", help="short reading waits, a pause on each highlight"
+    )
+    p.add_argument("--no-video", action="store_true", help="do not record the browser")
+    p.add_argument(
+        "--no-overlay", action="store_true", help="no caption bar or highlight on the page"
+    )
     p.set_defaults(func=cmd_run)
+
+    p = vsub.add_parser(
+        "demo", help="replay:61 as retiree-income, paced and recorded for a video (no live site)"
+    )
+    p.add_argument("--persona", help="persona id (default retiree-income)")
+    p.add_argument("--decider", choices=["auto", "model", "rules"], default="rules")
+    p.add_argument("--case", help="folder of sample case 61")
+    p.add_argument("--out", help="where to write the run (default: FTF_VICTIM_DIR or data/victim)")
+    p.add_argument("--no-perceive", action="store_true")
+    p.add_argument("--no-ingest", action="store_true")
+    p.set_defaults(func=cmd_demo)
 
     p = vsub.add_parser("perceive", help="build the perception fingerprint of a finished run")
     p.add_argument("run")

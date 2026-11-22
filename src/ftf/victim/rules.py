@@ -33,6 +33,25 @@ BLOCKED = "blocked"  # CAPTCHA or login nobody handled (VV-24)
 USER_STOP = "user_stop"
 ERROR = "error"
 
+# Stop reasons in plain words, for the caption shown at the end of a run.
+STOP_WORDS = {
+    FORBIDDEN_PAYMENT: "a payment step, which the agent never fills in",
+    FORBIDDEN_UPLOAD: "a document or photo upload, which the agent never does",
+    FORBIDDEN_DOWNLOAD: "a download or app install, which the agent refuses",
+    FORBIDDEN_PERMISSION: "a browser permission request, refused",
+    FORBIDDEN_LOGIN: "a log-in with a real account, which the agent never does",
+    OFFSITE_HANDOFF: "the next step happens off the site (a call-back)",
+    FORM_NOT_SENT: "a form the agent would not send",
+    NO_PROGRESS: "no new page after several steps",
+    NO_ACTIONS: "nothing left to do on this page",
+    BUDGET_STEPS: "step limit reached",
+    BUDGET_TIME: "time limit reached",
+    BUDGET_PAGES: "page limit reached",
+    BLOCKED: "a check nobody handled",
+    USER_STOP: "stopped by the person watching",
+    ERROR: "an error",
+}
+
 _PAYMENT_FRAME = re.compile(
     r"stripe|adyen|checkout\.com|braintree|paypal|payu|przelewy24|tpay|dotpay|blik|"
     r"klarna|revolut|moonpay|coinbase|binance|/pay(ment)?\b|/checkout",

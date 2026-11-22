@@ -10,6 +10,7 @@ because that is when the network record is written.
 from __future__ import annotations
 
 import contextlib
+import json
 import secrets
 import time
 from dataclasses import dataclass, field, replace
@@ -33,6 +34,7 @@ from .contacts import (
 from .control import PanelServer, RunControl
 from .decide import Decider, Decision, History, RuleDecider
 from .observe import Candidate, PageState, observe
+from .overlay import Overlay, action_caption
 from .persona import Persona
 from .record import Recorder, Stage, now_iso, stage_key
 
@@ -62,6 +64,9 @@ class RunOptions:
     human_wait_s: float = 600.0  # VV-24
     pace: float = 1.0  # 1 = the persona's own reading and typing speed; 0 = no waiting
     panel: bool = True
+    record_video: bool = True  # the run's browser as .webm clips under run_files/recording/
+    overlay: bool = True  # caption bar and highlight on the page (never in the evidence)
+    demo: bool = False  # short reading waits and a pause on each highlight, for a video
 
 
 @dataclass
@@ -167,6 +172,17 @@ class VictimRun:
         self.forms_sent = 0
         self.chat_seen: set[tuple[int, str]] = set()
         self.started = time.monotonic()
+        hold = 1.2 if self.options.demo else min(0.6 * self.options.pace, 0.6)
+        self.overlay = Overlay(
+            who=f"persona {persona.ref} (synthetic)",
+            draw=self.options.overlay,
+            hold_s=hold if self.options.overlay else 0.0,
+        )
+        self.rec.before_capture = self.overlay.clear
+        self._cap: tuple[str, str, str] = ("", "", "")  # caption, reason, badge of this step
+        self._clip_pages: list[Any] = []
+        self._clip_paths: list[Path | None] = []
+        self.recording: dict[str, Any] | None = None
         self.vb: VictimBrowser | None = None
         self.page: Any = None
         self.nav: _Navigation | None = None
@@ -214,7 +230,16 @@ class VictimRun:
         except Exception:  # noqa: BLE001 - navigating
             return ""
 
+    def show(self, caption: str, sub: str = "", xpath: str = "", hold: float | None = None) -> None:
+        """Caption (and highlight) on the page for the video and the person watching."""
+        badge = self._cap[2] if xpath else ""
+        self.overlay.show(self.page, caption, sub, badge, xpath=xpath, dot=bool(xpath), hold=hold)
+
+    def _demo_hold(self, seconds: float) -> float:
+        return seconds if self.options.demo else 0.0
+
     def observe(self) -> PageState:
+        self.overlay.clear(self.page)
         for _ in range(3):
             try:
                 return observe(self.page)
@@ -225,6 +250,8 @@ class VictimRun:
     def reading_time(self, state: PageState) -> float:
         words = min(len(state.text.split()), 1500)
         seconds = words / max(self.persona.digital.reading_wpm, 60) * 60
+        if self.options.demo:  # enough to read the caption, not the page
+            return min(max(seconds * 0.1, 1.5), 3.5)
         return min(max(seconds, 2.0), 25.0) * self.options.pace
 
     # -- stages ------------------------------------------------------------------
@@ -273,6 +300,30 @@ class VictimRun:
         self.rec.write_manifest(stage)
         self.stage = stage
         self.say(f"stage {stage.index}: {stage.kind} at {url[:100]} ({how})")
+        reached = {
+            "start": "opened from the ad link",
+            "link_click": "reached by clicking a link",
+            "chat_hand_off": "reached from the chat",
+            "form_submit": "reached by sending the form",
+            "button_click": "reached by clicking a button",
+            "new_tab": "opened in a new tab",
+        }.get(how, how)
+        redirects = len(arrived["http_redirects"])
+        kind_words = {
+            "advertorial": "an article (advertorial)",
+            "chat": "a chat",
+            "quiz": "a quiz",
+            "form": "a form",
+            "thank_you": "a thank-you page",
+            "decoy": "a harmless-looking decoy page",
+        }
+        self.show(
+            f"Page {stage.index}: {kind_words.get(stage.kind, 'the next page')}",
+            f"{reached}"
+            + (f", through {redirects} redirect(s)" if redirects else "")
+            + f" — {urlsplit(url).hostname or url[:60]}",
+            hold=self._demo_hold(2.0),
+        )
         return True
 
     def absorb_navigation(self, how: str, started: str, action: str = "") -> bool:
@@ -403,14 +454,16 @@ class VictimRun:
     def locator(self, xpath: str) -> Any:
         return self.page.locator(f"xpath={xpath}").first
 
-    def type_value(self, xpath: str, value: str) -> None:
+    def type_value(self, xpath: str, value: str, label: str = "") -> None:
         field = self.locator(xpath)
         field.scroll_into_view_if_needed(timeout=3000)
+        if label:
+            self.show(f"Types “{value}” into {label}", self._cap[1], xpath=xpath)
         field.click(timeout=3000)
         field.fill("")
-        if self.options.pace > 0:
-            delay = 1000 / max(self.persona.digital.typing_cps, 1.0) * self.options.pace
-            field.press_sequentially(value, delay=min(delay, 400))
+        if self.options.pace > 0 or self.options.demo:
+            delay = 1000 / max(self.persona.digital.typing_cps, 1.0) * max(self.options.pace, 0.3)
+            field.press_sequentially(value, delay=min(delay, 120 if self.options.demo else 400))
         else:
             field.fill(value)
 
@@ -424,7 +477,7 @@ class VictimRun:
         mark = self.nav.mark()
         typed: dict[str, str] = {}
         for xpath, value in plan.values.items():
-            self.type_value(xpath, value)
+            self.type_value(xpath, value, self._field_label(form, xpath))
             typed[xpath] = value
             self.wait(0.4 * self.options.pace)
         for xpath, option in plan.selects.items():
@@ -470,6 +523,11 @@ class VictimRun:
         mark = self.nav.mark()
         quick = self._quick()
         if form.get("submit_xpath"):
+            self.show(
+                f"Sends the form (“{form.get('submit_text') or 'submit'}”)",
+                f"to {urlsplit(form.get('action') or self.page.url).hostname or 'the same page'}",
+                xpath=form["submit_xpath"],
+            )
             self.locator(form["submit_xpath"]).click(timeout=5000)
         else:
             self.page.evaluate(
@@ -497,6 +555,12 @@ class VictimRun:
         return {"submitted": True}
 
     @staticmethod
+    def _field_label(form: dict[str, Any], xpath: str) -> str:
+        """What a viewer would call the field: its label, else its name."""
+        f = next((x for x in form["fields"] if x.get("xpath") == xpath), {})
+        return f"“{f.get('label') or f.get('name') or 'the field'}”"
+
+    @staticmethod
     def _field_name(form: dict[str, Any], xpath: str) -> str:
         f = next((x for x in form["fields"] if x.get("xpath") == xpath), {})
         return f.get("name") or f.get("label") or xpath
@@ -511,12 +575,15 @@ class VictimRun:
                 self.wait(0.5 * self.options.pace)
             return {}
         if c.kind == "media":
+            self.show(self._cap[0], self._cap[1], xpath=c.xpath)
             self.locator(c.xpath).evaluate("v => { v.muted = true; return v.play && v.play(); }")
-            self.wait(10 * self.options.pace)
+            self.wait(
+                min(10 * self.options.pace, 4.0) if self.options.demo else 10 * self.options.pace
+            )
             return {}
         if c.kind == "text_input":
             assert d.text is not None
-            self.type_value(c.xpath, d.text)
+            self.type_value(c.xpath, d.text, "the chat")
             self.page.keyboard.press("Enter")
             self.rec.append(
                 "chat",
@@ -531,6 +598,7 @@ class VictimRun:
             return {"typed": d.text}
         target = self.locator(c.xpath)
         target.scroll_into_view_if_needed(timeout=3000)
+        self.show(self._cap[0], self._cap[1], xpath=c.xpath)
         if c.kind == "chat_option":
             self.rec.append(
                 "chat",
@@ -598,14 +666,24 @@ class VictimRun:
                 fallback=self.fallback,
                 panel_url=panel.url if panel else None,
                 launcher=self.launcher,
+                video_dir=self.rec.files / "recording" if self.options.record_video else None,
             )
             self.page = self.vb.page
+            self._adopt(self.page)
             self.nav = _Navigation(self.page)
             self.control.update(status="running", persona=self.persona.ref, step=0, url=self.url)
             started = now_iso()
             self.say(f"opening the ad link as {self.persona.ref}")
             self.page.goto(self.url, referer=referer or None, wait_until="domcontentloaded")
             self.settle()
+            platform = self.persona.digital.platform
+            self.show(
+                "Opens the ad link",
+                f"as {self.persona.ref}, arriving from {platform}"
+                if platform
+                else self.persona.ref,
+                hold=self._demo_hold(2.0),
+            )
             self.absorb_navigation("start", started, "ad link opened with the persona's referrer")
             if self.stage is None:  # no document request seen (should not happen)
                 self._new_or_known_stage(self.page.url, "start", started, None, "")
@@ -623,8 +701,15 @@ class VictimRun:
                 with contextlib.suppress(Exception):
                     self.rec.snapshot(self.page, self.stage)
             self.control.update(status="finished", notice=f"Stopped: {stop[0]} — {stop[1][:200]}")
+            if self.page is not None and self.vb is not None:
+                self.show(
+                    f"Run ends: {rules.STOP_WORDS.get(stop[0], stop[0].replace('_', ' '))}",
+                    stop[1][:160],
+                    hold=self._demo_hold(3.0),
+                )
             if self.vb is not None:
                 self.vb.close()
+                self.collect_recording()
             if panel is not None:
                 panel.close()
         return self.finish(stop, referer)
@@ -701,6 +786,12 @@ class VictimRun:
                 reason=decision.reason,
             )
             self.say(f"step {self.step}: {chosen.describe()[:120]} — {decision.reason}")
+            self._cap = (
+                action_caption(chosen, decision.text),
+                decision.reason,
+                f"Step {self.step}",
+            )
+            self.overlay.show(self.page, self._cap[0], self._cap[1], self._cap[2], hold=0)
             self.wait(
                 self.reading_time(state) if chosen.kind != "scroll" else 1.0 * self.options.pace
             )
@@ -740,6 +831,7 @@ class VictimRun:
                 outcome = self.act(chosen, decision, state)
             except Exception as exc:  # noqa: BLE001 - a failed click is recorded, not fatal
                 error = f"{type(exc).__name__}: {str(exc).splitlines()[0][:200]}"
+            self.overlay.unpoint(self.page)
             if not outcome.get("submitted") and not outcome.get("stop"):
                 # A chat bot "types" its next message after a pause: wait for it longer.
                 chatty = chosen.kind in {"chat_option", "text_input"}
@@ -802,6 +894,59 @@ class VictimRun:
             if idle >= self.options.no_progress_steps:
                 return rules.NO_PROGRESS, f"no new stage in {idle} steps"
 
+    def _adopt(self, page: Any) -> None:
+        """A page the run continues on: its video becomes the next clip."""
+        if self.vb is None or any(p is page for p in self._clip_pages):
+            return
+        self._clip_pages.append(page)
+        self.overlay.start_clip(page, self.vb.events.opened_at.get(id(page)))
+        # The path is known from the start; the file is complete once the context closes,
+        # after which Playwright can no longer be asked.
+        video = None
+        with contextlib.suppress(Exception):
+            video = Path(page.video.path()) if page.video else None
+        self._clip_paths.append(video)
+
+    def collect_recording(self) -> None:
+        """After the context is closed: name the clips in order, write their captions."""
+        if self.vb is None or self.vb.video_dir is None:
+            return
+        out = self.vb.video_dir
+        clips = []
+        keep: set[Path] = set()
+        for n, src in enumerate(self._clip_paths, 1):
+            if src is None or not src.is_file():
+                continue
+            dest = out / f"clip-{n:02d}.webm"
+            with contextlib.suppress(OSError):
+                src.replace(dest)
+            vtt = out / f"clip-{n:02d}.vtt"
+            vtt.write_text(self.overlay.vtt(n), encoding="utf-8")
+            keep |= {dest, vtt}
+            clips.append(
+                {
+                    "video": f"{dest.relative_to(self.rec.root).as_posix()}",
+                    "captions": f"{vtt.relative_to(self.rec.root).as_posix()}",
+                    "cues": sum(1 for c in self.overlay.cues if c.clip == n),
+                }
+            )
+        for stray in out.glob("*.webm"):  # pages the run did not follow (closed pop-ups)
+            if stray not in keep:
+                with contextlib.suppress(OSError):
+                    stray.unlink()
+        v = self.persona.digital.viewport
+        self.recording = {
+            "clips": clips,
+            "size": {"width": v.width, "height": v.height},
+            "overlay": self.options.overlay,
+            "demo": self.options.demo,
+            "note": "the caption bar and outline are drawn for viewers and removed before every "
+            "screenshot and DOM snapshot",
+        }
+        (out / "recording.json").write_text(
+            json.dumps(self.recording, ensure_ascii=False, indent=1), encoding="utf-8"
+        )
+
     def switch_to_popup(self) -> None:
         """A link that opens a new tab continues the funnel there (VV-22: only if in-funnel)."""
         assert self.vb is not None and self.nav is not None
@@ -819,6 +964,7 @@ class VictimRun:
                 if self.stage is not None:
                     self.rec.snapshot(self.page, self.stage)
                 self.page = popup
+                self._adopt(popup)
                 self.nav.attach(popup)
                 self.nav.records.append(
                     {
@@ -878,6 +1024,7 @@ class VictimRun:
                 for s in self.rec.stages
             ],
             "funnel_shape": funnel_shape(self.rec.stages),
+            "recording": self.recording,
             "tool": {"name": "ftf.victim", "version": __version__},
         }
         self.rec.write_json("run.json", manifest)

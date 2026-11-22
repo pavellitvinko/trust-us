@@ -69,6 +69,13 @@ class Recorder:
         (self.files / "steps").mkdir(parents=True, exist_ok=True)
         self.stages: list[Stage] = []
         self._lines: dict[str, int] = {}
+        # Called with the page before every screenshot and DOM snapshot: the agent removes its
+        # on-page marker there, so nothing it draws ends up in the evidence.
+        self.before_capture: Any = None
+
+    def _clean(self, page: Any) -> None:
+        if self.before_capture is not None:
+            self.before_capture(page)
 
     # -- logs ----------------------------------------------------------------------
 
@@ -82,6 +89,7 @@ class Recorder:
 
     def step_screenshot(self, page: Any, step: int, suffix: str = "") -> str | None:
         rel = f"{RUN_FILES}/steps/step-{step:03d}{suffix}.png"
+        self._clean(page)
         try:
             page.screenshot(path=str(self.root / rel))
         except Exception:  # noqa: BLE001 - a page mid-navigation cannot always be shot
@@ -109,6 +117,7 @@ class Recorder:
         )
         stage.dir.mkdir(parents=True, exist_ok=True)
         self.stages.append(stage)
+        self._clean(page)
         with contextlib.suppress(Exception):
             page.screenshot(path=str(stage.dir / "screenshot.png"), full_page=True)
         self.snapshot(page, stage)
@@ -117,6 +126,7 @@ class Recorder:
 
     def snapshot(self, page: Any, stage: Stage) -> None:
         """Save the stage's DOM as it is now; the last snapshot before leaving is kept."""
+        self._clean(page)
         with contextlib.suppress(Exception):
             (stage.dir / "dom.html").write_text(page.content(), encoding="utf-8")
 
