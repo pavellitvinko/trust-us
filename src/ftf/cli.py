@@ -291,6 +291,7 @@ def cmd_demo(args) -> None:
     def show(step) -> None:
         print(f"[{step.status.upper():7}] {step.name}: {step.detail}", flush=True)
 
+    print("mode: shipped settings, local text vectors, no model calls, no DNS or RDAP")
     steps = run_demo(
         Path(args.sample), live_url=args.live_url, capture=not args.no_capture, on_step=show
     )
@@ -577,8 +578,9 @@ def main(argv: list[str] | None = None) -> None:
 
     p = sub.add_parser("demo", help="rehearse the demo sequence and check each step")
     p.add_argument("sample", help="folder with the organiser sample")
-    p.add_argument("--live-url", help="URL for the live capture step")
-    p.add_argument("--no-capture", action="store_true", help="skip the browser steps")
+    browser = p.add_mutually_exclusive_group()
+    browser.add_argument("--live-url", help="URL for the live capture step")
+    browser.add_argument("--no-capture", action="store_true", help="skip the browser steps")
     p.set_defaults(func=cmd_demo)
 
     sub.add_parser("views", help="list views").set_defaults(func=cmd_views)
@@ -667,7 +669,7 @@ def main(argv: list[str] | None = None) -> None:
 
     args = parser.parse_args(argv)
     # Evaluation measures the shipped method, so analyst edits must not change its results.
-    if args.command not in ("eval", "loio", "ablate", "validate", "load-fixtures"):
+    if args.command not in ("eval", "loio", "ablate", "validate", "load-fixtures", "demo"):
         from .method_settings import apply_saved
 
         apply_saved()

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import os
 import tempfile
 from collections.abc import Callable
@@ -9,9 +10,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import pipeline
+from .compare import vector
+from .compare.weights import weights
 from .contracts import RelationType, ViewKind
 from .eval.reference import resolve_view
 from .fusion import run_method
+from .fusion.fuse import active_groups, set_active_groups
 from .grouping import Outcome, assign, build_groups
 from .ingest import ingest_folder, ingest_path
 from .registry import load_plugins
@@ -73,7 +77,8 @@ def _add_capture(
 
     folder = work / name
     result = capture_url(url, folder / "bundle", replay_har=har)
-    _require(result.ok, f"capture {result.manifest.status.value}: {result.manifest.error or ''}")
+    status = result.manifest.status.value
+    _require(status == "ok", f"capture {status}: {result.manifest.error or 'no usable page'}")
     _, views = ingest_folder(folder, store, name)
     pages = [v for v in views if v.kind is ViewKind.PAGE]
     _require(pages, "the capture produced no page view")
@@ -93,6 +98,12 @@ def run_demo(
     sample = Path(sample).resolve()
     steps: list[Step] = []
     saved = {k: os.environ.get(k) for k in ("FTF_DATA_DIR", "FTF_EMBEDDER", "FTF_SEED_CORPUS")}
+    from .layers import _embedder as embedder_state
+
+    saved_embedder = embedder_state._embedder
+    saved_weights = copy.deepcopy(weights.__dict__)
+    saved_groups = active_groups()
+    saved_calibrations = dict(vector._calibrations)
 
     with tempfile.TemporaryDirectory() as scratch:
         work = Path(scratch)
@@ -124,7 +135,7 @@ def run_demo(
         def campaign_1_2() -> str:
             a, b = _view(store, "1:page"), _view(store, "2:page")
             _require(_relation(store, a, b) is RelationType.SAME_CAMPAIGN, "not one campaign")
-            hosts = _values(store, a, "url.host"), _values(store, b, "url.host")
+            hosts = _values(store, a, "domain.registrable"), _values(store, b, "domain.registrable")
             _require(hosts[0] and hosts[1] and not hosts[0] & hosts[1], "domains are not different")
             names = ("ad.ad_id", "ad.adset_id", "ad.campaign_id")
             ads = [
@@ -163,7 +174,8 @@ def run_demo(
             decoys = [v for v in pages if v not in (article, chat)]
             _require(len(decoys) == 1, "decoy page not found")
             _require(
-                _values(store, decoys[0], "url.host") & _values(store, article, "url.host"),
+                _values(store, decoys[0], "domain.registrable")
+                & _values(store, article, "domain.registrable"),
                 "decoy is not on the same domain",
             )
             _require(all(decoys[0] not in edge for edge in edges), "decoy is in the funnel")
@@ -185,17 +197,24 @@ def run_demo(
             return f"replay {status}: {view}"
 
         def live() -> str:
-            view, status = _add_capture(store, work, "demo-live", live_url, None)
+            # Its own store, so the judges' page cannot change the assignment in step 8.
+            live_store = Store(work / "data" / "live.sqlite")
+            try:
+                view, status = _add_capture(live_store, work, "demo-live", live_url, None)
+            finally:
+                live_store.close()
             return f"live {status}: {view}"
 
         def new_material() -> str:
             view = state.get("replay")
             _require(view, "the replay step produced no view")
+            run_method(store)  # fit weights on the sample again, after the live step
             result = assign(store, view)
-            _require(result.outcome is not Outcome.INSUFFICIENT, "insufficient evidence")
-            related = [x for items in result.related.values() for x in items]
-            _require(related, "no related known material")
-            report = build_pair_report(store, view, related[0].view_id)
+            _require(result.outcome is Outcome.DUPLICATE_OF, f"got {result.headline()}")
+            known = {_view(store, "2:healthlinkq"), _view(store, "3:page")}
+            _require(result.target in known, f"matched the wrong view: {result.target}")
+            report = build_pair_report(store, view, result.target)
+            _require(report["relation"] == RelationType.DUPLICATE.value, "report disagrees")
             compared = [row for row in report["layers"] if row["status"] == "compared"]
             _require(compared and report["sources"], "evidence table is empty")
             return f"{result.headline()}; evidence from {len(compared)} layers"
@@ -223,7 +242,12 @@ def run_demo(
                         on_step(steps[-1])
         finally:
             store.close()
-            set_embedder(None)
+            set_embedder(saved_embedder)
+            weights.__dict__.clear()
+            weights.__dict__.update(saved_weights)
+            set_active_groups(saved_groups)
+            vector._calibrations.clear()
+            vector._calibrations.update(saved_calibrations)
             for key, value in saved.items():
                 if value is None:
                     os.environ.pop(key, None)

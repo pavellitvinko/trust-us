@@ -154,7 +154,8 @@ docker compose exec app ftf demo /sample --live-url https://example.com
 
 `ftf demo` runs the jury sequence on a temporary store and checks each step: ingest, 1↔2, the
 2↔3 bridge, 48↔61, the 61 funnel and decoy, video-only case 5, capture replay and live capture,
-and assignment of new material. It does not change your stored data and exits non-zero on failure.
+and assignment of new material. It uses the shipped settings and local text vectors, with no
+model calls and no DNS or RDAP. It does not change your stored data and exits non-zero on failure.
 
 ## Run in Docker
 

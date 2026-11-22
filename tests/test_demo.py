@@ -24,3 +24,12 @@ def test_a_failed_step_does_not_stop_the_rehearsal(tmp_path):
     steps = run_demo(tmp_path / "empty", capture=False)
     assert len(steps) == 9
     assert steps[0].status == "failed"
+
+
+def test_demo_leaves_no_fitted_state_behind(tmp_path):
+    from ftf.compare.weights import weights
+
+    before = dict(weights.holders)
+    (tmp_path / "empty").mkdir()
+    run_demo(tmp_path / "empty", capture=False)
+    assert weights.holders == before
