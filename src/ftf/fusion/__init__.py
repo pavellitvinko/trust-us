@@ -5,13 +5,14 @@ Correlation groups, tier scores, coverage, the contradiction rule and the demoti
 """
 
 from .config import DEFAULT, FusionConfig
-from .fuse import decide, fuse, summarise
+from .fuse import decide, explain, fuse, summarise
 from .run import fuse_pair, prepare, run_fuse, run_method
 
 __all__ = [
     "DEFAULT",
     "FusionConfig",
     "decide",
+    "explain",
     "fuse",
     "fuse_pair",
     "prepare",

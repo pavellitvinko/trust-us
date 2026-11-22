@@ -1,9 +1,5 @@
 """Hour-4 checkpoint through the CLI and real organiser files, with no model calls."""
 
-import json
-import os
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -19,32 +15,8 @@ SAMPLE = ROOT / "testing_sample"
 
 
 @pytest.mark.skipif(not SAMPLE.is_dir(), reason="testing_sample/ not present")
-def test_real_sample_cli_checkpoint_without_models(tmp_path):
-    env = {
-        **os.environ,
-        "FTF_DATA_DIR": str(tmp_path / "data"),
-        "TLDEXTRACT_CACHE": str(tmp_path / "tld-cache"),
-        "FTF_EMBEDDER": "fake",  # local hashed text only; no model/cache access
-        "OPENAI_API_KEY": "",
-        "GEMINI_API_KEY": "",
-        "PYTHONPATH": os.pathsep.join((str(ROOT / "src"), str(ROOT))),
-    }
-
-    def cli(*args):
-        audit = tmp_path / f"{args[0]}-audit.json"
-        result = subprocess.run(
-            [sys.executable, "-m", "tests._model_off_cli", *args],
-            cwd=ROOT,
-            env={**env, "FTF_MODEL_OFF_AUDIT": str(audit)},
-            text=True,
-            capture_output=True,
-            timeout=120,
-            check=False,
-        )
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert json.loads(audit.read_text()) == {"model": [], "network": []}
-        return result.stdout
-
+def test_real_sample_cli_checkpoint_without_models(tmp_path, model_off_cli):
+    cli = model_off_cli
     assert "relations:" in cli("ingest", str(SAMPLE))
     load_plugins()
     store = Store(tmp_path / "data" / "ftf.sqlite")

@@ -5,7 +5,6 @@ from dataclasses import dataclass
 
 import pytest
 
-from ftf.config import Settings
 from ftf.contracts import Incident, Observation, Source, State, View, ViewKind
 from ftf.layers.playbook import PatternMo
 from ftf.models import ModelResult
@@ -49,18 +48,6 @@ def draft(ids, name="Celebrity endorsement", coherent=True):
         description="A public figure is shown backing the offer.",
         positive_card_ids=ids,
         near_misses=["An anonymous testimonial"],
-    )
-
-
-@pytest.fixture
-def settings(tmp_path):
-    return Settings(
-        data_dir=tmp_path / "data",
-        openai_api_key="",
-        gemini_api_key="",
-        openai_model="openai-test",
-        embedding_model="embed-test",
-        video_model="video-test",
     )
 
 

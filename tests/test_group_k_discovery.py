@@ -18,14 +18,13 @@ Group K elements are:
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-import pytest
-
-from src.ftf.expectations.library import (
+from ftf.expectations.library import (
     ElementBasis,
+    ElementChecked,
     ElementProfile,
     ExpectedElement,
     KindLibraryStore,
@@ -34,7 +33,7 @@ from src.ftf.expectations.library import (
     PageKind,
     TypicalWording,
 )
-from src.ftf.expectations.verification import verify_element, ElementChecked
+from ftf.expectations.verification import search_for_element_in_text, verify_element
 
 
 class TestGroupKElements:
@@ -127,7 +126,7 @@ class TestGroupKElements:
             kind=kind,
             elements=elements,
             generated_from="model_knowledge",
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(UTC),
         )
 
     @staticmethod
@@ -231,7 +230,7 @@ class TestGroupKElements:
             kind=kind,
             elements=elements,
             generated_from="model_knowledge",
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(UTC),
         )
 
     @staticmethod
@@ -293,7 +292,7 @@ class TestGroupKElements:
             kind=kind,
             elements=elements,
             generated_from="model_knowledge",
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(UTC),
         )
 
     @staticmethod
@@ -380,7 +379,7 @@ class TestGroupKElements:
             kind=kind,
             elements=elements,
             generated_from="model_knowledge",
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(UTC),
         )
 
     @staticmethod
@@ -452,7 +451,7 @@ class TestGroupKElements:
             kind=kind,
             elements=elements,
             generated_from="model_knowledge",
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(UTC),
         )
 
     def test_group_k_investment_elements_present(self):
@@ -539,7 +538,7 @@ class TestGroupKElements:
             lib = KindLibraryVersion(
                 version_id="1.0.0",
                 profiles=profiles,
-                created_at=datetime.utcnow(),
+                created_at=datetime.now(UTC),
             )
             path = store.save_version(lib)
 
@@ -570,19 +569,16 @@ class TestGroupKElements:
         Wyrażam zgodę na przetwarzanie danych
         """
 
-        # Check a few elements
-        elements_to_check = [ep for ep in profile.elements if ep.promoted][:3]
-
-        for ep in elements_to_check:
-            # At least one of these should verify as present
-            result = verify_element(
-                ep.element,
-                ElementChecked.PRESENT,
-                "risk",  # Simple quote to test
-                page_text,
-            )
-            # We're just checking that verification logic works, not all elements will match
-
-
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+        for ep in profile.elements:
+            found, wording = search_for_element_in_text(ep.element, page_text)
+            assert found, ep.element.name  # every Group K element above has a wording in the text
+            present = verify_element(ep.element, ElementChecked.PRESENT, wording, page_text)
+            assert present.verified, (ep.element.name, present.reason)
+            absent = verify_element(ep.element, ElementChecked.ABSENT, None, page_text)
+            assert not absent.verified, ep.element.name
+        missing = ExpectedElement(
+            name="licence_number",
+            description="Licence number",
+            typical_wordings=[TypicalWording(text="numer licencji")],
+        )
+        assert verify_element(missing, ElementChecked.ABSENT, None, page_text).verified
