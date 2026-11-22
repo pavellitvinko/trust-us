@@ -21,12 +21,13 @@ from ftf.fusion import run_method
 from ftf.grouping import assign, build_groups
 from ftf.intake import (
     ANALYSIS_LOCK,
-    STAGES,
     IntakeError,
     add_zip,
     allowed_folder,
+    capture_and_run,
     discard_upload,
     run_stages,
+    save_upload,
 )
 from ftf.material import expectation_profiles, material_summary
 from ftf.method_settings import apply_saved, current_values, reset, save
@@ -71,36 +72,57 @@ def add_material() -> None:
         disabled=not root,
         help=f"Inside {root}" if root else "Off until FTF_UI_FOLDER_ROOT is set.",
     )
-    enrich = st.checkbox("Look up DNS and RDAP (network)", value=True)
-    st.text_input(
-        "URL", disabled=True, help="Available once the live capture service (HAC-14) is connected."
+    url = st.text_input(
+        "Or a URL to capture",
+        placeholder="https://…",
+        help="Opened in a headless browser; forms are never submitted.",
     )
-    st.caption("URL capture is not connected yet.")
+    har = st.file_uploader(
+        "Or replay an archived HAR",
+        type=["har"],
+        help="Replays the recording offline; with a URL above, that page of the archive.",
+    )
+    enrich = st.checkbox("Look up DNS and RDAP (network)", value=True)
     if not st.button("Analyse material"):
         return
-    if not upload and not folder.strip():
-        st.warning("Choose a zip or enter a folder.")
+    by_folder = bool(upload or folder.strip())
+    by_capture = bool(url.strip() or har)
+    if by_folder == by_capture:
+        st.warning(
+            "Choose one source: a zip or folder, or a URL / HAR."
+            if by_folder
+            else "Choose a zip, a folder, a URL or a HAR."
+        )
         return
     progress = st.progress(0.0, text="Starting")
 
     def on_stage(name: str, index: int, total: int) -> None:
-        progress.progress(index / total, text=f"Stage {index + 1} of {len(STAGES)}: {name}")
+        progress.progress(index / total, text=f"Stage {index + 1} of {total}: {name}")
 
-    path = None
+    path = replay = None
     try:
-        path = (
-            add_zip(upload, upload.name, settings.data_dir / "uploads")
-            if upload
-            else allowed_folder(folder.strip(), root)
-        )
-        result = run_stages(store, path, on_stage, enrich=enrich)
+        if by_capture:
+            if har:
+                replay = save_upload(har, har.name, settings.data_dir / "uploads")
+            with st.spinner("Capturing the page (up to a minute)…"):
+                result = capture_and_run(store, url, on_stage, replay_har=replay, enrich=enrich)
+        else:
+            path = (
+                add_zip(upload, upload.name, settings.data_dir / "uploads")
+                if upload
+                else allowed_folder(folder.strip(), root)
+            )
+            result = run_stages(store, path, on_stage, enrich=enrich)
     except IntakeError as exc:
         if upload and path is not None:
             discard_upload(path)
+        if replay is not None:
+            discard_upload(replay)
         progress.empty()
         st.error(str(exc))
         return
     progress.progress(1.0, text="Done")
+    show_capture(result.get("capture"))
     st.session_state.pop("comparison_report", None)
     st.session_state.pop("assignments", None)
     st.session_state.pop("map_cache", None)
@@ -109,6 +131,19 @@ def add_material() -> None:
         f"Added {result['views']} views in {len(result['incidents'])} incident(s). "
         f"Campaigns: {result['campaigns']}, families: {result['families']}."
     )
+
+
+def show_capture(capture: dict | None) -> None:
+    """What the browser reached. A failed capture is still added: the failure is evidence."""
+    if not capture:
+        return
+    where = capture["final_url"] or capture["page_url"]
+    hops = f", {capture['redirects']} redirect hop(s)" if capture["redirects"] else ""
+    text = f"Capture ({capture['mode']}): {capture['status']} — {where}{hops}"
+    if capture["ok"]:
+        st.info(text)
+    else:
+        st.warning(f"{text}. {capture['error'] or ''} The failure is kept as evidence.")
 
 
 def show_status_table(title: str, section: dict) -> None:

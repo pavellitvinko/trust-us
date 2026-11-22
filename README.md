@@ -107,7 +107,14 @@ A capture writes `<incident>/bundle/` with `dom.html` (rendered after scrolling)
 and `manifest.json`: requested and final URL, capture time, mode, egress, user agent, the
 ordered redirect trace (`http`, `meta_refresh`, `script`, `history`, each citing its HAR
 entry), the final response's IP, TLS certificate and headers, failed and blocked requests.
-Default location: `$FTF_DATA_DIR/captures/<host>-<UTC time>/`.
+Default location: `$FTF_DATA_DIR/captures/<host>-<UTC time>-<id>/`.
+
+The interface does the same from **Add material**: enter a URL (a bare host gets `https://`;
+only http and https are opened), or upload an archived HAR to replay, then **Analyse
+material**. The capture becomes a new incident and runs through every stage like an uploaded
+folder; the result line says what the browser reached, and a failed capture is still added
+as evidence. A live capture needs Chromium (`uv run playwright install chromium`; it is in
+the Docker image).
 
 Each capture uses a fresh browser context with service workers blocked and downloads
 refused; forms are never submitted (blocked in the page, and any non-GET navigation is

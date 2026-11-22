@@ -530,3 +530,51 @@ def test_cli_capture_ingests_and_runs(tmp_path, monkeypatch, site, capsys):
     with pytest.raises(SystemExit) as exc:
         main(["capture", f"http://127.0.0.1:{_closed_port()}/", "--out", str(tmp_path / "x")])
     assert exc.value.code == 3
+
+
+@browser
+def test_interface_replay_runs_inside_an_event_loop(tmp_path, store, monkeypatch):
+    """The interface path: replay a HAR into a new incident and run every stage. Called from a
+    thread with a running event loop, as Streamlit may, where Playwright's sync API refuses."""
+    import asyncio
+
+    from ftf import intake
+
+    monkeypatch.setenv("FTF_EMBEDDER", "fake")
+    monkeypatch.setenv("FTF_DATA_DIR", str(tmp_path / "data"))
+    har = tmp_path / "archive.har"
+    body = "<html><body><h1>Archived offer</h1><script>fbq('init','2012165449475163')</script>"
+    _write_har(har, [_entry("https://gone-offer.live/", body=body + "</body></html>")])
+
+    async def in_loop():
+        return intake.capture_and_run(store, None, replay_har=har, enrich=False, timeout=15)
+
+    result = asyncio.run(in_loop())
+    assert result["capture"]["mode"] == "replay" and result["capture"]["ok"]
+    assert result["views"] == 1 and result["incidents"][0].startswith("archive-")
+    (view,) = [v for v in store.views() if v.incident_id == result["incidents"][0]]
+    assert [o.value for o in _obs(store, view.view_id, "fb_pixel")] == ["2012165449475163"]
+
+
+@browser
+def test_interface_captures_a_live_url(tmp_path, monkeypatch, site):
+    """Add material → URL in the Streamlit app: a live capture becomes a stored view."""
+    from streamlit.testing.v1 import AppTest
+
+    from ftf.store import Store
+
+    monkeypatch.setenv("FTF_EMBEDDER", "fake")
+    monkeypatch.setenv("FTF_DATA_DIR", str(tmp_path / "data"))
+    root = Path(__file__).resolve().parents[1]
+    app = AppTest.from_file(str(root / "app/streamlit_app.py"), default_timeout=120).run()
+    assert not app.exception
+    next(t for t in app.text_input if t.label == "Or a URL to capture").input(f"{site}/r")
+    next(c for c in app.checkbox if c.label.startswith("Look up")).uncheck()
+    next(b for b in app.button if b.label == "Analyse material").click().run()
+    assert not app.exception, app.exception
+    assert not app.error, [e.value for e in app.error]
+    assert any("Capture (live): ok" in i.value and "/final" in i.value for i in app.info)
+    assert any("Added 1 views" in s.value for s in app.success)
+    store = Store(tmp_path / "data" / "ftf.sqlite")
+    (view,) = [v for v in store.views() if v.meta.get("capture_status") == "ok"]
+    assert view.incident_id.startswith("127.0.0.1-")

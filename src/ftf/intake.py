@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 import stat
 import tempfile
@@ -17,7 +18,7 @@ from . import pipeline
 from .config import get_settings
 from .enrich.warning_lists import run_warning_lists
 from .fusion import run_method
-from .ingest import ingest_path
+from .ingest import ingest_folder, ingest_path
 from .store import Store
 
 MAX_ZIP_FILES = 20_000
@@ -99,11 +100,16 @@ def allowed_folder(text: str, root: str | None) -> Path:
     return path
 
 
-def _probe(path: Path):
+def _ingest(path: Path, store: Store, single: bool):
+    """One incident folder, or (unless `single`) a folder whose sub-folders are incidents."""
+    return [ingest_folder(path, store)] if single else ingest_path(path, store)
+
+
+def _probe(path: Path, single: bool = False):
     with tempfile.TemporaryDirectory() as scratch:
         probe = Store(Path(scratch) / "probe.sqlite")
         try:
-            return ingest_path(path, probe)
+            return _ingest(path, probe, single)
         finally:
             probe.close()
 
@@ -121,9 +127,9 @@ def refuse_known_overwrite(store: Store, path: Path) -> None:
         )
 
 
-def _check_new_material(store: Store, path: Path) -> None:
+def _check_new_material(store: Store, path: Path, single: bool = False) -> None:
     """Dry-run ingestion, so a rejected folder never touches stored incidents."""
-    found = _probe(path)
+    found = _probe(path, single)
     if not sum(len(views) for _, views in found):
         raise IntakeError("no views found in this material")
     existing = {i.incident_id for i in store.incidents()}
@@ -138,8 +144,13 @@ def run_stages(
     on_stage: Callable[[str, int, int], None] | None = None,
     *,
     enrich: bool = True,
+    single_incident: bool = False,
 ) -> dict[str, Any]:
-    """Ingest a folder and run the model-free stages, reporting each one as it starts."""
+    """Ingest a folder and run the model-free stages, reporting each one as it starts.
+
+    `single_incident` reads the folder as one incident even when it holds only sub-folders,
+    as a capture does (`<incident>/bundle/`).
+    """
     path = Path(path)
     if not path.is_dir():
         raise IntakeError(f"folder not found: {path}")
@@ -150,8 +161,8 @@ def run_stages(
 
     with ANALYSIS_LOCK:
         stage("ingest")
-        _check_new_material(store, path)
-        added = ingest_path(path, store)
+        _check_new_material(store, path, single_incident)
+        added = _ingest(path, store, single_incident)
         views = sum(len(found) for _, found in added)
         stage("extract")
         observations = pipeline.run_extract(store)
@@ -179,3 +190,111 @@ def run_stages(
         "campaigns": len(groups.campaigns),
         "families": len(groups.families),
     }
+
+
+# --- URL input (live capture or replay of an archived HAR) --------------------------------
+
+CAPTURE_STAGES = ("capture", *STAGES)
+_URL_SCHEMES = ("http", "https")
+
+
+def capture_dir(url: str | None, replay: Path | None) -> Path:
+    """A new incident folder for one capture, named after the host and the time."""
+    from datetime import UTC, datetime
+    from urllib.parse import urlsplit
+
+    host = urlsplit(url if url and "//" in url else f"//{url or ''}").hostname
+    name = host or (replay.stem if replay else "capture")
+    name = "".join(c if c.isalnum() or c in "-_." else "_" for c in name) or "capture"
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    return get_settings().data_dir / "captures" / f"{name}-{stamp}-{uuid.uuid4().hex[:6]}"
+
+
+def check_url(text: str) -> str:
+    """A web address to open: http(s) only, a bare host gets https://."""
+    from urllib.parse import urlsplit
+
+    url = text.strip()
+    if not url:
+        return ""
+    if any(c.isspace() for c in url):
+        raise IntakeError("a URL cannot contain spaces")
+    if "://" not in url and re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*:(?!\d)", url):
+        raise IntakeError("only http and https addresses can be captured")  # javascript:, data:
+    parts = urlsplit(url if "://" in url else f"https://{url}")
+    if parts.scheme.lower() not in _URL_SCHEMES or not parts.hostname:
+        raise IntakeError("only http and https addresses can be captured")
+    return parts.geturl()
+
+
+def save_upload(data: IO[bytes], name: str, uploads: Path) -> Path:
+    """Store an uploaded file (an archived HAR) under its own folder."""
+    stem = "".join(c if c.isalnum() or c in "-_." else "_" for c in Path(name).name) or "upload"
+    target = uploads / uuid.uuid4().hex / stem
+    target.parent.mkdir(parents=True)
+    with target.open("wb") as sink:
+        shutil.copyfileobj(data, sink)
+    return target
+
+
+def _capture(url: str | None, out_dir: Path, replay_har: Path | None, timeout: float):
+    """Run the browser in its own thread: Playwright's sync API refuses a thread that already
+    runs an event loop, and the caller's thread (Streamlit's) may."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    from .capture import capture_url
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        job = pool.submit(capture_url, url, out_dir, replay_har=replay_har, timeout=timeout)
+        return job.result()
+
+
+def capture_and_run(
+    store: Store,
+    url: str | None,
+    on_stage: Callable[[str, int, int], None] | None = None,
+    *,
+    replay_har: Path | None = None,
+    enrich: bool = True,
+    timeout: float = 30.0,
+) -> dict[str, Any]:
+    """Capture a URL (or replay an archived HAR) into a new incident, then run the stages.
+
+    A capture that reached no page (dead domain, refused, timed out) is still material: its
+    view keeps the failure as `capture.status` and gets DNS and RDAP, as with `ftf capture`.
+    """
+    url = check_url(url or "")
+    if not url and replay_har is None:
+        raise IntakeError("give a URL, or an archived HAR to replay")
+    total = len(CAPTURE_STAGES)
+    if on_stage:
+        on_stage("capture", 0, total)
+    incident_dir = capture_dir(url or None, replay_har)
+    try:
+        result = _capture(url or None, incident_dir / "bundle", replay_har, timeout)
+    except ImportError as exc:
+        raise IntakeError("live capture needs Playwright: uv sync") from exc
+    except ValueError as exc:
+        raise IntakeError(str(exc)) from exc
+    except Exception as exc:  # browser missing or crashed: say so plainly
+        first = (str(exc).strip().splitlines() or [type(exc).__name__])[0][:200]
+        hint = " (run: uv run playwright install chromium)" if "Executable" in first else ""
+        raise IntakeError(f"the browser could not run: {first}{hint}") from exc
+
+    def shifted(name: str, index: int, _total: int) -> None:
+        if on_stage:
+            on_stage(name, index + 1, total)
+
+    out = run_stages(store, incident_dir, shifted, enrich=enrich, single_incident=True)
+    man = result.manifest
+    out["capture"] = {
+        "mode": man.mode,
+        "status": man.status.value,
+        "ok": result.ok,
+        "page_url": man.page_url,
+        "final_url": man.final_url,
+        "error": man.error,
+        "redirects": len(man.redirects),
+        "bundle": str(result.bundle),
+    }
+    return out
