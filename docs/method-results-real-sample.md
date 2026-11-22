@@ -7,7 +7,7 @@ Results with real gateway embeddings belong to HAC-32 and are not in this file.
 
 ## Run record
 
-- Commit: `497fd2e`
+- Commit: `451b892+changes`
 - Date: 2026-11-22
 - Corpus: `testing_sample`: 10 incident folders, 37 views (21 image, 13 page, 3 video), 1316 observations; 3 views carry no fingerprint at all
 - Execution mode: model-off: no gateway call; vector layers use the local hashed-word embedder; no screenshot, video, pattern or expected-element reading
@@ -134,7 +134,7 @@ Rule check (confidence labels the evidence does not carry): none found.
 
 Parity with the all-pairs run: **holds**. Both runs store 666 relations for 37 views. Relation type, confidence label and coverage are equal for every pair, tier scores for every compared pair, and campaigns, families, playbooks and funnel edges are identical. Every skipped pair carries the same reasons as in the all-pairs run plus one line saying it was not compared in full.
 
-Pairs compared in full: 288 of 666. This is **not a saving on this corpus**: within a view kind the index proposes either every pair or none (image-image 210 of 210, page-page 78 of 78, video-video 0 of 3), because the perceptual and vector layers put every view that holds them into one bucket. No pair across view kinds is compared. All 378 skipped pairs are unrelated or insufficient evidence in the all-pairs run.
+Pairs compared in full: 288 of 666. This is **not a saving on this corpus**: within a view kind the index proposes either every pair or none (image-image 210 of 210, page-page 78 of 78, video-video 0 of 3), because the perceptual and vector layers put every view that holds them into one bucket. No pair across view kinds is compared. No skipped pair reaches a tier score of 0.1 in the all-pairs run. All 378 skipped pairs are unrelated or insufficient evidence in the all-pairs run.
 
 | View kinds | Compared in full | All pairs |
 | --- | --- | --- |
