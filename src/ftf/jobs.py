@@ -1,8 +1,8 @@
 """Add material in the background: save what was submitted, capture links, run the stages.
 
-A submission is saved at once, so the Library can list it straight away, then analysed by one
-worker thread per data folder. Analyses never overlap (`ANALYSIS_LOCK`); jobs wait in a queue.
-The worker opens its own store: SQLite connections stay in the thread that made them.
+A submission is saved at once and registered by the intake worker. The persistent scheduler
+reads independent items concurrently and publishes coherent campaign snapshots. SQLite
+connections stay in the thread that made them; live updates use `ANALYSIS_LOCK`.
 """
 
 from __future__ import annotations
@@ -27,7 +27,6 @@ from .intake import (
     check_public,
     check_url,
     private_allowed,
-    run_stages,
 )
 from .intake import _capture as guarded_capture
 from .library import record_cases
@@ -35,6 +34,10 @@ from .llm_checks import new_steps
 from .store import Store
 
 STAGE_NAMES = {
+    "local": "Collecting local clues",
+    "semantic": "Comparing meaning",
+    "match": "Matching known patterns",
+    "previews": "Preparing pictures",
     "image": "Reading images with the model",
     "page": "Reading pages with the model",
     "video": "Reading videos with the model",
@@ -55,7 +58,7 @@ STAGE_NAMES = {
 
 
 def _now() -> str:
-    return datetime.now(UTC).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat()
 
 
 def _safe_name(text: str, fallback: str) -> str:
@@ -160,6 +163,10 @@ class Job:
     results: dict = field(default_factory=dict)
     issues: list[str] = field(default_factory=list)
     steps: list[dict] = field(default_factory=new_steps)
+    core: dict = field(default_factory=dict)
+    view_ids: list[str] = field(default_factory=list)
+    recovered: bool = False
+    checks: list[str] | None = None
 
     @property
     def stage_name(self) -> str:
@@ -191,7 +198,7 @@ def _capture(url: str, out_dir: Path) -> object:
 
 
 class Worker:
-    """One analysis at a time for one data folder; jobs are kept in memory."""
+    """Material intake and progress facade over one data folder's persistent scheduler."""
 
     def __init__(self, db_path: Path, data_dir: Path, capture: Capture = _capture):
         self.db_path, self.data_dir, self.capture = Path(db_path), Path(data_dir), capture
@@ -199,7 +206,8 @@ class Worker:
         self.generation = 0  # bumped whenever stored results change
         self._queue: queue.Queue[str] = queue.Queue()
         self._thread: threading.Thread | None = None
-        self._mutex = threading.Lock()
+        self._mutex = threading.RLock()
+        self._capture_slots = threading.Semaphore(2)
         self.item_checks: dict[str, dict] = {}
         try:
             self.item_checks = json.loads((self.data_dir / "item-checks.json").read_text())
@@ -216,6 +224,9 @@ class Worker:
             pass
         if self.last_llm_run and self.last_llm_run["status"] in ("queued", "running"):
             self.last_llm_run.update(status="failed", error="The server stopped before this run finished.")
+        from .scheduler import Scheduler
+
+        self.scheduler = Scheduler(self)
 
     @property
     def uploads(self) -> Path:
@@ -226,13 +237,13 @@ class Worker:
 
     def submit(self, path: Path, names: list[str], urls: list[str] | None = None) -> Job:
         job = Job(job_id=uuid.uuid4().hex[:12], path=Path(path), names=names, urls=urls or [])
-        with self._mutex:
-            return self._enqueue(job)
+        return self._enqueue(job)
 
     def submit_llm(self, skipped: list[str] | None = None) -> Job:
         from .llm_checks import require_model_keys
 
-        require_model_keys()
+        if {"image", "page", "expectations", "techniques", "patterns", "semantic"} - set(skipped or []):
+            require_model_keys()
         with self._mutex:
             if any(j.kind == "llm" for j in self.active()):
                 raise IntakeError("LLM checks are already queued or running.")
@@ -246,7 +257,59 @@ class Worker:
             for step in job.steps:
                 if step["id"] in (skipped or []):
                     step.update(skipRequested=True, status="skipped")
-            return self._enqueue(job)
+        return self.scheduler.schedule(job)
+
+    def submit_video(self, view_id: str) -> Job:
+        from .config import get_settings
+        from .contracts import ViewKind
+
+        with self.scheduler.lock:
+            reader = Store(self.db_path)
+            try:
+                view = reader.get_view(view_id)
+                if view.kind is not ViewKind.VIDEO or view.meta.get("shipped"):
+                    raise IntakeError("This item has no source video to analyze.")
+            finally:
+                reader.close()
+            existing = next((j for j in self.active() if j.kind == "video" and j.view_ids == [view_id]), None)
+            if existing:
+                return existing
+            if not get_settings().gemini_api_key:
+                raise IntakeError("Set GEMINI_API_KEY to analyze videos.")
+            job = Job(uuid.uuid4().hex[:12], self.data_dir, ["Video analysis"],
+                      kind="video", view_ids=[view_id])
+            return self.scheduler.schedule(job, [view_id])
+
+    def submit_item_checks(self, view_id: str, checks: list[str] | None = None) -> Job:
+        from .config import get_settings
+        from .processing import applicable_checks
+
+        with self.scheduler.lock:
+            reader = Store(self.db_path)
+            try:
+                view = reader.get_view(view_id)
+                if view.meta.get("shipped"):
+                    raise IntakeError("This item has no source material to check.")
+                allowed = {s["id"] for s in applicable_checks(view)}
+            finally:
+                reader.close()
+            selected = set(allowed if checks is None else checks)
+            if not selected or selected - allowed:
+                raise IntakeError("Choose applicable checks for this item.")
+            existing = next((j for j in self.active() if j.kind == "item" and j.view_ids == [view_id]
+                             and set(j.checks or []) == selected), None)
+            if existing:
+                return existing
+            settings = get_settings()
+            if selected - {"warnings"} and view.kind.value != "video" and not settings.openai_api_key:
+                raise IntakeError("Set OPENAI_API_KEY to run these item checks.")
+            if ("patterns" in selected or view.kind.value == "video" and selected - {"warnings"}) and not settings.gemini_api_key:
+                raise IntakeError("Set GEMINI_API_KEY to run these item checks.")
+            if selected & {"techniques", "patterns"} and not settings.openai_api_key:
+                raise IntakeError("Set OPENAI_API_KEY to run these item checks.")
+            job = Job(uuid.uuid4().hex[:12], self.data_dir, ["Item checks"], kind="item",
+                      view_ids=[view_id], checks=sorted(selected))
+            return self.scheduler.schedule(job, [view_id])
 
     def skip_llm_step(self, job_id: str, step_id: str) -> None:
         with self._mutex:
@@ -295,26 +358,31 @@ class Worker:
             finally:
                 reader.close()
             self._save_llm(job)
-        self._queue.put(job.job_id)
-        if self._thread is None or not self._thread.is_alive():
-            self._thread = threading.Thread(target=self._loop, daemon=True, name="ftf-jobs")
-            self._thread.start()
+        self.scheduler.persist_job(job)
+        with self._mutex:
+            self._queue.put(job.job_id)
+            if self._thread is None or not self._thread.is_alive():
+                self._thread = threading.Thread(target=self._loop, daemon=True, name="ftf-jobs")
+                self._thread.start()
         return job
 
     def _save_llm(self, job: Job) -> None:
         from .llm_checks import result_issues
 
         job.issues = result_issues(job.results)
-        self.last_llm_run = {
+        payload = {
             "id": job.job_id, "status": job.status, "stage": job.stage_name,
             "error": job.error, "results": job.results.copy(), "issues": job.issues,
             "createdAt": job.created_at, "finishedAt": job.finished_at,
             "steps": [s.copy() for s in job.steps],
+            "core": job.core.copy(),
         }
-        path = self.data_dir / "llm-run.json"
-        temp = path.with_suffix(".tmp")
-        temp.write_text(json.dumps(self.last_llm_run, indent=2))
-        temp.replace(path)
+        if job.kind not in ("video", "item") and (not self.last_llm_run or job.created_at >= self.last_llm_run["createdAt"]):
+            self.last_llm_run = payload
+            path = self.data_dir / "llm-run.json"
+            temp = path.with_suffix(".tmp")
+            temp.write_text(json.dumps(self.last_llm_run, indent=2))
+            temp.replace(path)
         path = self.data_dir / "item-checks.json"
         temp = path.with_suffix(".tmp")
         temp.write_text(json.dumps(self.item_checks, indent=2))
@@ -330,7 +398,17 @@ class Worker:
 
     def _loop(self) -> None:
         while True:  # the thread lives as long as the app, so no submit can miss it
-            self.run(self.jobs[self._queue.get()])
+            job = self.jobs[self._queue.get()]
+            if job.urls:
+                # Acquisition must not hold up an already uploaded file submission.
+                threading.Thread(target=self._capture_job, args=(job,), daemon=True,
+                                 name="ftf-acquisition").start()
+            else:
+                self.run(job)
+
+    def _capture_job(self, job: Job) -> None:
+        with self._capture_slots:
+            self.run(job)
 
     def run(self, job: Job) -> Job:
         """Run one job in the calling thread (the worker thread, or a test)."""
@@ -380,21 +458,31 @@ class Worker:
                 )
                 job.status = "done"
                 return job
-            before = {i.incident_id for i in store.incidents()}
             if job.urls:
                 job.stage = "capture"
                 case = self._link_target(job)
                 for url in job.urls:
+                    if job.recovered and any(
+                        self._captured_url(manifest) == url for manifest in job.path.rglob("manifest.json")
+                    ):
+                        continue
                     self._capture(url, case / f"capture-{_host(url)}-{uuid.uuid4().hex[:6]}")
 
-            def on_stage(name: str, index: int, total: int) -> None:
-                job.stage = name
-                if index == 1:  # ingestion has finished: the Library can list the items
-                    job.incidents = sorted({i.incident_id for i in store.incidents()} - before)
-                    record_cases(self.data_dir, job.incidents)
+            # Register sources immediately. The persistent coordinator extracts each item,
+            # starts model reads as dependencies become ready, and publishes core results.
+            from .intake import ingest_new_material
 
-            run_stages(store, job.path, on_stage)
-            job.incidents = sorted({i.incident_id for i in store.incidents()} - before)
+            core_created_at = _now() if job.urls else job.created_at
+            job.stage = "ingest"
+            added = ingest_new_material(store, job.path, recovering=job.recovered)
+            ids = [v.view_id for _, found in added for v in found]
+            automatic = Job(uuid.uuid4().hex[:12], self.data_dir, ["Automatic analysis"],
+                            kind="llm", created_at=core_created_at,
+                            view_ids=ids)
+            existing = next((j for j in self.jobs.values() if j.kind == "llm" and j.view_ids == ids), None)
+            if not (job.recovered and existing):
+                self.scheduler.schedule(automatic, ids)
+            job.incidents = sorted(incident.incident_id for incident, _ in added)
             record_cases(self.data_dir, [i for i in job.incidents])
             job.status = "done"
         except IntakeError as exc:
@@ -405,6 +493,8 @@ class Worker:
             store.close()
             job.finished_at = _now()
             self.generation += 1
+            if job.kind == "material":
+                self.scheduler.persist_job(job)
             if job.kind == "llm":
                 for checks in self.item_checks.values():
                     for check in checks.values():
@@ -417,6 +507,13 @@ class Worker:
                         step.update(status="failed", current=None)
                 self._save_llm(job)
         return job
+
+    @staticmethod
+    def _captured_url(manifest: Path) -> str | None:
+        try:
+            return json.loads(manifest.read_text()).get("page_url")
+        except (OSError, ValueError):
+            return None
 
     @staticmethod
     def _link_target(job: Job) -> Path:
@@ -448,4 +545,10 @@ def worker_for(db_path: Path, data_dir: Path) -> Worker:
         key = str(Path(db_path).resolve())
         if key not in _WORKERS:
             _WORKERS[key] = Worker(db_path, data_dir)
+            for job in list(_WORKERS[key].jobs.values()):
+                if job.kind == "material" and job.status in ("queued", "running"):
+                    job.status, job.recovered = "queued", True
+                    _WORKERS[key]._enqueue(job)
+            if any(j.status in ("queued", "running") for j in _WORKERS[key].jobs.values()):
+                _WORKERS[key].scheduler.start()
         return _WORKERS[key]

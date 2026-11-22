@@ -14,6 +14,7 @@ STATE_LABELS = {
     "not_run": "Not checked", "queued": "Waiting", "running": "Processing",
     "complete": "Complete", "partial": "Partly checked", "unavailable": "Unavailable",
     "retained": "Earlier result kept", "skipped": "Skipped", "failed": "Failed",
+    "deferred": "Continuing in background", "on_demand": "Analyze on item page",
 }
 REASONS = {
     "no_key": "The provider key is missing.", "error": "The check could not finish.",
@@ -22,6 +23,7 @@ REASONS = {
     "no_text": "No readable text is available.", "no_content": "No readable content is available.",
     "no_kind": "The page type has not been identified.", "unsupported": "This source format is unsupported.",
     "no_patterns": "No active patterns are available to match.", "not_judged": "The model did not judge this pattern.",
+    "rate_limit": "The provider rate limit was reached.",
     "quote_not_in_text": "The quoted evidence could not be verified in the source.",
 }
 
@@ -40,7 +42,7 @@ def check_result(check: str, observations: list, summary: dict | None = None) ->
     observable = sum(o.state != State.NOT_OBSERVABLE for o in rows)
     unavailable = len(rows) - observable
     # A successful read with zero findings is still a completed check.
-    if summary and summary.get("kept"):
+    if summary and (summary.get("kept") or (summary.get("reason") and observable)):
         state, message = "retained", "The latest attempt did not finish; earlier results were kept."
     elif unavailable:
         state = "partial" if observable else "unavailable"
@@ -50,7 +52,7 @@ def check_result(check: str, observations: list, summary: dict | None = None) ->
     elif observable or (summary and not summary.get("not_observable") and not summary.get("reason")):
         state, message = "complete", "Check completed."
     elif summary and (summary.get("not_observable") or summary.get("reason")):
-        state, message = "unavailable", "This check could not be completed for this item."
+        state, message = "unavailable", REASONS.get(summary.get("reason"), "This check could not be completed for this item.")
     else:
         state, message = "not_run", "This check has not been recorded."
     return {"state": state, "message": message, "hasResult": bool(observable or state == "complete"),
@@ -71,6 +73,8 @@ def item_processing(view: View, observations: list, tracked: dict | None = None)
                 and attempt["outputSignature"] != stored["outputSignature"]):
             attempt = {}  # output changed through another workflow, such as the CLI
         state = attempt.get("state", stored["state"])
+        if view.kind is ViewKind.VIDEO and key in ("video", "techniques", "patterns") and state == "not_run":
+            state = "on_demand"
         has_result = stored["hasResult"] or attempt.get("hasResult", False)
         message = attempt.get("message", stored["message"])
         if view.meta.get("shipped") and state == "not_run":
@@ -79,6 +83,8 @@ def item_processing(view: View, observations: list, tracked: dict | None = None)
             message = "Skipped in the latest run. Earlier stored results remain available."
         elif state in ("queued", "running") and has_result:
             message += " Earlier results remain available while this check runs."
+        if state == "on_demand":
+            message = "Full video analysis runs when you choose Analyze video on this item's page."
         checks.append({"id": key, "label": spec["label"], "state": state,
                        "status": STATE_LABELS[state], "message": message, "hasResult": has_result,
                        "updatedAt": attempt.get("updatedAt"), "runId": attempt.get("runId"),
@@ -97,10 +103,14 @@ def item_processing(view: View, observations: list, tracked: dict | None = None)
         state = "not_run"
     elif all(s == "skipped" for s in states):
         state = "skipped"
+    elif "deferred" in states:
+        state = "deferred"
+    elif "on_demand" in states:
+        state = "on_demand"
     elif all(s in ("unavailable", "not_run") for s in states) and "unavailable" in states:
         state = "unavailable"
     else:
         state = "partial"
     current = next((c["label"] for c in checks if c["state"] == "running"), None)
-    return {"state": state, "status": STATE_LABELS[state], "complete": checked, "total": len(checks),
+    return {"state": state, "status": STATE_LABELS[state], "canRun": not view.meta.get("shipped", False), "complete": checked, "total": len(checks),
             "current": current, "checks": checks}

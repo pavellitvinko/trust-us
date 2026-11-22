@@ -1,0 +1,83 @@
+{
+  "workload": {
+    "items": 41,
+    "pages": 16,
+    "images": 22,
+    "videos": 3
+  },
+  "scope": "Core processing of pre-registered sources in temporary SQLite copies. Model caches start empty for each cold run. Full video analysis and additional checks are excluded. Upload transfer, URL acquisition and initial source registration are outside these measurements.",
+  "reader_model": "gpt-6-luna",
+  "max_read_concurrency": 8,
+  "target_seconds": 300,
+  "read_budget_seconds": 45,
+  "cold_runs": [
+    {
+      "run": "cold-1",
+      "started_at": "2026-11-22T06:16:54.620810+00:00",
+      "core_seconds": 160.966,
+      "first_publication_seconds": 1.19,
+      "completed_items": 41,
+      "target_met": true,
+      "new_provider_calls": 36,
+      "cache_hits": 2,
+      "reused_tasks": 0,
+      "successful_page_image_reads": 38
+    },
+    {
+      "run": "cold-2",
+      "started_at": "2026-11-22T06:19:45.707711+00:00",
+      "core_seconds": 106.262,
+      "first_publication_seconds": 1.261,
+      "completed_items": 41,
+      "target_met": true,
+      "new_provider_calls": 35,
+      "cache_hits": 2,
+      "reused_tasks": 0,
+      "successful_page_image_reads": 38
+    },
+    {
+      "run": "cold-3",
+      "started_at": "2026-11-22T06:21:31.993698+00:00",
+      "core_seconds": 103.087,
+      "first_publication_seconds": 1.029,
+      "completed_items": 41,
+      "target_met": true,
+      "new_provider_calls": 35,
+      "cache_hits": 2,
+      "reused_tasks": 0,
+      "successful_page_image_reads": 38
+    }
+  ],
+  "warm_run": {
+    "run": "warm",
+    "started_at": "2026-11-22T06:19:41.498934+00:00",
+    "core_seconds": 1.68,
+    "first_publication_seconds": null,
+    "completed_items": 41,
+    "target_met": true,
+    "new_provider_calls": 0,
+    "cache_hits": 15,
+    "reused_tasks": 64,
+    "successful_page_image_reads": 38
+  },
+  "single_duplicate_addition": {
+    "run": "single-item",
+    "started_at": "2026-11-22T06:19:43.187119+00:00",
+    "core_seconds": 2.478,
+    "first_publication_seconds": 1.45,
+    "completed_items": 1,
+    "target_met": true,
+    "new_provider_calls": 0,
+    "cache_hits": 1,
+    "reused_tasks": 0,
+    "successful_page_image_reads": 1
+  },
+  "sequential_replay": {
+    "observationsEqual": true,
+    "relationsEqual": true,
+    "cacheOnly": true,
+    "pairs": 820
+  },
+  "source_library_modified": false,
+  "reproduce": "uv run python scripts/benchmark_processing.py --live --cold-runs 3 --output /tmp/processing-live.json"
+}

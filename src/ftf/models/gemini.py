@@ -23,6 +23,7 @@ from .gateway import (
     TransientModelError,
     guarded_call,
     is_timeout,
+    remaining_time,
     schema_parser,
     success_envelope,
 )
@@ -75,7 +76,8 @@ def _make_client(settings: Settings, timeout_ms: int, attempts: int) -> Any:
     return genai.Client(
         api_key=settings.gemini_api_key,
         http_options=types.HttpOptions(
-            timeout=timeout_ms, retry_options=types.HttpRetryOptions(attempts=attempts)
+            timeout=min(timeout_ms, int(remaining_time(timeout_ms / 1000) * 1000)),
+            retry_options=types.HttpRetryOptions(attempts=attempts)
         ),
     )
 
@@ -161,6 +163,10 @@ def _embed_one(
 
     vectors = []
     for piece in pieces:
+        try:
+            remaining_time(EMBED_TIMEOUT_MS / 1000)
+        except TransientModelError as exc:
+            return ModelResult.not_observable(exc.reason, calls_made=len(vectors))
         result = _embed_chunk(_with_prefix(task, piece), settings, client)
         if result.value is None:
             return ModelResult.not_observable(result.reason or "error", calls_made=len(vectors))
@@ -188,11 +194,12 @@ def embed(
 def _wait_until_active(client: Any, uploaded: Any) -> Any:
     deadline = time.monotonic() + VIDEO_TIMEOUT_SECONDS
     while not uploaded.state or uploaded.state.name != "ACTIVE":
+        remaining_time(VIDEO_TIMEOUT_SECONDS)
         if uploaded.state and uploaded.state.name == "FAILED":
             raise TransientModelError("error")
         if time.monotonic() >= deadline:
             raise TransientModelError("timeout")
-        time.sleep(FILE_POLL_SECONDS)
+        time.sleep(min(FILE_POLL_SECONDS, remaining_time(VIDEO_TIMEOUT_SECONDS)))
         # A status check is free, so unlike generation it can be retried with a short timeout.
         uploaded = client.files.get(
             name=uploaded.name,
@@ -312,7 +319,7 @@ def read_video[S: BaseModel](
                     "mime_type": "application/json",
                     "schema": json_schema,
                 },
-                timeout=VIDEO_TIMEOUT_SECONDS,
+                timeout=remaining_time(VIDEO_TIMEOUT_SECONDS),
             )
         except Exception as exc:
             raise _transient(exc) from exc

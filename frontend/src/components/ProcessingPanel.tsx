@@ -17,7 +17,9 @@ export default function ProcessingPanel({ data, refresh }: { data: LibraryData; 
   const run = data.llmRun;
   const active = run?.status === "running" || run?.status === "queued";
   const setup = !run || (configuring && !active);
-  const steps = setup ? data.checkSteps : run.steps ?? [];
+  const steps = (setup ? data.checkSteps : run.steps ?? []).filter((s) => s.phase !== "on_demand")
+    .sort((a, b) => (a.phase === "core" ? 0 : 1) - (b.phase === "core" ? 0 : 1)
+      || (a.id === "local" ? -1 : b.id === "local" ? 1 : 0));
   const settled = steps.filter((step) => ["done", "skipped", "failed"].includes(step.status)).length;
   const working = steps.find((step) => step.status === "running");
   const fraction = working?.total ? working.done / working.total : 0;
@@ -53,13 +55,19 @@ export default function ProcessingPanel({ data, refresh }: { data: LibraryData; 
       {!setup && <span className="processing-elapsed">{duration(run.createdAt, run.finishedAt, now)}</span>}
     </>}>
     <div className="checks-menu-head"><strong>{setup ? "Choose checks" : "Processing steps"}</strong><span>{setup ? `${steps.filter((s) => !skipped.includes(s.id)).length} selected` : `${settled}/${steps.length} resolved`}</span></div>
+    {!setup && run.core && <div className="checks-menu-note" role="status">
+      <strong>Core analysis · {run.core.done}/{run.core.total} items</strong><br />
+      {run.core.status === "complete" ? `Ready in ${Math.round(run.core.elapsedSeconds ?? 0)}s`
+        : run.core.finishedAt ? "Core pass finished with coverage gaps; the five-minute target was not met."
+        : `Target: five minutes · ${duration(run.core.startedAt, null, now)} elapsed`}
+    </div>}
     <ul className="checks-menu-list">
-      {steps.map((step) => {
+      {steps.map((step, index) => {
         const status = setup ? skipped.includes(step.id) ? "skipped" : "pending" : step.status;
         const canSkip = active && step.skippable && !step.skipRequested &&
           (status === "pending" || (status === "running" && step.itemwise));
         const outcome = run?.results[step.id] as Record<string, number> | undefined;
-        const incomplete = outcome?.not_observable || outcome?.kept || outcome?.reason;
+        const incomplete = outcome?.not_observable || outcome?.kept || outcome?.reason || outcome?.unavailable || outcome?.deferred;
         const ringState: CheckState = status === "done" ? incomplete ? "partial" : "complete"
           : status === "pending" ? "queued" : status;
         const value = status === "done" ? 1 : status === "running" ? step.total ? step.done / step.total : undefined : 0;
@@ -69,10 +77,10 @@ export default function ProcessingPanel({ data, refresh }: { data: LibraryData; 
           : status === "pending" ? run?.status === "failed" ? "Not run" : "Waiting"
           : status === "running" ? step.total !== null ? `${step.done}/${step.total} processed` : "In progress"
           : status === "skipped" ? "Skipped" : "Failed";
-        return <li key={step.id}>
+        return <li key={step.id} className={index === 0 || steps[index - 1].phase !== step.phase ? "processing-phase-start" : undefined}>
           <ProgressRing value={value} state={ringState} label={`${step.label}: ${label}`} size={25}
             text={status === "pending" ? "" : undefined} />
-          <div className="checks-menu-copy"><strong>{step.label}</strong><span className={`check-${ringState}`}>{label}</span></div>
+          <div className="checks-menu-copy">{(index === 0 || steps[index - 1].phase !== step.phase) && <small>{step.phase === "core" ? "Core analysis" : "Additional checks"}</small>}<strong>{step.label}</strong><span className={`check-${ringState}`}>{label}</span></div>
           {setup && step.skippable ? <input type="checkbox" checked={!skipped.includes(step.id)} aria-label={`Include ${step.label}`}
             onChange={(e) => setSkipped((s) => e.target.checked ? s.filter((id) => id !== step.id) : [...s, step.id])} />
             : canSkip ? <button className="text-link small" disabled={!!pending} onClick={() => skip(step)}>{pending === step.id ? "Skipping…" : "Skip"}</button>
@@ -87,7 +95,7 @@ export default function ProcessingPanel({ data, refresh }: { data: LibraryData; 
     </div>
     {(error || (!setup && run.error)) && <p className="error checks-menu-note" role="alert">{error || run?.error}</p>}
     {!setup && run.issues.length > 0 && <details className="checks-menu-notes"><summary>{run.issues.length} coverage notes</summary><ul>{run.issues.map((issue) => <li key={issue}>{issue}</li>)}</ul></details>}
-    <p className="checks-menu-note">{setup ? "Uses OpenAI and Gemini with source material; API charges may apply. Cached answers are reused."
-      : "Progress measures resolved steps, not time remaining. Reading steps stop after the current item; batch steps can be skipped before starting."}</p>
+    <p className="checks-menu-note">{setup ? "New material starts automatically. OpenAI reads pages/images; Gemini supplies embeddings. API charges may apply. Videos are analyzed from their item page."
+      : "Core results appear as items finish. Additional checks continue in the background. Skipped, deferred and unavailable checks remain incomplete."}</p>
   </ChecksDropdown>;
 }

@@ -90,7 +90,7 @@ def inspection(tmp_path, monkeypatch):
     store.close()
     monkeypatch.setenv("FTF_DATA_DIR", str(data))
     monkeypatch.setenv("FTF_WEB_DIST", str(tmp_path / "no-dist"))
-    monkeypatch.setattr("ftf.web.app.render_missing", lambda *a: 0)
+    monkeypatch.setattr("ftf.previews.render_missing", lambda *a: 0)
     from ftf.web.app import create_app
 
     with TestClient(create_app()) as client:

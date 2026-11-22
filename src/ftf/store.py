@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections.abc import Iterable
+from contextlib import contextmanager
 from pathlib import Path
 
 from .contracts import Artifact, Evidence, Fingerprint, Incident, Observation, Relation, View
@@ -63,12 +64,36 @@ class Store:
         if str(path) != ":memory:":
             Path(path).parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(str(path))
+        self._batch_depth = 0
         self.db.executescript(_SCHEMA)
         # SQLite's lower() folds ASCII only; offer names are Polish.
         self.db.create_function("casefold", 1, _casefold, deterministic=True)
 
     def close(self) -> None:
         self.db.close()
+
+    @contextmanager
+    def batch(self):
+        """Commit a coherent publication once, instead of fsyncing each pair row."""
+        self._batch_depth += 1
+        try:
+            yield
+        except BaseException:
+            self.db.rollback()
+            raise
+        else:
+            if self._batch_depth == 1:
+                self.db.commit()
+        finally:
+            self._batch_depth -= 1
+
+    @contextmanager
+    def transaction(self):
+        if self._batch_depth:
+            yield
+        else:
+            with self.db:
+                yield
 
     # -- incidents, artifacts, views -------------------------------------------------
 
@@ -77,7 +102,7 @@ class Store:
     ) -> None:
         """Replace an incident and everything derived from it."""
         iid = incident.incident_id
-        with self.db:
+        with self.transaction():
             old = [
                 r[0]
                 for r in self.db.execute("SELECT view_id FROM views WHERE incident_id=?", (iid,))
@@ -140,7 +165,7 @@ class Store:
         self, view_id: str, extractor: str, observations: Iterable[Observation]
     ) -> None:
         """Replace one extractor's output for one view."""
-        with self.db:
+        with self.transaction():
             self.db.execute(
                 "DELETE FROM observations WHERE view_id=? AND extractor=?", (view_id, extractor)
             )
@@ -187,7 +212,7 @@ class Store:
     # -- fingerprints, evidence, relations -------------------------------------------
 
     def put_fingerprint(self, fp: Fingerprint) -> None:
-        with self.db:
+        with self.transaction():
             self.db.execute(
                 "INSERT OR REPLACE INTO fingerprints VALUES (?,?,?)",
                 (fp.view_id, fp.layer_id, fp.model_dump_json()),
@@ -207,7 +232,7 @@ class Store:
     def put_evidence(self, ev: Evidence) -> None:
         a, b = ordered(ev.view_a, ev.view_b)
         ev = ev.model_copy(update={"view_a": a, "view_b": b})
-        with self.db:
+        with self.transaction():
             self.db.execute(
                 "INSERT OR REPLACE INTO evidence VALUES (?,?,?,?,?)",
                 (a, b, ev.layer_id, ev.score, ev.model_dump_json()),
@@ -228,7 +253,7 @@ class Store:
     def put_relation(self, rel: Relation) -> None:
         a, b = ordered(rel.view_a, rel.view_b)
         rel = rel.model_copy(update={"view_a": a, "view_b": b})
-        with self.db:
+        with self.transaction():
             self.db.execute(
                 "INSERT OR REPLACE INTO relations VALUES (?,?,?,?)",
                 (a, b, rel.type.value, rel.model_dump_json()),

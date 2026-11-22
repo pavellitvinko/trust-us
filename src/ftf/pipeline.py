@@ -6,12 +6,12 @@ import logging
 from collections import Counter
 from itertools import combinations
 
-from .contracts import Evidence
+from .contracts import Evidence, FingerprintKind, ViewKind
 from .registry import Context, comparators, enrichers, extractors, layers, load_plugins
 from .store import Store
 
 
-def run_extract(store: Store, view_ids: list[str] | None = None) -> int:
+def run_extract(store: Store, view_ids: list[str] | None = None, *, fast: bool = False) -> int:
     load_plugins()
     ctx = Context(store)
     count = 0
@@ -20,7 +20,15 @@ def run_extract(store: Store, view_ids: list[str] | None = None) -> int:
             continue
         if view.meta.get("shipped"):  # processed results only: there is no material to re-read
             continue
+        if fast and view.kind is ViewKind.VIDEO:
+            from .extract.video_file import NAME, read_file
+
+            rows = read_file(view, ctx)
+            store.put_observations(view.view_id, NAME, rows)
+            count += len(rows)
         for extractor in extractors.all():
+            if fast and extractor.name == "video.media":
+                continue  # full frame scans are an explicit video-page action
             observations = extractor.run(view, ctx)
             store.put_observations(view.view_id, extractor.name, observations)
             count += len(observations)
@@ -54,7 +62,7 @@ def run_enrich(store: Store, view_ids: list[str] | None = None) -> Counter:
     return counts
 
 
-def run_fingerprint(store: Store, view_ids: list[str] | None = None) -> int:
+def run_fingerprint(store: Store, view_ids: list[str] | None = None, *, local_only: bool = False) -> int:
     load_plugins()
     all_views = store.views()
     has_shipped = any(v.meta.get("shipped") for v in all_views)
@@ -66,11 +74,16 @@ def run_fingerprint(store: Store, view_ids: list[str] | None = None) -> int:
             continue
         observations = store.observations(view.view_id)
         for layer in layers.all():
+            if local_only and layer.kind is FingerprintKind.VECTOR:
+                continue  # semantic layers are prepared in the background
             # A shipped view has no page text, so only layers fed by enrichment are rebuilt.
             if view.meta.get("shipped") and not _uses_enrichment(layer):
                 continue
             fingerprint = layer.build(view, observations)
             if fingerprint is None:
+                with store.db:
+                    store.db.execute("DELETE FROM fingerprints WHERE view_id=? AND layer_id=?",
+                                     (view.view_id, layer.name))
                 continue
             if has_shipped:
                 from .corpus_report import clean_payload

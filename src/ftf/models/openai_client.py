@@ -6,6 +6,7 @@ Streams the answer, so the timeout limits silence rather than the length of a lo
 from __future__ import annotations
 
 import json
+import threading
 import time
 from typing import Any
 
@@ -17,7 +18,9 @@ from .gateway import (
     TransientModelError,
     guarded_call,
     is_timeout,
+    record_metric,
     refusal_envelope,
+    remaining_time,
     schema_parser,
     success_envelope,
 )
@@ -35,7 +38,7 @@ def _make_client(settings: Settings) -> Any:
 
     # Retries are handled in `_send`: the SDK would also repeat a timed-out generation.
     return openai.OpenAI(
-        api_key=settings.openai_api_key, timeout=SILENCE_TIMEOUT_SECONDS, max_retries=0
+        api_key=settings.openai_api_key, timeout=remaining_time(SILENCE_TIMEOUT_SECONDS), max_retries=0
     )
 
 
@@ -50,18 +53,44 @@ def _send(client: Any, **request: Any) -> Any:
         httpx2.TransportError,
     )
     for attempt in range(MAX_RETRIES + 1):
+        remaining = remaining_time(SILENCE_TIMEOUT_SECONDS)
+        record_metric("httpAttempts")
         try:
             with client.responses.stream(**request) as stream:
-                return stream.get_final_response()
+                # Closing the stream also bounds a response that keeps sending events.
+                timer = threading.Timer(remaining, stream.close) if hasattr(stream, "close") else None
+                if timer:
+                    timer.daemon = True
+                    timer.start()
+                try:
+                    response = stream.get_final_response()
+                    remaining_time(SILENCE_TIMEOUT_SECONDS)
+                    return response
+                finally:
+                    if timer:
+                        timer.cancel()
         except ValidationError as exc:  # the SDK validates the text as it arrives
             raise TransientModelError("schema") from exc
         except (openai.APIError, httpx2.HTTPError) as exc:
+            remaining_time(SILENCE_TIMEOUT_SECONDS)
             if is_timeout(exc):
                 raise TransientModelError("timeout") from exc
+            if isinstance(exc, openai.RateLimitError):
+                record_metric("rateLimits")
+                try:
+                    record_metric("retryAfterSeconds", float(exc.response.headers.get("retry-after", "2")))
+                except (AttributeError, TypeError, ValueError):
+                    record_metric("retryAfterSeconds", 2)
+                raise TransientModelError("rate_limit") from exc
             if not isinstance(exc, retryable) or attempt == MAX_RETRIES:
                 raise TransientModelError("error") from exc
-            time.sleep(2**attempt)
+            delay = 2**attempt
+            if remaining_time(SILENCE_TIMEOUT_SECONDS) <= delay:
+                raise TransientModelError("timeout") from exc
+            record_metric("retries")
+            time.sleep(delay)
         except (AssertionError, RuntimeError, ValueError) as exc:  # failed or truncated stream
+            remaining_time(SILENCE_TIMEOUT_SECONDS)
             raise TransientModelError("error") from exc
     raise TransientModelError("error")
 
@@ -144,7 +173,12 @@ def read_structured[S: BaseModel](
         }
         if effort is not None:
             request["reasoning"] = {"effort": effort}
-        response = _send(client or _make_client(settings), **request)
+        active = client or _make_client(settings)
+        try:
+            response = _send(active, **request)
+        finally:
+            if client is None:
+                active.close()
         parts = _final_parts(response)
         if any(part.type == "refusal" for part in parts):
             return refusal_envelope()
