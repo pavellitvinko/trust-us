@@ -54,16 +54,6 @@ def _commit() -> str:
         return "unknown"
 
 
-def _walk(value: Any, clean) -> Any:
-    if isinstance(value, str):
-        return clean(value)
-    if isinstance(value, list):
-        return [_walk(item, clean) for item in value]
-    if isinstance(value, dict):
-        return {key: _walk(item, clean) for key, item in value.items()}
-    return value
-
-
 def _strings(value: Any):
     if isinstance(value, str):
         yield value

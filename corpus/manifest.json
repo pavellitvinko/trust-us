@@ -1,13 +1,13 @@
 {
- "schema": 1,
- "commit": "68aec39c8f7bd92dbeed5946cd761aff5f6ab087",
+ "schema": 2,
+ "commit": "c4feca703b929bb3b03239b4bafcdfe5672045af",
  "input_sha256": "768cbefffdfbfb3bfcc6470d5b97317ef77ea8407bdc422e2903b8235c834117",
  "execution_mode": "deterministic; no model or network calls",
  "counts": {
   "evidence": 268,
   "fingerprint": 198,
   "incident": 10,
-  "observation": 1290,
+  "observation": 1268,
   "relation": 666,
   "view": 37
  },
