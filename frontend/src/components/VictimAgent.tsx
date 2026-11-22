@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { victim, type VictimData, type VictimRun, type VictimStep } from "../api";
 
-const RUNNING = new Set(["starting", "running", "paused", "waiting_for_person"]);
+const RUNNING = new Set(["starting", "running", "paused", "waiting_for_person", "saving"]);
 const PAGE_KIND: Record<string, string> = {
   advertorial: "Article",
   chat: "Chat",
@@ -22,9 +22,9 @@ const HOW: Record<string, string> = {
 };
 
 /** The agent's runs, and the one on show. */
-export function useVictim() {
+export function useVictim(initial: string | null = null) {
   const [data, setData] = useState<VictimData | null>(null);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(initial);
   const [run, setRun] = useState<VictimRun | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
@@ -44,12 +44,12 @@ export function useVictim() {
         .then((r) => live && setRun(r))
         .catch((e) => live && setError((e as Error).message));
     load();
-    const timer = running ? setInterval(load, 1500) : undefined;
+    const timer = running ? setInterval(() => (load(), refresh()), 1500) : undefined;
     return () => {
       live = false;
       if (timer) clearInterval(timer);
     };
-  }, [selected, running]);
+  }, [selected, running, refresh]);
   useEffect(() => {
     if (run && !running) refresh(); // a run that just ended appears in the list as finished
   }, [run?.status]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -72,41 +72,19 @@ export function useVictim() {
 
 type Agent = ReturnType<typeof useVictim>;
 
-/** Shown once a link is entered, next to the probe agent. */
-export function VictimLinkPanel({ agent, targets }: { agent: Agent; targets: string[] }) {
-  const [chosen, setChosen] = useState("");
+/** Start another run: a link, a persona and the approval. */
+export function FollowerStart({ agent, initialUrl = "" }: { agent: Agent; initialUrl?: string }) {
+  const [url, setUrl] = useState(initialUrl);
   const [persona, setPersona] = useState("");
   const [approved, setApproved] = useState(false);
   const [quick, setQuick] = useState(true);
-  if (!targets.length || !agent.data) return null;
-  const target = targets.includes(chosen) ? chosen : targets[0];
+  if (!agent.data) return null;
   const busy = agent.starting || agent.running;
   return (
-    <div className="card probe-panel victim-panel">
-      <div className="probe-demo">
-        <div>
-          <b>Victim visitor</b>
-          <div className="small">
-            Goes through the site as one made-up person would: reads, answers the chat, and fills in the lead form with
-            fake details. It never pays, uploads or installs anything. A browser window opens on this computer and the
-            run is recorded as a video.
-          </div>
-        </div>
-        <button
-          className="btn"
-          disabled={busy || !agent.data.canStart || !approved}
-          onClick={() => agent.start({ url: target, persona, approved, quick })}
-        >
-          {agent.starting ? "Starting…" : agent.running ? "Running…" : "Run victim visitor"}
-        </button>
-      </div>
+    <details className="card follower-start">
+      <summary><b>Start another run</b> <span className="small">— another link or another persona</span></summary>
       <div className="victim-options">
-        {targets.length > 1 && (
-          <select className="input" aria-label="Link for the victim visitor" value={target}
-            onChange={(e) => setChosen(e.target.value)}>
-            {targets.map((t) => <option key={t} value={t}>{t}</option>)}
-          </select>
-        )}
+        <input className="input" aria-label="Link" placeholder="https://…" value={url} onChange={(e) => setUrl(e.target.value)} />
         <select className="input" aria-label="Persona" value={persona} onChange={(e) => setPersona(e.target.value)}>
           <option value="">Persona: suggested from the link</option>
           {agent.data.personas.map((p) => (
@@ -117,7 +95,7 @@ export function VictimLinkPanel({ agent, targets }: { agent: Agent; targets: str
       <label className="probe-check">
         <input type="checkbox" checked={approved} onChange={(e) => setApproved(e.target.checked)} />
         <span className="small">
-          I confirm this site is approved for a test: the agent sends its lead form with a made-up name, a throwaway
+          I confirm this site is approved for a test: the Follower sends its lead form with a made-up name, a throwaway
           e-mail inbox and, only if the form needs one, a number that can't belong to anyone.
         </span>
       </label>
@@ -128,10 +106,16 @@ export function VictimLinkPanel({ agent, targets }: { agent: Agent; targets: str
       {!agent.data.canStart && (
         <div className="probe-warn">
           <b>The app runs in Docker, where no browser window can open.</b> Run it on the host instead:
-          <pre>{agent.data.command.replace("<link>", target)}</pre>
+          <pre>{agent.data.command.replace("<link>", url || "<link>")}</pre>
         </div>
       )}
-    </div>
+      <div className="probe-actions">
+        <button className="btn primary" disabled={busy || !agent.data.canStart || !approved || !url.trim()}
+          onClick={() => agent.start({ url: url.trim(), persona, approved, quick })}>
+          {agent.starting ? "Starting…" : agent.running ? "A run is going…" : "Start Follower"}
+        </button>
+      </div>
+    </details>
   );
 }
 
@@ -176,7 +160,9 @@ function stepLine(s: VictimStep) {
     link: "Clicks", button: "Clicks", close: "Closes", chat_option: "Answers", text_input: "Types",
     media: "Plays", form: "Fills in and sends", scroll: "Scrolls and reads",
   };
-  return s.kind === "scroll" ? verb.scroll : `${verb[s.kind ?? ""] ?? ""} “${text.slice(0, 80)}”`;
+  if (s.kind === "scroll") return verb.scroll;
+  if (s.kind === "form") return "Fills in the form and sends it";
+  return `${verb[s.kind ?? ""] ?? ""} “${text.slice(0, 80)}”`;
 }
 
 /** The selected run: live progress while it goes, then the video, steps, pages and form. */
@@ -189,7 +175,7 @@ export function VictimRunView({ agent }: { agent: Agent }) {
   const picker = runs.length > 0 && (
     <select className="input victim-pick" aria-label="Earlier runs" value={agent.selected ?? ""}
       onChange={(e) => agent.setSelected(e.target.value || null)}>
-      <option value="">{runs.length} earlier run{runs.length > 1 ? "s" : ""}…</option>
+      <option value="">{runs.length} run{runs.length > 1 ? "s" : ""}…</option>
       {runs.map((r) => (
         <option key={r.id} value={r.id}>
           {when(r.startedAt)} · {r.startHost || "starting"} · {r.persona} · {r.steps} steps

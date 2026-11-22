@@ -390,3 +390,9 @@ pre.report { white-space: pre-wrap; font-size: 12px; background: #fafaf7; border
 .victim-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
 .victim-log { font-size: 12px; white-space: pre-wrap; background: var(--soft); padding: 10px; border-radius: 8px; }
 @media (max-width: 860px) { .victim-watch { grid-template-columns: 1fr; } }
+.add-actions { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin-top: 14px; }
+.add-actions .small { margin-right: auto; max-width: 460px; }
+.follower-start { margin-top: 14px; display: grid; gap: 10px; }
+.follower-start summary { cursor: pointer; }
+.follower-start[open] summary { margin-bottom: 4px; }
+.follower .lead { margin: 6px 0 18px; }

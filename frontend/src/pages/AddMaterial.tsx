@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { addMaterial } from "../api";
 import { plural } from "../components/bits";
 import { ProbeLinkPanel, ProbeRun, ProbeTools, useProbe } from "../components/ProbeAgent";
-import { useVictim, VictimLinkPanel, VictimRunView } from "../components/VictimAgent";
+import { victim } from "../api";
 
 type Staged = { file: File; path: string };
 
@@ -62,7 +62,7 @@ export default function AddMaterial() {
   const folderInput = useRef<HTMLInputElement>(null);
   const kind = linkKind(link);
   const agent = useProbe();
-  const victimAgent = useVictim();
+  const [following, setFollowing] = useState(false);
   // The agent walks websites, so a Meta Ad Library link is not a target for it.
   const probeTargets = [...new Set([...(kind ? [link.trim()] : []), ...links])].filter((l) => !AD_LIBRARY.test(l));
 
@@ -102,6 +102,31 @@ export default function AddMaterial() {
     } catch (e) {
       setError((e as Error).message);
       setProgress(null);
+    }
+  };
+
+  const siteName = (url: string) => {
+    try {
+      return new URL(/^https?:\/\//.test(url) ? url : `https://${url}`).hostname;
+    } catch {
+      return url.slice(0, 40);
+    }
+  };
+  // The Follower walks one site, so it takes the first website link (not a Meta Ad Library one).
+  const followTarget = probeTargets[0];
+  const startFollower = async () => {
+    if (!followTarget) {
+      setError("Paste a link to a website first.");
+      return;
+    }
+    setError(null);
+    setFollowing(true);
+    try {
+      const { id } = await victim.start({ url: followTarget, persona: "", approved: true, quick: true });
+      navigate(id ? `/follower?run=${encodeURIComponent(id)}` : "/follower");
+    } catch (e) {
+      setError((e as Error).message);
+      setFollowing(false);
     }
   };
 
@@ -215,15 +240,23 @@ export default function AddMaterial() {
           <div style={{ width: `${Math.round(progress * 100)}%` }} />
         </div>
       )}
-      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 14 }}>
+      <div className="add-actions">
+        {followTarget && (
+          <span className="small">
+            Start Follower goes through {siteName(followTarget)} as a made-up person and
+            sends its lead form with fake details. Use it only on sites approved for a test.
+          </span>
+        )}
+        <button className="btn" onClick={startFollower} disabled={following || !followTarget}
+          title={followTarget ? "" : "Paste a link to a website first"}>
+          {following ? "Starting…" : "Start Follower"}
+        </button>
         <button className="btn primary" onClick={analyse} disabled={progress !== null}>
           {progress !== null ? "Uploading…" : count > 1 ? `Analyse ${count} items together` : "Analyse"}
         </button>
       </div>
       <ProbeLinkPanel agent={agent} targets={probeTargets} />
       <ProbeRun agent={agent} />
-      <VictimLinkPanel agent={victimAgent} targets={probeTargets} />
-      <VictimRunView agent={victimAgent} />
 
       <h2>Or find material with a tool</h2>
       <div className="card">

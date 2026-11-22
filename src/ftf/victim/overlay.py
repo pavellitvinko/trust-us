@@ -48,7 +48,7 @@ SHOW_JS = r"""
       @keyframes p{0%{box-shadow:0 0 0 0 rgba(255,181,71,.7)}100%{box-shadow:0 0 0 22px rgba(255,181,71,0)}}
       [hidden]{display:none!important}
     </style>
-    <div class="tag">Victim visitor · <b class="who"></b></div>
+    <div class="tag">Follower · <b class="who"></b></div>
     <div class="box" hidden></div><div class="dot" hidden></div>
     <div class="bar"><span class="step"></span><div><div class="main"></div><div class="sub"></div></div></div>`;
     host.__root = root;

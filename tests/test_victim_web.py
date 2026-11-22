@@ -144,3 +144,11 @@ def test_a_live_run_is_started_with_live_and_reported(tmp_path, monkeypatch):
     c.get(f"/api/victim/{RUN}")
     c.get("/api/victim")
     assert changed == [1]
+
+
+def test_a_run_whose_record_is_still_being_written_is_saving(tmp_path, monkeypatch):
+    files = tmp_path / "runs" / RUN / "run_files"
+    files.mkdir(parents=True)
+    (files / "live.json").write_text(json.dumps({"status": "finished"}))
+    c, _ = client(tmp_path, monkeypatch)
+    assert c.get(f"/api/victim/{RUN}").json()["status"] == "saving"

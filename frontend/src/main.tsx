@@ -5,6 +5,7 @@ import { api, type Meta } from "./api";
 import { MetaContext } from "./components/bits";
 import AddMaterial from "./pages/AddMaterial";
 import CampaignPage from "./pages/CampaignPage";
+import Follower from "./pages/Follower";
 import Campaigns from "./pages/Campaigns";
 import HowItWorks from "./pages/HowItWorks";
 import ItemPage from "./pages/ItemPage";
@@ -38,6 +39,7 @@ function App() {
           <NavLink to="/add">Add material</NavLink>
           <NavLink to="/library">Library</NavLink>
           <NavLink to="/campaigns">Campaigns</NavLink>
+          <NavLink to="/follower">Follower</NavLink>
           <NavLink to="/how-it-works">How it works</NavLink>
         </nav>
       </header>
@@ -50,6 +52,7 @@ function App() {
           <Route path="/campaigns/kit/:id" element={<CampaignPage kit />} />
           <Route path="/campaigns/:id" element={<CampaignPage />} />
           <Route path="/item/:id" element={<ItemPage />} />
+          <Route path="/follower" element={<Follower />} />
           <Route path="/probe" element={<Navigate to="/add" replace />} />
           <Route path="/how-it-works" element={<HowItWorks />} />
           <Route path="*" element={<Navigate to="/library" replace />} />

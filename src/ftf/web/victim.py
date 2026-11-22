@@ -90,6 +90,8 @@ def _status(files: Path, run: dict[str, Any]) -> str:
         return "ended without a record" if old else "starting"
     # The agent writes live.json at every step; a long-silent one without run.json is dead,
     # unless it is waiting for a person or paused.
+    if state == "finished":  # the browser is closing and the record is being written
+        return "ended without a record" if stale else "saving"
     if stale and state not in {"paused", "waiting_for_person"}:
         return "ended without a record"
     return str(state)
