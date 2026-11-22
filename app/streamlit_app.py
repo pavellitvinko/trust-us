@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
+import os
 
 import streamlit as st
 
@@ -14,8 +14,16 @@ from ftf.enrich.warning_lists import (
     warning_observations,
     warning_risk_reasons,
 )
-from ftf.grouping import assign
-from ftf.intake import STAGES, IntakeError, add_zip, run_stages
+from ftf.grouping import assign, build_groups
+from ftf.intake import (
+    ANALYSIS_LOCK,
+    STAGES,
+    IntakeError,
+    add_zip,
+    allowed_folder,
+    discard_upload,
+    run_stages,
+)
 from ftf.material import material_summary
 from ftf.reporting import build_pair_report, render_pair_report
 from ftf.store import Store
@@ -35,7 +43,13 @@ store = Store(settings.db_path)
 def add_material() -> None:
     st.subheader("Add material")
     upload = st.file_uploader("Incident folder as a zip", type=["zip"])
-    folder = st.text_input("Or a folder on this machine")
+    root = os.environ.get("FTF_UI_FOLDER_ROOT")
+    folder = st.text_input(
+        "Or a folder on the server",
+        disabled=not root,
+        help=f"Inside {root}" if root else "Off until FTF_UI_FOLDER_ROOT is set.",
+    )
+    enrich = st.checkbox("Look up DNS and RDAP (network)", value=True)
     st.text_input(
         "URL", disabled=True, help="Available once the live capture service (HAC-14) is connected."
     )
@@ -50,19 +64,23 @@ def add_material() -> None:
     def on_stage(name: str, index: int, total: int) -> None:
         progress.progress(index / total, text=f"Stage {index + 1} of {len(STAGES)}: {name}")
 
+    path = None
     try:
         path = (
             add_zip(upload, upload.name, settings.data_dir / "uploads")
             if upload
-            else Path(folder.strip()).expanduser()
+            else allowed_folder(folder.strip(), root)
         )
-        result = run_stages(store, path, on_stage)
+        result = run_stages(store, path, on_stage, enrich=enrich)
     except IntakeError as exc:
+        if upload and path is not None:
+            discard_upload(path)
         progress.empty()
         st.error(str(exc))
         return
     progress.progress(1.0, text="Done")
     st.session_state.pop("comparison_report", None)
+    st.session_state.pop("assignments", None)
     st.success(
         f"Added {result['views']} views in {len(result['incidents'])} incident(s). "
         f"Campaigns: {result['campaigns']}, families: {result['families']}."
@@ -95,10 +113,20 @@ with st.sidebar:
     incident_id = st.selectbox("Incident", [i.incident_id for i in incidents])
     views = store.views(incident_id)
     view = st.radio("View", views, format_func=lambda v: f"{v.kind.value}: {v.label}")
+if view is None:
+    for tab in (tab_match, tab_material):
+        with tab:
+            st.info("This incident has no views.")
+    st.stop()
 
 with tab_match:
     st.subheader("Closest known material")
-    outcome = assign(store, view.view_id)
+    assignments = st.session_state.setdefault("assignments", {})
+    if view.view_id not in assignments:
+        with ANALYSIS_LOCK:
+            groups = build_groups(store, persist_funnel=False)
+            assignments[view.view_id] = assign(store, view.view_id, groups)
+    outcome = assignments[view.view_id]
     st.write(f"Outcome: **{outcome.headline()}**")
     for reason in outcome.reasons:
         st.caption(reason)
@@ -122,9 +150,10 @@ with tab_match:
             "Compare with", candidates, format_func=lambda v: f"{v.view_id} — {v.label}"
         )
         if st.button("Explain comparison"):
-            st.session_state["comparison_report"] = build_pair_report(
-                store, view.view_id, other.view_id
-            )
+            with ANALYSIS_LOCK:
+                st.session_state["comparison_report"] = build_pair_report(
+                    store, view.view_id, other.view_id
+                )
         report = st.session_state.get("comparison_report")
         if (
             report
@@ -153,7 +182,7 @@ with tab_material:
         st.markdown(f"**{kind.replace('_', ' ')}**")
         for reason in reasons:
             source = reason["source"]
-            st.write(f"- {reason['summary']} ({source['file']}:{source['locator']})")
+            st.write(f"- {reason['summary']} ({source['file'] or '-'}:{source['locator'] or '-'})")
     if suspicion["unchecked_kinds"]:
         st.caption("Not checked: " + ", ".join(suspicion["unchecked_kinds"]))
     show_status_table("Expected elements", summary["expectations"])

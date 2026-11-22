@@ -194,13 +194,18 @@ def build_playbooks(
     return playbooks, dict(playbooks_of)
 
 
-def build_groups(store: Store, config: FusionConfig = DEFAULT, funnel: bool = True) -> Groups:
+def build_groups(
+    store: Store,
+    config: FusionConfig = DEFAULT,
+    funnel: bool = True,
+    persist_funnel: bool = True,
+) -> Groups:
     from ..fusion.demotion import contradicting_pairs
     from .funnel import run_funnel
 
     view_ids = [v.view_id for v in store.views()]
     relations = store.relations()
-    edges = run_funnel(store) if funnel else {}
+    edges = run_funnel(store, persist=persist_funnel) if funnel else {}
     funnel_pairs = [(e.source, e.target) for f, _ in edges.values() for e in f]
     campaigns, campaign_of, rejected = build_campaigns(
         view_ids, relations, config, funnel_pairs, contradicting_pairs(store, config)

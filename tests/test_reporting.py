@@ -259,3 +259,11 @@ def test_real_sample_report_completeness_without_models(tmp_path):
             assert "Source observations" in output.read_text()
     finally:
         s.close()
+
+
+def test_report_does_not_write_funnel_rows(report_store):
+    views = [v.view_id for v in report_store.views()][:2]
+    count = "SELECT COUNT(*), COALESCE(MAX(id), 0) FROM observations"
+    before = report_store.db.execute(count).fetchone()
+    build_pair_report(report_store, *views)
+    assert report_store.db.execute(count).fetchone() == before

@@ -160,15 +160,18 @@ def funnel_edges(
     return funnel, co_captured, mismatches
 
 
-def run_funnel(store: Store) -> dict[str, tuple[list[FunnelEdge], list[FunnelEdge]]]:
-    """Compute edges for every incident, store the mismatch observations, return the edges."""
+def run_funnel(
+    store: Store, persist: bool = True
+) -> dict[str, tuple[list[FunnelEdge], list[FunnelEdge]]]:
+    """Compute edges for every incident and return them. `persist` stores the mismatches."""
     out = {}
     for incident in store.incidents():
         funnel, co, mismatches = funnel_edges(store, incident.incident_id)
-        by_view: dict[str, list[Observation]] = defaultdict(list)
-        for m in mismatches:
-            by_view[m.view_id].append(m)
-        for v in store.views(incident.incident_id):
-            store.put_observations(v.view_id, EXTRACTOR, by_view.get(v.view_id, []))
+        if persist:
+            by_view: dict[str, list[Observation]] = defaultdict(list)
+            for m in mismatches:
+                by_view[m.view_id].append(m)
+            for v in store.views(incident.incident_id):
+                store.put_observations(v.view_id, EXTRACTOR, by_view.get(v.view_id, []))
         out[incident.incident_id] = (funnel, co)
     return out

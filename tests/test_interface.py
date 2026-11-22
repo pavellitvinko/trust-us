@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from ftf.contracts import Incident, Observation, Source, State, View, ViewKind
-from ftf.intake import IntakeError, add_zip, run_stages, safe_extract
+from ftf.intake import IntakeError, add_zip, allowed_folder, run_stages, safe_extract
 from ftf.material import material_summary
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -54,8 +54,9 @@ def test_uploaded_folder_reaches_every_stage(store, tmp_path, monkeypatch):
     html = "<html><head><title>Oferta</title></head><body><p>Treść strony.</p></body></html>"
     folder = add_zip(archive([("case/page.html", html)]), "case.zip", tmp_path / "uploads")
     seen = []
-    result = run_stages(store, folder, lambda name, *_: seen.append(name))
-    assert seen == ["ingest", "extract", "fingerprint", "compare", "group"]
+    monkeypatch.setenv("FTF_DATA_DIR", str(tmp_path / "data"))
+    result = run_stages(store, folder, lambda name, *_: seen.append(name), enrich=False)
+    assert seen == ["ingest", "extract", "enrich", "fingerprint", "compare", "group"]
     assert result["views"] == 1
 
 
@@ -63,6 +64,44 @@ def test_empty_material_is_an_error(store, tmp_path):
     (tmp_path / "empty").mkdir()
     with pytest.raises(IntakeError):
         run_stages(store, tmp_path / "empty")
+
+
+def test_rejected_material_keeps_the_stored_incident(store, tmp_path, monkeypatch):
+    monkeypatch.setenv("FTF_EMBEDDER", "fake")
+    monkeypatch.setenv("FTF_DATA_DIR", str(tmp_path / "data"))
+    case = tmp_path / "case"
+    case.mkdir()
+    (case / "page.html").write_text("<html><body><p>Strona</p></body></html>")
+    run_stages(store, case, enrich=False)
+    before = [v.view_id for v in store.views()]
+    with pytest.raises(IntakeError, match="already ingested"):
+        run_stages(store, case, enrich=False)
+    (case / "page.html").unlink()
+    (case / "n.txt").write_text("x")
+    with pytest.raises(IntakeError, match="no views"):
+        run_stages(store, case, enrich=False)
+    assert [v.view_id for v in store.views()] == before
+
+
+def test_two_uploads_with_one_name_stay_separate(tmp_path):
+    first = add_zip(archive([("case/p.html", "x")]), "case.zip", tmp_path / "u")
+    second = add_zip(archive([("case/p.html", "y")]), "case.zip", tmp_path / "u")
+    assert next(first.iterdir()).name != next(second.iterdir()).name
+
+
+@pytest.mark.parametrize("entries", [[("a", "x"), ("a/b", "y")]])
+def test_unpackable_zip_is_a_clean_error(tmp_path, entries):
+    with pytest.raises(IntakeError):
+        add_zip(archive(entries), "bad.zip", tmp_path / "u")
+    assert not list((tmp_path / "u").iterdir())
+
+
+def test_server_folder_needs_an_allowed_root(tmp_path):
+    with pytest.raises(IntakeError):
+        allowed_folder(str(tmp_path), None)
+    with pytest.raises(IntakeError):
+        allowed_folder("/etc", str(tmp_path))
+    assert allowed_folder(str(tmp_path / "x"), str(tmp_path)) == (tmp_path / "x").resolve()
 
 
 def test_missing_model_stages_are_explicit(store):

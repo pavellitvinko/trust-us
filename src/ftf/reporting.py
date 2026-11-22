@@ -485,7 +485,7 @@ def build_pair_report(store: Store, view_a: str, view_b: str, config=DEFAULT) ->
 
 def _membership(store: Store, view_a: str, view_b: str, config) -> dict[str, Any]:
     """Group context, kept apart from the direct pair evidence above."""
-    groups = build_groups(store, config)
+    groups = build_groups(store, config, persist_funnel=False)
     campaigns = {side: groups.campaign_of.get(v) for side, v in (("a", view_a), ("b", view_b))}
     families = {side: groups.family_of.get(c) if c else None for side, c in campaigns.items()}
     edges = [
