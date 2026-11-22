@@ -1,114 +1,143 @@
-import { useNavigate } from "react-router-dom";
-import { pictureUrl, type LibraryData, type LinkKind } from "../api";
-import { plural } from "./bits";
+import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
+import type { MapEdge, Row } from "../api";
+import { Picture, plural } from "./bits";
+import { buildTree, filterTree, groupKeys, shortCase, type TreeNode } from "./mapTree";
+import { VideoThumbnail } from "./video";
 
-const W = 170;
-const H = 104;
-const STROKE: Record<Exclude<LinkKind, "possible">, { color: string; dash?: string; width: number }> = {
-  campaign: { color: "var(--camp-line)", width: 3 },
-  kit: { color: "var(--kit-line)", width: 2.5, dash: "8 6" },
-  duplicate: { color: "var(--dup-line)", width: 3 },
-};
+function ItemRow({ row }: { row: Row }) {
+  return (
+    <li className="tree-item">
+      <Link to={`/item/${encodeURIComponent(row.id)}`}>
+        {row.type === "Video" ? (
+          <VideoThumbnail id={row.id} />
+        ) : (
+          <Picture id={row.id} has={row.picture} type={row.type} width={72} height={46} />
+        )}
+        <span className="tree-item-text">
+          <span className="t">{row.title}</span>
+          <span className="small">
+            {row.type}
+            {row.host && ` · ${row.host}`}
+            {row.signs > 0 && <span className="danger"> · {plural(row.signs, "warning sign")}</span>}
+            {row.duplicateOf && <span className="tree-copy"> · same page also in {shortCase(row.duplicateOf)}</span>}
+          </span>
+        </span>
+      </Link>
+    </li>
+  );
+}
 
-const short = (text: string, n: number) => (text.length > n ? text.slice(0, n - 1) + "…" : text);
-
-/** Linked items as pictures; a line is a link, labelled with what the two items share. */
-export default function MapView({ map, unlinked }: { map: LibraryData["map"]; unlinked: number }) {
-  const navigate = useNavigate();
-  if (!map.nodes.length) {
+function Branch({
+  node,
+  closed,
+  toggle,
+}: {
+  node: TreeNode;
+  closed: (key: string) => boolean;
+  toggle: (key: string) => unknown;
+}) {
+  if (node.kind === "case") {
     return (
-      <div className="empty card">
-        Nothing is linked yet. Items appear here once they share something with another item.
-      </div>
+      <li className="tree-case">
+        <div className="tree-case-name">{node.title}</div>
+        <ul>
+          {node.rows.map((r) => (
+            <ItemRow key={r.id} row={r} />
+          ))}
+        </ul>
+      </li>
     );
   }
-  const at = Object.fromEntries(map.nodes.map((n) => [n.id, n]));
-  const width = Math.max(...map.nodes.map((n) => n.x)) + W;
-  const height = Math.max(...map.nodes.map((n) => n.y)) + H + 40;
-  const open = (id: string) => navigate(`/item/${encodeURIComponent(id)}`);
+  const open = !closed(node.key);
   return (
-    <>
-      <div className="mapbox">
-        <svg viewBox={`-20 -10 ${width + 40} ${height}`} role="img" aria-label="Map of linked items">
-          <defs>
-            <clipPath id="card">
-              <rect width={W} height={H} rx={6} />
-            </clipPath>
-          </defs>
-          {map.edges.map((e) => {
-            const a = at[e.a];
-            const b = at[e.b];
-            if (!a || !b || e.kind === "possible") return null;
-            const s = STROKE[e.kind];
-            const label = e.kind === "duplicate" ? "same page" : e.label;
-            const mx = (a.x + b.x) / 2;
-            const my = (a.y + b.y) / 2;
-            return (
-              <g key={`${e.a}|${e.b}`}>
-                <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={s.color} strokeWidth={s.width} strokeDasharray={s.dash}>
-                  <title>{e.reason}</title>
-                </line>
-                <rect x={mx - label.length * 3.4 - 6} y={my - 10} width={label.length * 6.8 + 12} height={20} rx={4} fill="#fff" />
-                <text x={mx} y={my + 4} textAnchor="middle" fontSize={12} fill="#4a4945">
-                  {label}
-                </text>
-              </g>
-            );
-          })}
-          {map.nodes.map((n) => (
-            <g
-              key={n.id}
-              className="node"
-              transform={`translate(${n.x - W / 2},${n.y - H / 2})`}
-              onClick={() => open(n.id)}
-              onKeyDown={(e) => e.key === "Enter" && open(n.id)}
-              tabIndex={0}
-              role="link"
-              aria-label={n.title}
-            >
-              <rect className="frame" x={-2} y={-2} width={W + 4} height={H + 4} rx={8} fill="#fff" stroke="#d3d1c7" />
-              {n.picture ? (
-                <image href={pictureUrl(n.id)} width={W} height={H} preserveAspectRatio="xMidYMin slice" clipPath="url(#card)" />
-              ) : (
-                <>
-                  <rect width={W} height={H} rx={6} fill="#f3f2ed" />
-                  <text x={W / 2} y={H / 2 + 4} textAnchor="middle" fontSize={11.5} fill="#8a877f">
-                    no preview
-                  </text>
-                </>
-              )}
-              <text y={H + 18} fontSize={12} fill="#1f1f1d">
-                {short(n.title, 25)}
-              </text>
-              <text y={H + 33} fontSize={11.5} fill="#6d6b67">
-                {n.case}
-                {n.signs ? ` · ${plural(n.signs, "warning sign")}` : ""}
-              </text>
-            </g>
-          ))}
-        </svg>
-      </div>
-      <div className="mapkey">
-        <span>
-          <i style={{ borderColor: "var(--camp-line)" }} />
-          Campaign link: likely the same people
-        </span>
-        <span>
-          <i style={{ borderColor: "var(--kit-line)", borderTopStyle: "dashed" }} />
-          Kit link: same template, maybe different people
-        </span>
-        <span>
-          <i style={{ borderColor: "var(--dup-line)" }} />
-          Same page added twice
-        </span>
-        <span>Click a picture to open it.</span>
-        {unlinked > 0 && (
-          <span>
-            {unlinked === 1 ? "1 item isn't" : `${unlinked} items aren't`} linked to anything yet and appear only in
-            the table.
+    <li className={`tree-group ${node.kind}`}>
+      <div className="tree-head">
+        <button aria-expanded={open} onClick={() => toggle(node.key)}>
+          <span className="caret" aria-hidden="true">
+            {open ? "▾" : "▸"}
           </span>
+          <span className="tree-title">{node.title}</span>
+          <span className="tree-count">{plural(node.count, "item")}</span>
+        </button>
+        {node.href && (
+          <Link className="tree-open" to={node.href} aria-label={`Open ${node.title}`}>
+            Open
+          </Link>
         )}
       </div>
-    </>
+      {open && (
+        <>
+          <div className="tree-why small">
+            {node.note}
+            {node.reasons.length > 0 && <b> Linked by: {node.reasons.join(", ")}.</b>}
+            {node.name && <span className="muted"> {node.name}</span>}
+          </div>
+          <ul>
+            {node.children.map((c) => (
+              <Branch key={c.key} node={c} closed={closed} toggle={toggle} />
+            ))}
+          </ul>
+        </>
+      )}
+    </li>
+  );
+}
+
+/** The Library as a tree: template, campaign, case, item. */
+export default function MapView({ rows, edges }: { rows: Row[]; edges: MapEdge[] }) {
+  const [query, setQuery] = useState("");
+  // Stored as a difference from the default, so groups that arrive later open normally.
+  const [flipped, setFlipped] = useState<Set<string>>(new Set());
+  const tree = useMemo(() => buildTree(rows, edges), [rows, edges]);
+  const shown = useMemo(() => filterTree(tree, query), [tree, query]);
+  const searching = query.trim().length > 0;
+  const keys = useMemo(() => groupKeys(tree), [tree]);
+  const closedByDefault = (key: string) => key === "unlinked";
+  const closed = (key: string) => !searching && closedByDefault(key) !== flipped.has(key);
+  const toggle = (key: string) =>
+    !searching && // a search shows every match, so its branches stay open
+    setFlipped((now) => {
+      const next = new Set(now);
+      if (!next.delete(key)) next.add(key);
+      return next;
+    });
+  const setAll = (open: boolean) =>
+    setFlipped(new Set(keys.filter((key) => closedByDefault(key) === open)));
+  const found = shown.reduce((sum, n) => sum + n.count, 0);
+
+  return (
+    <div className="tree-page">
+      <div className="tree-tools">
+        <input
+          className="input"
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search by name, site or case"
+          aria-label="Search the map"
+        />
+        <button className="btn" onClick={() => setAll(true)} disabled={searching}>
+          Expand all
+        </button>
+        <button className="btn" onClick={() => setAll(false)} disabled={searching}>
+          Collapse all
+        </button>
+      </div>
+      <p className="small tree-help">
+        Read it from the top: a <b>template</b> can be used by several <b>campaigns</b>, a campaign is likely run by the
+        same people, and a <b>case</b> is what was added together.
+        {searching && <span aria-live="polite"> {plural(found, "item")} found.</span>}
+      </p>
+      {shown.length ? (
+        <ul className="tree">
+          {shown.map((n) => (
+            <Branch key={n.key} node={n} closed={closed} toggle={toggle} />
+          ))}
+        </ul>
+      ) : (
+        <div className="empty card">Nothing matches "{query.trim()}".</div>
+      )}
+    </div>
   );
 }

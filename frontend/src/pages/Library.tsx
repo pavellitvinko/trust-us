@@ -163,7 +163,7 @@ export default function Library() {
           {view === "table" ? (
             <ItemsTable rows={data.items} />
           ) : (
-            <MapView map={data.map} unlinked={data.items.length - data.map.nodes.length} />
+            <MapView rows={data.items} edges={data.map.edges} />
           )}
         </>
       )}
