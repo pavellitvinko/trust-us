@@ -87,6 +87,16 @@ def report_store(tmp_path):
     s.close()
 
 
+PATHS_BY_RELATION = {
+    "duplicate": {"duplicate"},
+    "same_campaign": {"identity", "artifact"},
+    "same_family": {"kit", "identity_solo", "contradiction_cap"},
+    "same_playbook": {"playbook"},
+    "unrelated": {"unrelated"},
+    "insufficient_evidence": {"insufficient"},
+}
+
+
 def assert_complete(report):
     assert report["objects"]["a"]["view_id"] and report["objects"]["b"]["view_id"]
     assert (
@@ -99,7 +109,11 @@ def assert_complete(report):
         coverage["comparable_groups"] / coverage["total_groups"], abs=0.0001
     )
     assert report["reasons"] and report["tiers"] and report["rules"]
-    assert report["confidence"]["basis"]["rule"]
+    basis = report["confidence"]["basis"]
+    assert basis["rule"] and basis["label_rule"]
+    assert basis["path"] in PATHS_BY_RELATION[report["relation"]], basis
+    # the recomputed decision is the stored one, or the report says that it is not
+    assert report["stored_relation"]["agrees"] in (True, None), report["stored_relation"]
     assert {row["layer_id"] for row in report["layers"]} == set(layers.names())
     for row in report["layers"]:
         assert row["tier"] and row["group"] and row["comparator"] and row["layer_version"]
